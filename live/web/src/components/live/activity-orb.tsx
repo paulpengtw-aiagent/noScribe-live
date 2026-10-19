@@ -1,8 +1,10 @@
-// PLACEHOLDER — replaced in the next pass
-import type { JSX } from "react";
+import { useLayoutEffect, useRef, type JSX } from "react";
+import { useReducedMotion } from "motion/react";
+import { useInkPalette } from "@/hooks/use-ink-palette";
+import { OrbRenderer, type OrbMode } from "@/lib/orb-renderer";
 import { cn } from "@/lib/utils";
 
-export type OrbMode = "idle" | "converting" | "diarizing" | "thinking" | "transcribing" | "finished" | "error";
+export type { OrbMode } from "@/lib/orb-renderer";
 
 export interface ActivityOrbProps {
   mode: OrbMode;
@@ -15,21 +17,63 @@ export interface ActivityOrbProps {
   className?: string;
 }
 
-export function ActivityOrb({ mode, speakerColors, activeColor, size = 260, className }: ActivityOrbProps): JSX.Element {
-  const color = activeColor ?? speakerColors[0] ?? "#737373";
+const LABEL: Record<OrbMode, string> = {
+  idle: "waiting",
+  converting: "preparing audio",
+  diarizing: "identifying speakers",
+  thinking: "loading or listening",
+  transcribing: "transcribing",
+  finished: "finished",
+  error: "stopped",
+};
+
+/**
+ * The activity orb: a sphere of dots that reacts to the transcription (see lib/orb-renderer.ts).
+ * The canvas is the only element; it is labelled with the state.
+ */
+export function ActivityOrb({
+  mode,
+  envelope,
+  pulseKey,
+  progress,
+  speakerColors,
+  activeColor,
+  size = 260,
+  className,
+}: ActivityOrbProps): JSX.Element {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rendererRef = useRef<OrbRenderer | null>(null);
+  const reduce = useReducedMotion() ?? false;
+  const { ink, ink3 } = useInkPalette();
+
+  // One renderer per canvas. It is rebuilt only when the reduced-motion preference changes.
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const renderer = new OrbRenderer(canvas, reduce);
+    rendererRef.current = renderer;
+    renderer.start();
+    return () => {
+      renderer.dispose();
+      rendererRef.current = null;
+    };
+  }, [reduce]);
+
+  useLayoutEffect(() => {
+    rendererRef.current?.setInk(ink, ink3);
+  }, [ink, ink3, reduce]);
+
+  useLayoutEffect(() => {
+    rendererRef.current?.setInput({ mode, envelope, pulseKey, progress, speakerColors, activeColor, size });
+  }, [mode, envelope, pulseKey, progress, speakerColors, activeColor, size, reduce]);
+
   return (
-    <div
-      aria-hidden="true"
-      className={cn("relative shrink-0", className)}
+    <canvas
+      ref={canvasRef}
+      role="img"
+      aria-label={`Activity orb: ${LABEL[mode]}`}
+      className={cn("block shrink-0", className)}
       style={{ width: size, height: size }}
-    >
-      <div
-        className="absolute inset-0 rounded-full transition-opacity duration-700"
-        style={{
-          background: `radial-gradient(circle at 50% 50%, ${color} 0%, transparent 70%)`,
-          opacity: mode === "idle" ? 0.2 : 0.6,
-        }}
-      />
-    </div>
+    />
   );
 }
