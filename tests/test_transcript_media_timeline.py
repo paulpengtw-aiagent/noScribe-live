@@ -29,7 +29,7 @@ def test_transcript_uses_actual_converted_media_position(
         return {}
 
     app = SimpleNamespace(
-        cancel=False, _ffmpeg_proc=None,
+        cancel=False, _ffmpeg_proc=None, _live_feed=m.live_feed.JobFeed.disabled(),
         update_queue_table=lambda: None,
         set_progress=lambda *args: None,
         log=lambda *args, **kwargs: None,

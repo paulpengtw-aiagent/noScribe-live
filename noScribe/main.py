@@ -28,6 +28,7 @@ import queue as pyqueue
 import re
 import sys
 import tkinter as tk
+import time
 import traceback
 import urllib
 import urllib.parse
@@ -56,7 +57,7 @@ from faster_whisper.vad import VadOptions, get_speech_timestamps
 from i18n import t
 from PIL import Image
 
-from . import audio, exception, transcription, utils
+from . import audio, exception, live_feed, transcription, utils
 from .CTkToolTips import CTkToolTip
 from .tkHyperlinkManager import HyperlinkManager
 
@@ -821,6 +822,8 @@ Examples:
                        help='Exclude disfluencies from transcript')
     parser.add_argument('--pause', choices=PAUSE_OPTIONS, default=None,
                        help='Mark pauses in transcript')
+    parser.add_argument('--live-feed', metavar='PATH', default=None,
+                       help="Append live progress and finished segments as NDJSON to PATH. If PATH is a directory (or ends with '/'), one file per job is created inside it. Also settable via the NOSCRIBE_LIVE_FEED environment variable.")
     
     return parser.parse_args()
 
@@ -1026,6 +1029,7 @@ def _init_app_state(app):
     app._shutting_down = False
     app._ui_thread_id = get_ident()
     app._ui_tasks = pyqueue.Queue()
+    app._live_feed = live_feed.JobFeed.disabled()  # replaced per job by transcription_worker
 
     # Get a list of available Whisper models.
     tmp = transcription.WhisperModelManager(app.user_models_dir)
@@ -2583,10 +2587,14 @@ class App(ctk.CTk):
                     self.logn(t('start_job', audio_file=os.path.basename(job.audio_file)), 'highlight')
   
                     # Process single job
+                    self._live_feed = live_feed.open_job(
+                        job, getattr(job.whisper_model, 'name', str(job.whisper_model)),
+                        noscribe_version=app_version)
                     self._process_single_job(job)
                     
                     queue_jobs_processed += 1
                     job.set_finished()
+                    self._live_feed.end('finished', output_file=str(job.transcript_file))
                     self.update_queue_table()
                     
                 except Exception as e:
@@ -2596,10 +2604,12 @@ class App(ctk.CTk):
                         # A user cancel is not an error: log the plain message,
                         # not a traceback that makes it look like a crash.
                         job.set_canceled(t('err_user_cancelation'))
+                        self._live_feed.end('canceled', error=t('err_user_cancelation'))
                         self.update_queue_table()
                         self.logn(t('err_user_cancelation'), 'error')
                     else:
                         job.set_error(error_msg)
+                        self._live_feed.end('error', error=error_msg)
                         self.update_queue_table()
                         self.logn(error_msg, 'error')
                         traceback_str = job.error_tb or traceback.format_exc()
@@ -2719,6 +2729,7 @@ class App(ctk.CTk):
                 # 1) Convert Audio
 
                 self.logn()
+                self._live_feed.phase('converting')
                 self.logn(t('start_audio_conversion'), 'highlight')
 
                 try:
@@ -2851,6 +2862,7 @@ class App(ctk.CTk):
                         self.logn(t('loading_pyannote'))
                         # self.set_progress(1, 100, job.speaker_detection)
 
+                        self._live_feed.phase('diarizing')
                         while True:
                             try:
                                 diarization = self._run_diarize_subprocess(tmp_audio_file, job)
@@ -2861,6 +2873,7 @@ class App(ctk.CTk):
                                     continue
                                 raise
 
+                        self._live_feed.diarization(diarization)
                         # write segments to log file
                         for segment in diarization:
                             line = f'{utils.ms_to_str(transcript_start + segment["start"], include_ms=True)} - {utils.ms_to_str(transcript_start + segment["end"], include_ms=True)} {segment["label"]}'
@@ -2883,6 +2896,7 @@ class App(ctk.CTk):
                 # 3) Transcribe with faster-whisper
 
                 job.status = JobStatus.TRANSCRIPTION
+                self._live_feed.phase('transcribing')
                 self.update_queue_table()
 
                 self.logn()
@@ -2997,6 +3011,7 @@ class App(ctk.CTk):
                     sampling_rate = 16000
                     audio_array = decode_audio(tmp_audio_file, sampling_rate=sampling_rate)
                     duration = audio_array.shape[0] / sampling_rate
+                    self._live_feed.audio(duration, transcript_start / 1000.0)
                     try:
                         vad_parameters = VadOptions(min_silence_duration_ms=500,
                                                     threshold=job.vad_threshold,
@@ -3045,9 +3060,10 @@ class App(ctk.CTk):
                     last_segment_end = 0
                     last_timestamp_ms = 0
                     first_segment = True
+                    live_index = 0  # live feed: segments are numbered per attempt, like the document
 
                     def on_segment(seg):
-                        nonlocal first_segment, last_segment_end, last_timestamp_ms, p, speaker, speaker_disp, prev_speaker
+                        nonlocal first_segment, last_segment_end, last_timestamp_ms, p, speaker, speaker_disp, prev_speaker, live_index
                         # Map dict to simple object-like for existing code
                         class _Seg:
                             __slots__ = ("start", "end", "text", "words")
@@ -3180,6 +3196,10 @@ class App(ctk.CTk):
                         a_html = f'<a name=\"ts_{orig_audio_start}_{orig_audio_end}_{speaker_disp}\" >{seg_html}</a>'
                         a = d.createElementFromHTML(a_html)
                         p.appendChild(a)
+                        self._live_feed.segment(live_index, orig_audio_start / 1000.0, orig_audio_end / 1000.0,
+                                                speaker_disp if job.speaker_detection != 'none' else '',
+                                                segment.text)
+                        live_index += 1
 
                         # Keep the live transcript visible without persisting its
                         # contents in the job log. Count only the original text,
@@ -3205,6 +3225,7 @@ class App(ctk.CTk):
                         try:
                             progr = round((segment.end/duration) * 100)
                             self.set_progress(3, progr, job.speaker_detection)
+                            self._live_feed.progress('transcribing', (segment.end/duration) * 100)
                         except Exception:
                             pass
                     
@@ -3400,6 +3421,7 @@ class App(ctk.CTk):
         from .whisper_mp_worker import whisper_proc_entrypoint
         proc = ctx.Process(target=whisper_proc_entrypoint, args=(args, q))
         proc.start()
+        live_t0 = time.monotonic()  # live feed: model_ready reports load time from here
         # Expose to allow cancel to terminate the child
         self._mp_proc = proc
         self._mp_queue = q
@@ -3451,6 +3473,14 @@ class App(ctk.CTk):
                         except Exception:
                             pass
                         raise
+                elif mtype == "device":
+                    # Only the live feed records these; the log ignores them.
+                    self._live_feed.model_ready(msg.get('device'), msg.get('device_name'),
+                                                msg.get('compute_type'), time.monotonic() - live_t0)
+                    if job.language_name != 'Auto':
+                        self._live_feed.language(language_code or job.language_name, None)
+                elif mtype == "language":
+                    self._live_feed.language(msg.get('language'), msg.get('probability'))
                 elif mtype == "result":
                     if msg.get("ok"):
                         info = msg.get("info", {})
@@ -3540,8 +3570,10 @@ class App(ctk.CTk):
                     self.logr(f'{step_name}: {progress_percent}%')
                     if step_name == 'segmentation':
                         self.set_progress(2, progress_percent * 0.3, job.speaker_detection)
+                        self._live_feed.progress('diarizing', progress_percent * 0.3, detail=step_name)
                     elif step_name == 'embeddings':
                         self.set_progress(2, 30 + (progress_percent * 0.7), job.speaker_detection)
+                        self._live_feed.progress('diarizing', 30 + (progress_percent * 0.7), detail=step_name)
                 elif mtype == "result":
                     if msg.get("ok"):
                         diarization = msg.get("segments", [])
@@ -3901,6 +3933,10 @@ def noScribeMain():
 
     # Parse command line arguments
     args = parse_cli_args()
+
+    # --live-feed (or NOSCRIBE_LIVE_FEED, read lazily) enables the NDJSON feed.
+    if args.live_feed is not None:
+        live_feed.configure(args.live_feed)
 
     # Handle special case: show available models
     if args.help_models:

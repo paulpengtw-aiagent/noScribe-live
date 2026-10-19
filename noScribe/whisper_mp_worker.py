@@ -82,6 +82,14 @@ def whisper_proc_entrypoint(args: dict, q):
             local_files_only=args.get("local_files_only", True),
         )
 
+        # Report the device actually used; the parent forwards it to the live feed only.
+        try:
+            q.put({"type": "device", "device": device,
+                   "device_name": (torch.cuda.get_device_name(0) if device == 'cuda' else None),
+                   "compute_type": args.get("compute_type", "float16")})
+        except Exception:
+            pass
+
         # Define callbacks that forward to parent via queue (not used by faster-whisper directly, but kept for parity)
         def log_cb(level, msg):
             plog(level, msg)
@@ -132,6 +140,10 @@ def whisper_proc_entrypoint(args: dict, q):
                 del audio
                 gc.collect()
             log_cb("info", t('language_detect', lang=whisper_lang, prob=f'{language_probability:.2f}'))
+            try:
+                q.put({"type": "language", "language": whisper_lang, "probability": float(language_probability)})
+            except Exception:
+                pass
 
         # Build prompt/hotwords if disfluencies suppression is requested
         prompt = ""
