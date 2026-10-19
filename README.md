@@ -1,4 +1,16 @@
-﻿# noScribe
+﻿## noScribe Live (this fork)
+
+This fork adds a real-time localhost viewer (`live/`) and an opt-in `--live-feed` flag. Run the viewer with `live/run.sh`, then open http://localhost:8765. To transcribe with live output, run this from the repo root:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 /home/cheng/noScribe/venv/bin/python -m noScribe --no-gui --model breeze-asr-25 --speaker-detection auto --timestamps --live-feed live/feeds/ INPUT OUTPUT.html
+```
+
+See [live/README.md](live/README.md).
+
+---
+
+# noScribe
 ### Cutting Edge AI Technology for Automated Audio Transcription
 </br>
 
