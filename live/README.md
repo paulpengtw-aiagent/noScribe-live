@@ -71,8 +71,8 @@ faster-whisper yields segments per 30 s decoding window, so they arrive in burst
 - `docs/01-waiting.png`: before a run
 - `docs/02-diarizing.png`: diarizing
 - `docs/03-loading-model.png`: loading the model (thinking state)
-- `docs/04-midstream.png`, `docs/05-midstream-later.png`, `docs/06-mobile-midstream.png`: mid-run, run 1 (desktop, later, and mobile)
-- `docs/04b-midstream-run2.png`, `docs/05b-midstream-later-run2.png`, `docs/06b-mobile-midstream-run2.png`: the same views for run 2
+- `docs/04-midstream.png`, `docs/05-midstream-later.png`: segments arriving one at a time (desktop, earlier and later)
+- `docs/06-mobile-midstream.png`: mid-run on mobile
 - `docs/07-finished.png`: after the run finished
 - `docs/08-reopened-after-run-light.png`: opened after the run, catching up from the snapshot (light theme)
 
@@ -90,6 +90,7 @@ faster-whisper yields segments per 30 s decoding window, so they arrive in burst
   - `StreamingText` is adapted into `streaming-text-inline.tsx`.
 - No AICSS Pro components are used.
 - Built here: the canvas activity orb (`live/web/src/lib/orb-renderer.ts`), the timeline, the layout and the status chips.
+- Chinese segment text is shown in Traditional (Taiwan) through `opencc-js` (cn→tw), converted for display only and loaded lazily; the feed and the saved HTML are unchanged.
 
 ## Tests
 
@@ -100,6 +101,5 @@ cd live && .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m 
 
 ## Known gaps
 
-- The waveform timeline draws segment bars only. Peaks are served by `/api/runs/{id}/peaks` but not drawn yet.
-- Speaker labels are raw `S00` and `S01`.
+- Chinese is converted to Traditional (Taiwan) for display only (opencc-js cn→tw); Whisper output carries no punctuation, and none is added.
 - There are no automated frontend tests.
