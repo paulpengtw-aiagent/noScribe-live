@@ -23,15 +23,18 @@ import { cn } from "@/lib/utils";
 const FOLLOW_THRESHOLD_PX = 120;
 /** Content this far past an edge (px) counts as "more above or below" and gets a soft fade. */
 const EDGE_PX = 2;
-/** A live segment that arrived this recently (ms) is revealed rather than shown at once. */
-const RECENT_MS = 1500;
+/** A burst of live segments finishes revealing this long after its last arrival (ms). */
+const BURST_MS = 1200;
+/** Bounds for how long one live segment takes to reveal (ms). */
+const MIN_REVEAL_MS = 120;
+const MAX_REVEAL_MS = 700;
 const CLI_COMMAND =
   "python -m noScribe --no-gui --model breeze-asr-25 --speaker-detection auto --timestamps --live-feed live/feeds/ INPUT OUTPUT.html";
 
 const NO_SEGMENTS: Segment[] = [];
 
-/** How one segment is drawn: plain text, revealed, revealed with a caret, or shown whole with a caret. */
-type Reveal = "plain" | "reveal" | "caret" | "static-caret";
+/** How one segment is drawn: plain text, waiting its turn (nothing shown), revealing now, or shown whole with the caret. */
+type Reveal = "plain" | "waiting" | "reveal" | "caret";
 
 function distanceToEnd(el: HTMLElement): number {
   return el.scrollHeight - el.scrollTop - el.clientHeight;
@@ -52,17 +55,29 @@ export interface TranscriptHandle {
 export interface TranscriptCardProps {
   run: RunState | null;
   speakers: string[];
-  /** Wall-clock ms; drives the reveal window of recent segments. */
+  /** Wall-clock ms; paces the reveal of queued live segments. */
   now: number;
   hoveredIndex: number | null;
   onHover: (index: number | null) => void;
   ref?: Ref<TranscriptHandle>;
 }
 
-function revealFor(segment: Segment, isLast: boolean, active: boolean, now: number): Reveal {
-  if (isLast && active) return segment.live ? "caret" : "static-caret";
-  if (segment.live && now - segment.recvAt < RECENT_MS) return "reveal";
-  return "plain";
+/** A live segment with text that has not finished revealing yet. Snapshot segments never queue. */
+function isQueued(segment: Segment, doneThrough: number): boolean {
+  return segment.live && segment.index > doneThrough && segment.text.trim() !== "";
+}
+
+/** The newest live segment index, or -1. */
+function highestLiveIndex(segments: readonly Segment[]): number {
+  let highest = -1;
+  for (const segment of segments) {
+    if (segment.live && segment.index > highest) highest = segment.index;
+  }
+  return highest;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
 
 /** One-shot highlight that fades out over 1.2 s. Under reduced motion it holds, then drops. */
@@ -78,6 +93,10 @@ interface SegmentSpanProps {
   overlap: boolean;
   spaceBefore: boolean;
   reveal: Reveal;
+  /** Only for the segment revealing now: how long its reveal takes (ms). */
+  revealMs?: number;
+  /** Only for the segment revealing now: called once its text is fully shown. */
+  onRevealed?: (index: number) => void;
   hovered: boolean;
   onHover: (index: number | null) => void;
 }
@@ -87,11 +106,12 @@ const SegmentSpan = memo(function SegmentSpan({
   overlap,
   spaceBefore,
   reveal,
+  revealMs,
+  onRevealed,
   hovered,
   onHover,
 }: SegmentSpanProps) {
   const text = segment.text.trim();
-  const caret = reveal === "caret" || reveal === "static-caret";
   return (
     <>
       {spaceBefore ? " " : null}
@@ -102,11 +122,21 @@ const SegmentSpan = memo(function SegmentSpan({
         onMouseLeave={() => onHover(null)}
         className={cn("segment", segment.live && "segment-fresh", hovered && "bg-raised")}
       >
-        {overlap ? <OverlapTag speaker={speakerKey(segment.speaker)} /> : null}
-        {reveal === "plain" ? (
-          text
-        ) : (
-          <StreamingTextInline text={text} caret={caret} instant={reveal === "static-caret"} />
+        {reveal === "waiting" ? null : (
+          <>
+            {overlap ? <OverlapTag speaker={speakerKey(segment.speaker)} /> : null}
+            {reveal === "plain" ? (
+              text
+            ) : (
+              <StreamingTextInline
+                text={text}
+                caret
+                instant={reveal === "caret"}
+                durationMs={revealMs}
+                onRevealed={onRevealed ? () => onRevealed(segment.index) : undefined}
+              />
+            )}
+          </>
         )}
       </span>
     </>
@@ -191,6 +221,26 @@ export function TranscriptCard({ run, speakers, now, hoveredIndex, onHover, ref 
   const lastIndex = segments.length > 0 ? segments[segments.length - 1].index : -1;
   const hasBlocks = run !== null && segments.length > 0;
   const name = run ? (run.audioName ?? run.runId) : null;
+
+  // Live segments reveal one after another, in arrival order. `doneThrough` is the newest live segment that has
+  // finished revealing in this run. The live text on screen when the card mounts counts as done, so a remount
+  // does not replay it.
+  const [revealed, setRevealed] = useState(() => ({ runId, through: highestLiveIndex(segments) }));
+  const doneThrough = revealed.runId === runId ? revealed.through : -1;
+  // Reduced motion and an ended run show everything at once, so only a live run has a queue.
+  const queueing = active && !reduce;
+  const queue = useMemo(
+    () => (queueing ? segments.filter((segment) => isQueued(segment, doneThrough)) : NO_SEGMENTS),
+    [queueing, segments, doneThrough],
+  );
+  const head = queue.length > 0 ? queue[0] : null;
+  // The caret sits on the segment revealing now, or on the last segment while the run is live and idle.
+  const caretIndex = head ? head.index : active ? lastIndex : null;
+  // The queue finishes BURST_MS after its last arrival, each segment taking an equal share of the time left.
+  const revealMs = head
+    ? clamp((queue[queue.length - 1].recvAt + BURST_MS - now) / queue.length, MIN_REVEAL_MS, MAX_REVEAL_MS)
+    : MAX_REVEAL_MS;
+  const markRevealed = (index: number) => setRevealed({ runId, through: index });
 
   useLayoutEffect(() => {
     activeRef.current = active;
@@ -309,14 +359,23 @@ export function TranscriptCard({ run, speakers, now, hoveredIndex, onHover, ref 
                 </header>
                 <p className="mt-2 max-w-[70ch] text-pretty text-[17px] leading-[1.7] text-foreground">
                   {block.items.map(({ seg, overlap, spaceBefore }) => {
-                    const isLast = seg.index === lastIndex;
+                    const isHead = head !== null && seg.index === head.index;
+                    const reveal: Reveal = isHead
+                      ? "reveal"
+                      : queueing && isQueued(seg, doneThrough)
+                        ? "waiting"
+                        : seg.index === caretIndex
+                          ? "caret"
+                          : "plain";
                     return (
                       <SegmentSpan
                         key={seg.index}
                         segment={seg}
                         overlap={overlap}
                         spaceBefore={spaceBefore}
-                        reveal={revealFor(seg, isLast, active, now)}
+                        reveal={reveal}
+                        revealMs={isHead ? revealMs : undefined}
+                        onRevealed={isHead ? markRevealed : undefined}
                         hovered={hoveredIndex === seg.index}
                         onHover={onHover}
                       />

@@ -3,15 +3,15 @@
  *
  * Differences from the installed StreamingText.tsx (kept unmodified next to this file):
  * - renders a <span> so it can sit inside a running paragraph of transcript text;
- * - the reveal speed is configurable, and it speeds up with a backlog so any
- *   segment finishes revealing within about 700 ms;
+ * - the caller sets how long the reveal takes (durationMs) and is told when it is done
+ *   (onRevealed), so segments can be revealed one after another;
  * - the caret is shown only when `caret` is set: solid while revealing, blinking
  *   once idle; with reduced motion the text appears at once and nothing blinks.
  *
  * Source: https://www.aicss.dev (free registry). See ./README.md.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import styles from "./streaming-text-inline.module.css";
@@ -22,19 +22,25 @@ export interface StreamingTextInlineProps {
   caret?: boolean;
   /** Show the whole text at once (catch-up segments, or no reveal wanted). */
   instant?: boolean;
-  /** Characters per 16 ms tick at base speed; a backlog raises it, see FINISH_MS. */
+  /** Milliseconds the reveal takes. Read every frame, so a new value speeds up or slows a reveal in progress. */
+  durationMs?: number;
+  /** Called once when the reveal has shown the whole text. Not called when the text is shown at once. */
+  onRevealed?: () => void;
+  /** Minimum characters per 16 ms tick; a short duration raises the speed above it. */
   charsPerTick?: number;
   className?: string;
 }
 
 const TICK_MS = 16;
-/** A segment should be fully revealed this long after it starts, however long it is. */
+/** Default reveal time: a segment is fully revealed this long after it starts, however long it is. */
 const FINISH_MS = 700;
 
 export function StreamingTextInline({
   text,
   caret = false,
   instant = false,
+  durationMs = FINISH_MS,
+  onRevealed,
   charsPerTick = 2,
   className,
 }: StreamingTextInlineProps) {
@@ -43,6 +49,13 @@ export function StreamingTextInline({
   // The reveal count belongs to one text: a new text starts again from zero without an extra render.
   const [reveal, setReveal] = useState<{ text: string; count: number }>({ text, count: 0 });
   const shown = skip ? text.length : reveal.text === text ? reveal.count : 0;
+  // The reveal loop reads the latest duration and callback without restarting when they change.
+  const durationRef = useRef(durationMs);
+  const onRevealedRef = useRef(onRevealed);
+  useLayoutEffect(() => {
+    durationRef.current = durationMs;
+    onRevealedRef.current = onRevealed;
+  });
 
   useEffect(() => {
     if (skip) return;
@@ -56,16 +69,19 @@ export function StreamingTextInline({
       const dt = last === null ? TICK_MS : Math.min(100, now - last);
       last = now;
       const remaining = text.length - count;
-      if (remaining <= 0) return;
-      const perTick = Math.max(charsPerTick, Math.ceil(remaining / (FINISH_MS / TICK_MS)));
-      carry += (dt / TICK_MS) * perTick;
-      const advance = Math.floor(carry);
-      if (advance > 0) {
-        carry -= advance;
-        count = Math.min(text.length, count + advance);
-        setReveal({ text, count });
+      if (remaining > 0) {
+        const ticks = Math.max(1, durationRef.current) / TICK_MS;
+        const perTick = Math.max(charsPerTick, Math.ceil(remaining / ticks));
+        carry += (dt / TICK_MS) * perTick;
+        const advance = Math.floor(carry);
+        if (advance > 0) {
+          carry -= advance;
+          count = Math.min(text.length, count + advance);
+          setReveal({ text, count });
+        }
       }
       if (count < text.length) frame = requestAnimationFrame(step);
+      else onRevealedRef.current?.();
     };
 
     frame = requestAnimationFrame(step);
