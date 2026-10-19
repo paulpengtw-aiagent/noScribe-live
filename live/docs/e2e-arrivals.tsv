@@ -1,0 +1,56 @@
+# run 20261020-051028-demo-en-zh  model breeze-asr-25  device cuda NVIDIA GeForce RTX 5060 Ti  compute default  model load 20.2 s
+# audio 202.4 s, wall 50.2 s -> RTF 0.248; whisper only (model_ready->run_end) 0.071
+# segments 50; CLI->browser latency ms: median 36, p95 70, max 77, min 4; tail(file->server) median 30; push(server->browser) median 6
+# first segment written by CLI at +39.54 s, last at +50.05 s; last browser arrival +50.08 s; CLI process exit +50.81 s
+
+index	media_s	speaker	cli_write_s	browser_recv_s	latency_ms	tail_ms	push_ms	cli_progress	text
+0	2.2-6.8	S00	39.544	39.566	22	2	20	0%	This is a LibriVox recording. All LibriV
+1	7.5-12.3	S00	39.549	39.616	67	66	1	3%	For more information or to volunteer, pl
+2	14.1-17.7	S00	39.549	39.620	70	66	5	6%	This recording is by Mark Smith of Simps
+3	20.4-32.5	S00	39.550	39.620	70	65	5	9%	The address at the dedication of the Nat
+4	36.2-40.0	S00	39.550	39.627	77	65	12	16%	Four score and seven years ago, our fath
+5	41.1-44.1	S01	39.550	39.627	76	65	12	20%	訓 吶喊自恤
+6	45.6-48.5	S01	42.553	42.594	41	38	3	22%	我在年輕時候也曾經做過許多夢
+7	48.5-50.5	S01	42.554	42.594	40	38	3	24%	後來大半忘卻了
+8	50.5-52.7	S01	42.554	42.597	43	37	5	25%	但自己也並不以為可惜
+9	53.3-54.3	S01	42.554	42.597	43	37	5	26%	所謂回憶著
+10	54.3-56.2	S01	42.554	42.597	42	37	5	26%	雖說可以使人歡欣
+11	56.2-58.8	S01	42.554	42.601	46	37	9	28%	有時也不免使人寂寞
+12	58.8-63.5	S01	42.555	42.601	46	37	9	29%	使精神的思慮還牽著已逝的寂寞的時光又有什麼意味呢
+13	64.1-66.1	S01	42.555	42.620	65	37	28	31%	而我偏苦于不能全忘卻
+14	66.5-68.1	S01	42.555	42.620	64	37	28	33%	這不能全忘的一部分
+15	68.1-70.8	S01	42.555	42.620	64	37	28	34%	到現在便成了吶喊的來由
+16	72.4-73.4	S01	42.556	42.620	64	36	28	35%	我有四年多
+17	73.4-74.8	S01	42.556	42.620	64	36	28	36%	曾經常常
+18	74.8-76.3	S01	42.556	42.620	63	36	28	37%	幾乎是每天
+19	76.3-78.9	S01	44.058	44.064	6	6	0	37%	出入于製鋪和藥店里
+20	78.9-80.6	S01	44.058	44.070	12	5	6	39%	年紀可是忘卻了
+21	81.2-89.9	S00	44.059	44.070	11	5	6	39%	Upon this continent a new nation, concei
+22	91.4-101.4	S00	44.059	44.070	11	5	6	44%	Now we are engaged in a great civil war,
+23	102.8-105.1	S00	44.059	44.070	10	4	6	50%	We are met on a great battlefield of tha
+24	106.2-108.8	S00	44.060	44.070	10	4	6	52%	We have come to dedicate a portion of th
+25	108.8-115.7	S00	46.603	46.607	4	3	1	54%	as a final resting place for those who h
+26	116.7-120.3	S00	46.604	46.612	8	2	6	57%	It is altogether fitting and proper that
+27	122.4-125.1	S01	46.604	46.612	8	2	6	59%	總之是藥店的櫃檯正和我一樣高
+28	125.1-127.3	S01	46.604	46.612	7	2	6	62%	製鋪的是比我高一倍
+29	128.4-131.7	S01	46.605	46.612	7	1	6	63%	我從一倍高的櫃檯外送上衣服或首飾去
+30	131.7-133.6	S01	46.605	46.630	25	1	23	65%	在五面裡借了錢
+31	133.6-137.4	S01	46.605	46.630	24	1	23	66%	再到一樣高的櫃檯上給我久病的父親去買藥
+32	138.8-140.9	S01	46.609	46.665	56	49	7	68%	回家之後又需忙別的事了
+33	140.9-143.5	S01	46.609	46.665	55	49	7	70%	因為開放的醫生是最有名的
+34	143.5-145.9	S01	48.769	48.800	31	31	0	71%	以此所用的藥引也奇特
+35	145.9-147.3	S01	48.769	48.805	36	31	5	72%	冬天的蘆根
+36	147.3-149.1	S01	48.769	48.805	36	30	5	72%	精霜三年的甘蔗
+37	149.1-150.9	S01	48.769	48.805	35	30	5	74%	蟋蟀要圓對的
+38	150.9-152.0	S01	48.770	48.805	35	30	5	75%	節子的平地木
+39	152.0-154.1	S01	48.770	48.805	35	30	5	75%	多不是容易辦到的東西
+40	154.8-158.1	S01	48.770	48.810	40	30	10	76%	然而我的父親終於日重一日的亡故了
+41	159.7-161.8	S01	48.770	48.810	39	29	10	78%	有誰從小康人家而墜入
+42	163.5-170.4	S00	48.771	48.810	39	29	10	80%	But in a larger sense, we cannot dedicat
+43	171.3-174.4	S00	48.771	48.810	38	29	10	84%	The brave men living and dead who strugg
+44	175.1-179.0	S00	50.052	50.067	15	15	-0	86%	have consecrated it far above our power 
+45	180.2-183.6	S00	50.052	50.072	20	15	5	88%	The world will little note nor long reme
+46	184.4-187.2	S00	50.052	50.072	20	15	5	91%	but it can never forget what they did he
+47	188.3-190.1	S00	50.052	50.072	19	15	5	92%	It is for us the living rather
+48	190.4-197.4	S00	50.053	50.072	19	14	5	94%	to be dedicated here to the unfinished w
+49	198.7-202.4	S00	50.053	50.077	24	14	10	98%	It is rather for us to be here dedicated
