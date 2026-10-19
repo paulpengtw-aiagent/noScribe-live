@@ -1,0 +1,9 @@
+.venv/
+feeds/
+samples/*.mp3
+samples/*.wav
+samples/dl-*/
+web/node_modules/
+web/dist/
+__pycache__/
+.pytest_cache/
