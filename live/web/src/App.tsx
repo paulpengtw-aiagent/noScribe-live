@@ -25,6 +25,7 @@ import {
   type RunState,
 } from "@/lib/live-state";
 import { clockText, envelopeFor, FOLLOW_NEWEST } from "@/lib/live-view";
+import { SpeakerOrderContext } from "@/lib/speaker-names";
 import { speakerColor } from "@/lib/speakers";
 
 /** Below this width the page stacks into one column. */
@@ -138,56 +139,58 @@ export default function App() {
 
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="flex min-h-svh flex-col bg-background text-foreground">
-        <TopBar
-          runs={state.runs}
-          runParam={runParam}
-          onRunChange={setRunParam}
-          connection={connection}
-          theme={theme}
-          onToggleTheme={toggleTheme}
-        />
-        <main className="live-page">
-          <div className="live-grid">
-            <motion.div className="live-stage" {...entrance(0, reduceMotion)}>
-              <StageCard
-                run={run}
-                phase={phase}
-                compact={!wide}
-                orbMode={orbModeFor(phase)}
-                envelope={envelope}
-                pulseKey={pulseKey}
-                speakerColors={speakerColors}
-                activeColor={activeColor}
-                progress={progress}
-                transcribed={transcribed}
-                latency={latency}
-                rtf={rtf}
-                elapsed={elapsed}
-              />
-            </motion.div>
+      <SpeakerOrderContext.Provider value={speakers}>
+        <div className="flex min-h-svh flex-col bg-background text-foreground">
+          <TopBar
+            runs={state.runs}
+            runParam={runParam}
+            onRunChange={setRunParam}
+            connection={connection}
+            theme={theme}
+            onToggleTheme={toggleTheme}
+          />
+          <main className="live-page">
+            <div className="live-grid">
+              <motion.div className="live-stage" {...entrance(0, reduceMotion)}>
+                <StageCard
+                  run={run}
+                  phase={phase}
+                  compact={!wide}
+                  orbMode={orbModeFor(phase)}
+                  envelope={envelope}
+                  pulseKey={pulseKey}
+                  speakerColors={speakerColors}
+                  activeColor={activeColor}
+                  progress={progress}
+                  transcribed={transcribed}
+                  latency={latency}
+                  rtf={rtf}
+                  elapsed={elapsed}
+                />
+              </motion.div>
 
-            <motion.div className="live-transcript" {...entrance(1, reduceMotion)}>
-              <TranscriptCard
-                ref={transcriptRef}
-                run={run}
-                speakers={speakers}
-                now={now}
-                hoveredIndex={hoveredIndex}
-                onHover={setHoveredIndex}
-              />
-            </motion.div>
+              <motion.div className="live-transcript" {...entrance(1, reduceMotion)}>
+                <TranscriptCard
+                  ref={transcriptRef}
+                  run={run}
+                  speakers={speakers}
+                  now={now}
+                  hoveredIndex={hoveredIndex}
+                  onHover={setHoveredIndex}
+                />
+              </motion.div>
 
-            <motion.div className="live-timeline" {...entrance(2, reduceMotion)}>
-              <TimelineCard
-                speakers={speakers}
-                transcribed={run ? `Transcribed ${transcribed}` : DASH}
-                waveform={waveform}
-              />
-            </motion.div>
-          </div>
-        </main>
-      </div>
+              <motion.div className="live-timeline" {...entrance(2, reduceMotion)}>
+                <TimelineCard
+                  speakers={speakers}
+                  transcribed={run ? `Transcribed ${transcribed}` : DASH}
+                  waveform={waveform}
+                />
+              </motion.div>
+            </div>
+          </main>
+        </div>
+      </SpeakerOrderContext.Provider>
     </TooltipProvider>
   );
 }

@@ -8,6 +8,7 @@ import { useElementSize } from "@/hooks/use-element-size";
 import { DASH, formatElapsed, formatMs, formatPercent, formatRtf } from "@/lib/format";
 import { PHASE_LABEL, phaseLabel, type DisplayPhase, type LatencyStats, type RunState } from "@/lib/live-state";
 import { deviceText, languageText, latencyHint } from "@/lib/live-view";
+import { useSpeakerName } from "@/lib/speaker-names";
 import { cn } from "@/lib/utils";
 
 const MODEL_HINT = "The speech model transcribing this audio.";
@@ -53,6 +54,7 @@ export function StageCard({
   elapsed,
 }: StageCardProps) {
   const orbArea = useRef<HTMLDivElement>(null);
+  const speakerName = useSpeakerName();
   const area = useElementSize(orbArea);
   // Desktop: the orb takes the room the chips leave over, between 120 and 260 px.
   const orbSize = compact
@@ -67,7 +69,7 @@ export function StageCard({
     { label: "Latency", value: formatMs(latency.last), hint: latencyHint(latency) },
     { label: "RTF", value: formatRtf(rtf), hint: RTF_HINT },
     { label: "Language", value: languageText(run) ?? DASH, hint: LANGUAGE_HINT },
-    { label: "Speakers", value: run && run.speakers.length > 0 ? String(run.speakers.length) : DASH, hint: speakerHint(run) },
+    { label: "Speakers", value: run && run.speakers.length > 0 ? String(run.speakers.length) : DASH, hint: speakerHint(run, speakerName) },
     { label: "Elapsed", value: formatElapsed(elapsed), hint: ELAPSED_HINT },
     { label: "Segments", value: run ? String(run.segments.length) : DASH, hint: SEGMENTS_HINT },
   ];
@@ -124,9 +126,9 @@ export function StageCard({
   );
 }
 
-function speakerHint(run: RunState | null): string {
+function speakerHint(run: RunState | null, speakerName: (label: string) => string): string {
   return run && run.speakers.length > 0
-    ? `Speaker labels found in the audio: ${run.speakers.join(", ")}.`
+    ? `Speaker labels found in the audio: ${run.speakers.map((label) => speakerName(label)).join(", ")}.`
     : "Speaker labels appear once speaker detection has run.";
 }
 

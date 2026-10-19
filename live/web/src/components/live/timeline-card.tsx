@@ -1,4 +1,5 @@
 import { WaveformTimeline, type WaveformTimelineProps } from "@/components/live/waveform-timeline";
+import { useSpeakerName } from "@/lib/speaker-names";
 import { cn } from "@/lib/utils";
 
 export interface TimelineCardProps {
@@ -10,6 +11,7 @@ export interface TimelineCardProps {
 }
 
 export function TimelineCard({ speakers, transcribed, waveform, className }: TimelineCardProps) {
+  const speakerName = useSpeakerName();
   return (
     <section aria-label="Timeline" className={cn("live-card flex min-h-0 flex-1 flex-col gap-4 p-5", className)}>
       <header className="flex min-w-0 items-center justify-between gap-4">
@@ -23,7 +25,7 @@ export function TimelineCard({ speakers, transcribed, waveform, className }: Tim
                   className="size-2 rounded-full"
                   style={{ backgroundColor: waveform.speakerColor(speaker) }}
                 />
-                {speaker}
+                {speakerName(speaker)}
               </li>
             ))}
           </ul>

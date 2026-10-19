@@ -44,12 +44,14 @@ export function speakerDotColor(speakers: readonly string[], label: string, them
 
 /**
  * Name shown for a speaker label. "S00" becomes "Speaker 1", numbered by order of first
- * appearance (1-based). Custom names are returned as they are. Overlap marks are stripped.
+ * appearance (1-based). A label missing from the list falls back to its own number plus one.
+ * Custom names are returned as they are. Overlap marks are stripped.
  */
 export function speakerDisplayName(label: string, speakers: readonly string[]): string {
   const key = speakerKey(label);
   if (!key) return "";
   if (!NUMBERED_LABEL.test(key)) return key;
   const index = speakers.indexOf(key);
-  return `Speaker ${(index < 0 ? speakers.length : index) + 1}`;
+  if (index >= 0) return `Speaker ${index + 1}`;
+  return `Speaker ${Number(key.slice(1)) + 1}`;
 }

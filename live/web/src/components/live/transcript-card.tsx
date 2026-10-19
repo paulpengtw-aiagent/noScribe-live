@@ -15,7 +15,9 @@ import { Button } from "@/components/ui/button";
 import { formatTimecode, isMostlyCjk } from "@/lib/format";
 import { isRunActive, type RunState, type Segment } from "@/lib/live-state";
 import { splitPath } from "@/lib/live-view";
+import { useSpeakerName } from "@/lib/speaker-names";
 import { speakerColor, speakerKey } from "@/lib/speakers";
+import { useZhTw } from "@/lib/zh-tw";
 import { buildBlocks } from "@/lib/transcript-blocks";
 import { cn } from "@/lib/utils";
 
@@ -97,6 +99,8 @@ interface SegmentSpanProps {
   revealMs?: number;
   /** Only for the segment revealing now: called once its text is fully shown. */
   onRevealed?: (index: number) => void;
+  /** Display text for a segment (Traditional Chinese conversion when loaded). */
+  display: (text: string) => string;
   hovered: boolean;
   onHover: (index: number | null) => void;
 }
@@ -108,10 +112,11 @@ const SegmentSpan = memo(function SegmentSpan({
   reveal,
   revealMs,
   onRevealed,
+  display,
   hovered,
   onHover,
 }: SegmentSpanProps) {
-  const text = segment.text.trim();
+  const text = display(segment.text.trim());
   return (
     <>
       {spaceBefore ? " " : null}
@@ -144,9 +149,10 @@ const SegmentSpan = memo(function SegmentSpan({
 });
 
 function OverlapTag({ speaker }: { speaker: string }) {
+  const speakerName = useSpeakerName();
   return (
     <span className="mr-1.5 inline-block rounded-full px-1.5 align-[2px] text-[11px] leading-4 text-ink-2 shadow-ring">
-      overlap · {speaker}
+      overlap · {speakerName(speaker)}
     </span>
   );
 }
@@ -201,6 +207,8 @@ function CommandBlock() {
 
 export function TranscriptCard({ run, speakers, now, hoveredIndex, onHover, ref }: TranscriptCardProps) {
   const reduce = useReducedMotion() ?? false;
+  const speakerName = useSpeakerName();
+  const toDisplay = useZhTw();
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   // Whether the view follows new text. Kept in a ref so observers and handlers read the latest value.
@@ -354,7 +362,10 @@ export function TranscriptCard({ run, speakers, now, hoveredIndex, onHover, ref 
                     className="size-2 rounded-full"
                     style={{ backgroundColor: speakerColor(speakers, block.speaker) }}
                   />
-                  {block.speaker ? <span className="font-medium text-ink-2">{block.speaker}</span> : null}
+                  {block.speaker ? <span className="font-medium text-ink-2">{speakerName(block.speaker)}</span> : null}
+                  {block.speaker && speakerName(block.speaker) !== block.speaker ? (
+                    <span className="text-[12px] text-ink-3">{block.speaker}</span>
+                  ) : null}
                   <span className="font-mono text-[12px] tabular-nums text-ink-3">{formatTimecode(block.start)}</span>
                 </header>
                 <p className="mt-2 max-w-[70ch] text-pretty text-[17px] leading-[1.7] text-foreground">
@@ -376,6 +387,7 @@ export function TranscriptCard({ run, speakers, now, hoveredIndex, onHover, ref 
                         reveal={reveal}
                         revealMs={isHead ? revealMs : undefined}
                         onRevealed={isHead ? markRevealed : undefined}
+                        display={toDisplay}
                         hovered={hoveredIndex === seg.index}
                         onHover={onHover}
                       />
