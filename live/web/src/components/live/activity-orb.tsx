@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, type JSX } from "react";
-import { useReducedMotion } from "motion/react";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { useInkPalette } from "@/hooks/use-ink-palette";
 import { OrbRenderer, type OrbMode } from "@/lib/orb-renderer";
 import { cn } from "@/lib/utils";
@@ -16,6 +16,8 @@ export interface ActivityOrbProps {
   size?: number;
   className?: string;
 }
+
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 
 const LABEL: Record<OrbMode, string> = {
   idle: "waiting",
@@ -43,7 +45,8 @@ export function ActivityOrb({
 }: ActivityOrbProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<OrbRenderer | null>(null);
-  const reduce = useReducedMotion() ?? false;
+  // Follows the OS setting live. A change rebuilds the renderer: one static frame, or the loop.
+  const reduce = useMediaQuery(REDUCED_MOTION_QUERY);
   const { ink, ink3 } = useInkPalette();
 
   // One renderer per canvas. It is rebuilt only when the reduced-motion preference changes.

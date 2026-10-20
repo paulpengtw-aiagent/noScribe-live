@@ -280,7 +280,12 @@ export class OrbRenderer {
 
   /** Starts the animation loop. Under reduced motion this only draws the static frame. */
   start(): void {
-    if (this.still || this.listening) return;
+    if (this.still) {
+      // No loop under reduced motion. Paint the one static frame if input has already arrived.
+      this.renderStill();
+      return;
+    }
+    if (this.listening) return;
     this.listening = true;
     document.addEventListener("visibilitychange", this.onVisibility);
     this.resumeLoop();

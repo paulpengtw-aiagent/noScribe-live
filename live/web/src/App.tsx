@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { StageCard } from "@/components/live/stage-card";
 import { TimelineCard } from "@/components/live/timeline-card";
@@ -6,8 +6,13 @@ import type { TimelineSegment, WaveformTimelineProps } from "@/components/live/w
 import type { OrbMode } from "@/components/live/activity-orb";
 import { TopBar } from "@/components/live/top-bar";
 import { TranscriptCard, type TranscriptHandle } from "@/components/live/transcript-card";
+import { ConnBanner } from "@/components/live/conn-banner";
+import { notifyNewRun } from "@/components/live/new-run-notice";
+import { LoadingSkeleton, TranscriptSkeleton } from "@/components/live/loading-skeleton";
+import { RunMissing } from "@/components/live/run-missing";
+import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { useLiveFeed } from "@/hooks/use-live-feed";
+import { useLiveFeed, type Connection } from "@/hooks/use-live-feed";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useNow } from "@/hooks/use-now";
 import { useRunPeaks } from "@/hooks/use-run-peaks";
@@ -24,7 +29,7 @@ import {
   type DisplayPhase,
   type RunState,
 } from "@/lib/live-state";
-import { clockText, envelopeFor, FOLLOW_NEWEST, otherLiveRun } from "@/lib/live-view";
+import { clockText, envelopeFor, FOLLOW_NEWEST, otherLiveRun, runName } from "@/lib/live-view";
 import { SpeakerOrderContext } from "@/lib/speaker-names";
 import { speakerColor } from "@/lib/speakers";
 
@@ -64,9 +69,26 @@ function entrance(index: number, reduce: boolean) {
   };
 }
 
+/** `?run=<id>` from the URL, or the follow-newest default. */
+function readRunParam(): string {
+  return new URLSearchParams(window.location.search).get("run") || FOLLOW_NEWEST;
+}
+
+/** Tab title: the shown run's file and how it stands, so a background tab says what is happening. */
+function documentTitle(run: RunState | null, connection: Connection): string {
+  if (!run) return "noScribe Live";
+  const name = run.audioName || run.runId;
+  if (run.endStatus === "finished") return `✓ Finished – ${name}`;
+  if (run.endStatus === "error") return `✕ Failed – ${name}`;
+  if (run.endStatus === "canceled") return `○ Canceled – ${name}`;
+  if (run.stale || connection === "stale") return `■ Stopped – ${name}`;
+  if (connection === "live") return `● Live – ${name}`;
+  return "noScribe Live";
+}
+
 export default function App() {
-  const [runParam, setRunParam] = useState(FOLLOW_NEWEST);
-  const { state, connection } = useLiveFeed(runParam);
+  const [runParam, setRunParam] = useState(readRunParam);
+  const { state, connection, retry } = useLiveFeed(runParam);
   const { theme, toggle: toggleTheme } = useTheme();
   const wide = useMediaQuery(WIDE_QUERY);
   const reduceMotion = useReducedMotion() ?? false;
@@ -77,7 +99,46 @@ export default function App() {
   const now = useNow(active, 250);
   // Offers a switch to another still-running run; never moves the user off a run they picked.
   const otherLive = otherLiveRun(state.runs, run?.runId ?? null, active, runParam === FOLLOW_NEWEST);
-  const { peaks, error: peaksError } = useRunPeaks(run?.runId ?? null, !active);
+  // The waveform is requested as soon as the run's audio is known, live or not.
+  const peakRunId = run?.audioFile ? run.runId : null;
+  const { peaks, error: peaksError } = useRunPeaks(peakRunId, !active);
+  // The header never says "Live" while the stream is down: the run's state is unknown then.
+  const badgeRun = active && connection !== "live" ? null : run;
+  // Transcript column: the skeleton while the run is awaited, the CLI hint only when the server
+  // confirmed zero runs, a "not found" card for an explicit run id the server does not know, or the run.
+  const runsExist = state.runs.length > 0;
+  const awaitingRun = !run && (connection === "connecting" || (runParam === FOLLOW_NEWEST && runsExist));
+  const onboarding = state.helloed && !runsExist && !run && connection !== "connecting";
+  const missingRun = state.helloed && runsExist && !run && !awaitingRun;
+
+  // The URL names the shown run; following the newest run leaves the URL bare.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (runParam === FOLLOW_NEWEST) url.searchParams.delete("run");
+    else url.searchParams.set("run", runParam);
+    window.history.replaceState(null, "", url);
+  }, [runParam]);
+
+  useEffect(() => {
+    document.title = documentTitle(run, connection);
+  }, [run, connection]);
+
+  // A run that starts while an explicit run is shown gets a notice. It never switches by itself.
+  const seenRuns = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (!state.helloed) return;
+    if (seenRuns.current === null) {
+      seenRuns.current = new Set(state.runs.map((item) => item.run_id));
+      return;
+    }
+    for (const item of state.runs) {
+      if (seenRuns.current.has(item.run_id)) continue;
+      seenRuns.current.add(item.run_id);
+      if (item.status === "running" && runParam !== FOLLOW_NEWEST) {
+        notifyNewRun(runName(item), () => setRunParam(item.run_id));
+      }
+    }
+  }, [state.helloed, state.runs, runParam]);
 
   const phase = displayPhase(run);
   const segments = run?.segments;
@@ -124,7 +185,12 @@ export default function App() {
   // Hover is shared: a segment in the transcript highlights its bar in the timeline, and back.
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const transcriptRef = useRef<TranscriptHandle>(null);
-  const selectSegment = useCallback((index: number) => transcriptRef.current?.reveal(index), []);
+  // The segment the reader picked (text or timeline). Stays highlighted until another pick.
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const selectSegment = useCallback((index: number) => {
+    setActiveIndex(index);
+    transcriptRef.current?.reveal(index);
+  }, []);
 
   const waveform: WaveformTimelineProps = {
     duration,
@@ -135,6 +201,7 @@ export default function App() {
     speakerColor: colorOf,
     hoveredIndex,
     onHover: setHoveredIndex,
+    activeIndex,
     onSelect: selectSegment,
     live: active,
   };
@@ -147,13 +214,17 @@ export default function App() {
             runs={state.runs}
             runParam={runParam}
             onRunChange={setRunParam}
-            run={run}
+            run={badgeRun}
             otherLive={otherLive}
             connection={connection}
             theme={theme}
             onToggleTheme={toggleTheme}
           />
+          <ConnBanner connection={connection} retry={retry} />
           <main className="live-page">
+            {!state.helloed ? (
+              <LoadingSkeleton />
+            ) : (
             <div className="live-grid">
               <motion.div className="live-stage" {...entrance(0, reduceMotion)}>
                 <StageCard
@@ -174,6 +245,15 @@ export default function App() {
               </motion.div>
 
               <motion.div className="live-transcript" {...entrance(1, reduceMotion)}>
+                {awaitingRun ? (
+                  <TranscriptSkeleton />
+                ) : missingRun ? (
+                  <RunMissing onFollowNewest={() => setRunParam(FOLLOW_NEWEST)} />
+                ) : (
+                <div
+                  data-testid={onboarding ? "onboarding" : undefined}
+                  className={onboarding ? "flex min-h-0 flex-1 flex-col" : "contents"}
+                >
                 <TranscriptCard
                   ref={transcriptRef}
                   run={run}
@@ -181,7 +261,11 @@ export default function App() {
                   now={now}
                   hoveredIndex={hoveredIndex}
                   onHover={setHoveredIndex}
+                  activeIndex={activeIndex}
+                  onSelect={setActiveIndex}
                 />
+                </div>
+                )}
               </motion.div>
 
               <motion.div className="live-timeline" {...entrance(2, reduceMotion)}>
@@ -193,9 +277,11 @@ export default function App() {
                 />
               </motion.div>
             </div>
+            )}
           </main>
         </div>
       </SpeakerOrderContext.Provider>
+      <Toaster theme={theme} />
     </TooltipProvider>
   );
 }

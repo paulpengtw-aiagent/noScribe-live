@@ -79,6 +79,21 @@ export function formatTimeOfDay(unixSeconds: number | null | undefined, withSeco
   return withSeconds ? `${hm}:${String(d.getSeconds()).padStart(2, "0")}` : hm;
 }
 
+/** Local calendar day as YYYY-MM-DD, for grouping runs by day. */
+export function formatDay(unixSeconds: number): string {
+  const d = new Date(unixSeconds * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** Local date and time to the second, "YYYY-MM-DD HH:MM:SS", for a unix-seconds timestamp. */
+export function formatDateTime(unixSeconds: number | null | undefined): string {
+  if (unixSeconds == null || !Number.isFinite(unixSeconds)) return DASH;
+  const d = new Date(unixSeconds * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${formatDay(unixSeconds)} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 export function basename(path: string | null | undefined): string | null {
   if (!path) return null;
   const parts = path.split(/[\\/]/);

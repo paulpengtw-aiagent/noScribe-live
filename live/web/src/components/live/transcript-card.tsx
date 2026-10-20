@@ -14,16 +14,18 @@ import { StreamingTextInline } from "@/components/aicss/streaming-text-inline";
 import { ErrorDetails } from "@/components/live/error-details";
 import { Button } from "@/components/ui/button";
 import { describeEnd, type EndDescription } from "@/lib/end-state";
-import { formatTimecode, isMostlyCjk } from "@/lib/format";
+import { formatElapsed, isMostlyCjk } from "@/lib/format";
 import { isRunActive, type RunState, type Segment } from "@/lib/live-state";
 import { useSpeakerName } from "@/lib/speaker-names";
 import { speakerColor, speakerKey } from "@/lib/speakers";
 import { useZhTw } from "@/lib/zh-tw";
-import { buildBlocks } from "@/lib/transcript-blocks";
+import { buildBlocks, type Paragraph, type SegmentItem } from "@/lib/transcript-blocks";
 import { cn } from "@/lib/utils";
 
-/** The view keeps following new text while the reader is this close to the bottom (px). */
-const FOLLOW_THRESHOLD_PX = 120;
+/** The view follows new text while the reader is within this many px of the bottom. */
+const STICK_PX = 8;
+/** After a programmatic scroll, scroll events for this long (ms) cannot change whether the view follows. */
+const HOLD_MS = 1000;
 /** Content this far past an edge (px) counts as "more above or below" and gets a soft fade. */
 const EDGE_PX = 2;
 /** A burst of live segments finishes revealing this long after its last arrival (ms). */
@@ -31,13 +33,25 @@ const BURST_MS = 1200;
 /** Bounds for how long one live segment takes to reveal (ms). */
 const MIN_REVEAL_MS = 120;
 const MAX_REVEAL_MS = 700;
+/** A finished run drains its pending text within this long (ms). */
+const FINISH_MS = 400;
+/** The reveal is behind when more than this many segments wait, or the oldest has waited this long (ms). */
+const FLUSH_SEGMENTS = 2;
+const FLUSH_MS = 2000;
 const CLI_COMMAND =
   "python -m noScribe --no-gui --model breeze-asr-25 --speaker-detection auto --timestamps --live-feed live/feeds/ INPUT OUTPUT.html";
 
 const NO_SEGMENTS: Segment[] = [];
+const NO_LINES: SpokenLine[] = [];
 
 /** How one segment is drawn: plain text, waiting its turn (nothing shown), revealing now, or shown whole with the caret. */
 type Reveal = "plain" | "waiting" | "reveal" | "caret";
+
+/** One completed segment, as the screen reader hears it. */
+interface SpokenLine {
+  key: number;
+  text: string;
+}
 
 function distanceToEnd(el: HTMLElement): number {
   return el.scrollHeight - el.scrollTop - el.clientHeight;
@@ -51,7 +65,7 @@ function edgeMask(edges: { top: boolean; bottom: boolean }): string {
 }
 
 export interface TranscriptHandle {
-  /** Scrolls a segment into view and flashes it. */
+  /** Scrolls a segment into view and flashes it. Stops following the newest text. */
   reveal: (index: number) => void;
 }
 
@@ -62,6 +76,10 @@ export interface TranscriptCardProps {
   now: number;
   hoveredIndex: number | null;
   onHover: (index: number | null) => void;
+  /** The segment the reader picked (text or timeline), highlighted with data-active. */
+  activeIndex?: number | null;
+  /** Called when the reader clicks a segment's text. */
+  onSelect?: (index: number) => void;
   ref?: Ref<TranscriptHandle>;
 }
 
@@ -75,6 +93,15 @@ function highestLiveIndex(segments: readonly Segment[]): number {
   let highest = -1;
   for (const segment of segments) {
     if (segment.live && segment.index > highest) highest = segment.index;
+  }
+  return highest;
+}
+
+/** The newest segment index of any kind, or -1. */
+function highestIndex(segments: readonly Segment[]): number {
+  let highest = -1;
+  for (const segment of segments) {
+    if (segment.index > highest) highest = segment.index;
   }
   return highest;
 }
@@ -95,6 +122,7 @@ interface SegmentSpanProps {
   segment: Segment;
   overlap: boolean;
   spaceBefore: boolean;
+  thinBefore: boolean;
   reveal: Reveal;
   /** Only for the segment revealing now: how long its reveal takes (ms). */
   revealMs?: number;
@@ -103,32 +131,49 @@ interface SegmentSpanProps {
   /** Display text for a segment (Traditional Chinese conversion when loaded). */
   display: (text: string) => string;
   hovered: boolean;
+  active: boolean;
   onHover: (index: number | null) => void;
+  onSelect?: (index: number) => void;
 }
 
 const SegmentSpan = memo(function SegmentSpan({
   segment,
   overlap,
   spaceBefore,
+  thinBefore,
   reveal,
   revealMs,
   onRevealed,
   display,
   hovered,
+  active,
   onHover,
+  onSelect,
 }: SegmentSpanProps) {
   const text = display(segment.text.trim());
   return (
     <>
       {spaceBefore ? " " : null}
+      {thinBefore ? (
+        <span aria-hidden="true" className="text-ink-3">
+          {" "}
+        </span>
+      ) : null}
       <span
         data-index={segment.index}
         data-segment-index={segment.index}
         data-segment-seq={segment.seq}
+        data-active={active ? "true" : undefined}
         lang={isMostlyCjk(text) ? "zh-Hant" : undefined}
         onMouseEnter={() => onHover(segment.index)}
         onMouseLeave={() => onHover(null)}
-        className={cn("segment", segment.live && "segment-fresh", hovered && "bg-raised")}
+        onClick={() => onSelect?.(segment.index)}
+        className={cn(
+          "segment",
+          segment.live && "segment-fresh",
+          hovered && "bg-raised",
+          active && "bg-secondary",
+        )}
       >
         {reveal === "waiting" ? null : (
           <>
@@ -208,15 +253,28 @@ function CommandBlock() {
   );
 }
 
-export function TranscriptCard({ run, speakers, now, hoveredIndex, onHover, ref }: TranscriptCardProps) {
+export function TranscriptCard({
+  run,
+  speakers,
+  now,
+  hoveredIndex,
+  onHover,
+  activeIndex = null,
+  onSelect,
+  ref,
+}: TranscriptCardProps) {
   const reduce = useReducedMotion() ?? false;
   const speakerName = useSpeakerName();
   const toDisplay = useZhTw();
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  // Whether the view follows new text. Kept in a ref so observers and handlers read the latest value.
-  const pinnedRef = useRef(true);
-  const [pinned, setPinned] = useState(true);
+  // Whether the view follows new text. A ref so observers and handlers read the latest value; the state mirrors it for the UI.
+  const followingRef = useRef(true);
+  const [following, setFollowing] = useState(true);
+  // scrollTop the view last set while following. Content growth never lowers scrollTop, so a lower value means the reader scrolled up.
+  const stuckTopRef = useRef(0);
+  // Until this time (performance.now() ms), scroll events cannot start or stop following. Covers programmatic scrolls.
+  const holdRef = useRef(0);
   const [edges, setEdges] = useState({ top: false, bottom: false });
   // Keeps the previous object when nothing changed, so scroll events do not re-render the card.
   const setEdgesFor = (el: HTMLElement) => {
@@ -224,6 +282,11 @@ export function TranscriptCard({ run, speakers, now, hoveredIndex, onHover, ref 
     const bottom = distanceToEnd(el) > EDGE_PX;
     setEdges((prev) => (prev.top === top && prev.bottom === bottom ? prev : { top, bottom }));
   };
+  const setFollow = (value: boolean) => {
+    followingRef.current = value;
+    setFollowing(value);
+  };
+  const stopFollowing = () => setFollow(false);
   const active = isRunActive(run);
   const activeRef = useRef(active);
   const runId = run?.runId ?? null;
@@ -238,20 +301,57 @@ export function TranscriptCard({ run, speakers, now, hoveredIndex, onHover, ref 
   // does not replay it.
   const [revealed, setRevealed] = useState(() => ({ runId, through: highestLiveIndex(segments) }));
   const doneThrough = revealed.runId === runId ? revealed.through : -1;
-  // Reduced motion and an ended run show everything at once, so only a live run has a queue.
-  const queueing = active && !reduce;
-  const queue = useMemo(
-    () => (queueing ? segments.filter((segment) => isQueued(segment, doneThrough)) : NO_SEGMENTS),
-    [queueing, segments, doneThrough],
+  // Reduced motion shows everything at once. Otherwise queued text reveals, including after the run ends.
+  const queueable = !reduce;
+  const pendingQueue = useMemo(
+    () => (queueable ? segments.filter((segment) => isQueued(segment, doneThrough)) : NO_SEGMENTS),
+    [queueable, segments, doneThrough],
   );
+  const oldest = pendingQueue.length > 0 ? pendingQueue[0] : null;
+  // Behind by too much: the pending text is shown at once, and the reveal state catches up.
+  const behind = oldest !== null && (pendingQueue.length > FLUSH_SEGMENTS || now - oldest.recvAt > FLUSH_MS);
+  // Adjusts the reveal state during render (React's pattern for state that follows props); the next render has nothing pending.
+  if (behind) setRevealed({ runId, through: highestLiveIndex(segments) });
+  const queueing = queueable && !behind;
+  const queue = queueing ? pendingQueue : NO_SEGMENTS;
   const head = queue.length > 0 ? queue[0] : null;
+  const headIndex = head ? head.index : -1;
+  // A segment whose turn has not come yet: nothing is drawn for it.
+  const isWaiting = (segment: Segment) => queueing && segment.index !== headIndex && isQueued(segment, doneThrough);
   // The caret sits on the segment revealing now, or on the last segment while the run is live and idle.
   const caretIndex = head ? head.index : active ? lastIndex : null;
-  // The queue finishes BURST_MS after its last arrival, each segment taking an equal share of the time left.
+  // The queue's last segment is due BURST_MS after its arrival. A finished run drains the queue within FINISH_MS.
   const revealMs = head
-    ? clamp((queue[queue.length - 1].recvAt + BURST_MS - now) / queue.length, MIN_REVEAL_MS, MAX_REVEAL_MS)
+    ? active
+      ? clamp((queue[queue.length - 1].recvAt + BURST_MS - now) / queue.length, MIN_REVEAL_MS, MAX_REVEAL_MS)
+      : clamp(FINISH_MS / queue.length, 16, MAX_REVEAL_MS)
     : MAX_REVEAL_MS;
   const markRevealed = (index: number) => setRevealed({ runId, through: index });
+
+  // Turns whose text has not started yet are not drawn at all, so a speaker header never shows without words under it.
+  const visibleBlocks = blocks
+    .map((block) => ({
+      block,
+      paragraphs: block.paragraphs.filter((paragraph) => paragraph.items.some((item) => !isWaiting(item.seg))),
+    }))
+    .filter((entry) => entry.paragraphs.length > 0);
+
+  // What the screen reader announces: each segment once, after its reveal is complete (never partial text).
+  // Text already on screen when a run is first shown is not news, so announcements start after it.
+  const [announceFrom, setAnnounceFrom] = useState<{ runId: string | null; through: number }>({ runId: null, through: -1 });
+  if (announceFrom.runId !== runId) setAnnounceFrom({ runId, through: highestIndex(segments) });
+  // Derived, not stored: the lines only grow as segments complete, so React appends just the new ones.
+  const spokenLines = useMemo(() => {
+    if (announceFrom.runId !== runId) return NO_LINES;
+    const lines: SpokenLine[] = [];
+    for (const segment of segments) {
+      if (segment.index <= announceFrom.through) continue;
+      if (queueing && isQueued(segment, doneThrough)) break;
+      const text = toDisplay(segment.text.trim());
+      if (text) lines.push({ key: segment.index, text: segment.speaker ? `${speakerName(segment.speaker)}: ${text}` : text });
+    }
+    return lines;
+  }, [announceFrom, runId, segments, queueing, doneThrough, toDisplay, speakerName]);
 
   useLayoutEffect(() => {
     activeRef.current = active;
@@ -261,30 +361,29 @@ export function TranscriptCard({ run, speakers, now, hoveredIndex, onHover, ref 
   useLayoutEffect(() => {
     const el = scrollRef.current;
     const follow = activeRef.current;
-    pinnedRef.current = follow;
-    setPinned(follow);
+    setFollow(follow);
+    holdRef.current = 0;
     if (!el) return;
     el.scrollTop = follow ? el.scrollHeight : 0;
+    stuckTopRef.current = el.scrollTop;
     setEdgesFor(el);
   }, [runId]);
 
-  // A reader who is at the newest text stays there while the content grows, including after the run ends.
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
-  });
-
-  // The last segment reveals over time and grows the content; keep the edges and any follow in step.
+  // Content that grows (new text, a reveal step, a resize) keeps a following reader at the newest text.
+  // Nothing scrolls on render: only a size change of the content or the scroller does.
   useEffect(() => {
+    const el = scrollRef.current;
     const content = contentRef.current;
-    if (!content) return;
+    if (!el) return;
     const observer = new ResizeObserver(() => {
-      const el = scrollRef.current;
-      if (!el) return;
-      if (pinnedRef.current) el.scrollTop = el.scrollHeight;
+      if (followingRef.current) {
+        el.scrollTop = el.scrollHeight;
+        stuckTopRef.current = el.scrollTop;
+      }
       setEdgesFor(el);
     });
-    observer.observe(content);
+    observer.observe(el);
+    if (content) observer.observe(content);
     return () => observer.disconnect();
   }, [hasBlocks]);
 
@@ -292,8 +391,12 @@ export function TranscriptCard({ run, speakers, now, hoveredIndex, onHover, ref 
     ref,
     () => ({
       reveal(index: number) {
-        const target = scrollRef.current?.querySelector<HTMLElement>(`[data-index="${index}"]`);
-        if (!target) return;
+        const el = scrollRef.current;
+        const target = el?.querySelector<HTMLElement>(`[data-index="${index}"]`);
+        if (!el || !target) return;
+        // The reader asked for this text: stop following, and do not resume during the scroll to it.
+        holdRef.current = performance.now() + HOLD_MS;
+        setFollow(false);
         target.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
         flashSegment(target, reduce);
       },
@@ -304,20 +407,40 @@ export function TranscriptCard({ run, speakers, now, hoveredIndex, onHover, ref 
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    pinnedRef.current = distanceToEnd(el) <= FOLLOW_THRESHOLD_PX;
-    setPinned(pinnedRef.current);
+    if (performance.now() >= holdRef.current) {
+      if (followingRef.current) {
+        // Scrolled up (wheel, keys, touch or the scrollbar): stop following.
+        if (el.scrollTop < stuckTopRef.current - 1) setFollow(false);
+        else stuckTopRef.current = el.scrollTop;
+      } else if (distanceToEnd(el) <= STICK_PX) {
+        // Back at the newest text: resume following.
+        stuckTopRef.current = el.scrollTop;
+        setFollow(true);
+      }
+    }
     setEdgesFor(el);
+  };
+
+  const onWheel = (event: { deltaY: number }) => {
+    if (event.deltaY < 0) stopFollowing();
+  };
+
+  const onKeyDown = (event: { key: string }) => {
+    if (event.key === "PageUp" || event.key === "ArrowUp" || event.key === "Home") stopFollowing();
   };
 
   const jumpToLive = () => {
     const el = scrollRef.current;
     if (!el) return;
-    pinnedRef.current = true;
-    setPinned(true);
+    holdRef.current = performance.now() + HOLD_MS;
+    setFollow(true);
+    // Lower than the final bottom on purpose: a stale high value would read as a scroll up after the hold.
+    stuckTopRef.current = el.scrollTop;
     el.scrollTo({ top: el.scrollHeight, behavior: reduce ? "auto" : "smooth" });
   };
 
-  const showJump = active && !pinned && segments.length > 0;
+  // The jump button shows whenever the view is not at the newest text, live or ended.
+  const showJump = !following && segments.length > 0;
   // How the run ended, or null while it is still running.
   const end = run ? describeEnd(run) : null;
 
@@ -346,11 +469,17 @@ export function TranscriptCard({ run, speakers, now, hoveredIndex, onHover, ref 
 
       <div
         ref={scrollRef}
+        role="region"
+        aria-label="Transcript text"
+        tabIndex={0}
+        data-testid="transcript-scroll"
+        data-following={following ? "true" : "false"}
         onScroll={onScroll}
-        role="log"
-        aria-live="polite"
-        aria-relevant="additions"
-        className="quiet-scroll flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pb-8"
+        onWheel={onWheel}
+        onTouchStart={stopFollowing}
+        onTouchMove={stopFollowing}
+        onKeyDown={onKeyDown}
+        className="quiet-scroll flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pb-8 outline-none focus-visible:shadow-ring"
         style={{ maskImage: edgeMask(edges), WebkitMaskImage: edgeMask(edges) }}
       >
         {!run ? (
@@ -363,9 +492,9 @@ export function TranscriptCard({ run, speakers, now, hoveredIndex, onHover, ref 
           </div>
         ) : hasBlocks ? (
           <div ref={contentRef} className="shrink-0">
-            {blocks.map((block) => (
-              <section key={block.id} className="mt-[18px] first:mt-0">
-                <header className="flex items-center gap-2 text-[13px] leading-5">
+            {visibleBlocks.map(({ block, paragraphs }) => (
+              <section key={block.id} data-testid="turn" className="mt-[18px] first:mt-0">
+                <header data-testid="speaker-header" className="flex items-center gap-2 text-[13px] leading-5">
                   <span
                     aria-hidden="true"
                     className="size-2 rounded-full"
@@ -375,34 +504,48 @@ export function TranscriptCard({ run, speakers, now, hoveredIndex, onHover, ref 
                   {block.speaker && speakerName(block.speaker) !== block.speaker ? (
                     <span className="text-[12px] text-ink-3">{block.speaker}</span>
                   ) : null}
-                  <span className="font-mono text-[12px] tabular-nums text-ink-3">{formatTimecode(block.start)}</span>
                 </header>
-                <p className="mt-2 max-w-[70ch] text-pretty text-[17px] leading-[1.7] text-foreground">
-                  {block.items.map(({ seg, overlap, spaceBefore }) => {
-                    const isHead = head !== null && seg.index === head.index;
-                    const reveal: Reveal = isHead
-                      ? "reveal"
-                      : queueing && isQueued(seg, doneThrough)
-                        ? "waiting"
-                        : seg.index === caretIndex
-                          ? "caret"
-                          : "plain";
-                    return (
-                      <SegmentSpan
-                        key={seg.index}
-                        segment={seg}
-                        overlap={overlap}
-                        spaceBefore={spaceBefore}
-                        reveal={reveal}
-                        revealMs={isHead ? revealMs : undefined}
-                        onRevealed={isHead ? markRevealed : undefined}
-                        display={toDisplay}
-                        hovered={hoveredIndex === seg.index}
-                        onHover={onHover}
-                      />
-                    );
-                  })}
-                </p>
+                {paragraphs.map((paragraph: Paragraph) => (
+                  <div
+                    key={paragraph.id}
+                    data-testid="paragraph"
+                    data-start={paragraph.start}
+                    className="mt-2 grid grid-cols-[5rem_minmax(0,1fr)] gap-x-3"
+                  >
+                    <span data-testid="paragraph-time" className="pt-[5px] font-mono text-[12px] leading-5 tabular-nums text-ink-3">
+                      {formatElapsed(paragraph.start)}
+                    </span>
+                    <p className="max-w-[70ch] text-pretty text-[17px] leading-[1.7] text-foreground">
+                      {paragraph.items.map(({ seg, overlap, spaceBefore, thinBefore }: SegmentItem) => {
+                        const isHead = seg.index === headIndex;
+                        const reveal: Reveal = isHead
+                          ? "reveal"
+                          : isWaiting(seg)
+                            ? "waiting"
+                            : seg.index === caretIndex && !reduce
+                              ? "caret"
+                              : "plain";
+                        return (
+                          <SegmentSpan
+                            key={seg.index}
+                            segment={seg}
+                            overlap={overlap}
+                            spaceBefore={spaceBefore}
+                            thinBefore={thinBefore}
+                            reveal={reveal}
+                            revealMs={isHead ? revealMs : undefined}
+                            onRevealed={isHead ? markRevealed : undefined}
+                            display={toDisplay}
+                            hovered={hoveredIndex === seg.index}
+                            active={activeIndex === seg.index}
+                            onHover={onHover}
+                            onSelect={onSelect}
+                          />
+                        );
+                      })}
+                    </p>
+                  </div>
+                ))}
               </section>
             ))}
           </div>
@@ -415,11 +558,18 @@ export function TranscriptCard({ run, speakers, now, hoveredIndex, onHover, ref 
         ) : null}
       </div>
 
+      <div data-testid="sr-announcer" aria-live="polite" className="sr-only">
+        {spokenLines.map((line) => (
+          <p key={line.key}>{line.text}</p>
+        ))}
+      </div>
+
       <AnimatePresence>
         {showJump ? (
           <motion.button
             key="jump-to-live"
             type="button"
+            data-testid="jump-to-live"
             onClick={jumpToLive}
             initial={reduce ? false : { opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
@@ -428,7 +578,7 @@ export function TranscriptCard({ run, speakers, now, hoveredIndex, onHover, ref 
             className="absolute right-6 bottom-5 inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3.5 text-[13px] font-medium text-secondary-foreground shadow-ring hover:bg-raised"
           >
             <ArrowDown className="size-3.5" aria-hidden="true" />
-            Jump to live
+            {active ? "Jump to live" : "Jump to end"}
           </motion.button>
         ) : null}
       </AnimatePresence>

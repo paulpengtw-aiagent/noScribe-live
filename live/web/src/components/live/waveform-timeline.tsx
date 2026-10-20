@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from "react";
 import { useSpeakerName } from "@/lib/speaker-names";
 import { cn } from "@/lib/utils";
 
@@ -18,6 +18,8 @@ export interface WaveformTimelineProps {
   frontier: number | null;
   speakerColor: (speaker: string) => string;
   hoveredIndex: number | null;
+  /** The segment the reader picked (clicked in the timeline or the text); shown with data-active. */
+  activeIndex?: number | null;
   onHover: (index: number | null) => void;
   onSelect: (index: number) => void;
   live: boolean;
@@ -99,6 +101,7 @@ export function WaveformTimeline({
   frontier,
   speakerColor,
   hoveredIndex,
+  activeIndex = null,
   onHover,
   onSelect,
   className,
@@ -108,6 +111,23 @@ export function WaveformTimeline({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [ink, setInk] = useState(FALLBACK_INK);
+  // Roving tabindex: one block is in the tab order (the last one focused, else the active one, else the newest).
+  const [focusStop, setFocusStop] = useState<number | null>(null);
+  const newestIndex = segments.length > 0 ? segments[segments.length - 1].index : null;
+  const stopIndex = focusStop ?? activeIndex ?? newestIndex;
+
+  // Left and Right arrows move focus between blocks, so the timeline is one tab stop.
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    const root = rootRef.current;
+    if (!root) return;
+    const blocks = Array.from(root.querySelectorAll<HTMLButtonElement>("[data-timeline-index]"));
+    const at = blocks.indexOf(event.target as HTMLButtonElement);
+    if (at < 0) return;
+    event.preventDefault();
+    const step = event.key === "ArrowRight" ? 1 : -1;
+    blocks[Math.min(blocks.length - 1, Math.max(0, at + step))]?.focus();
+  };
 
   // The canvas fills the root without padding, so the root's content box is the drawing area.
   useEffect(() => {
@@ -147,21 +167,29 @@ export function WaveformTimeline({
   const span = duration && duration > 0 ? duration : Math.max(1, frontier ?? 1);
   const pct = (seconds: number) => Math.min(100, Math.max(0, ((seconds - startOffset) / span) * 100));
   return (
-    <div ref={rootRef} className={cn("relative h-full w-full", className)}>
+    <div ref={rootRef} onKeyDown={onKeyDown} className={cn("relative h-full w-full", className)}>
       <canvas ref={canvasRef} aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full" />
       <div className="absolute inset-x-0 top-1/2 h-px bg-hairline" />
       {segments.map((seg) => {
         const left = pct(seg.start);
         const segWidth = Math.max(0.3, pct(seg.end) - left);
         const name = speakerName(seg.speaker);
+        const isActive = activeIndex === seg.index;
         return (
           <button
             key={seg.index}
             type="button"
+            data-timeline-index={seg.index}
+            data-active={isActive ? "true" : undefined}
+            aria-current={isActive ? "true" : undefined}
+            tabIndex={seg.index === stopIndex ? 0 : -1}
             aria-label={name ? `Segment ${seg.index + 1}, ${name}` : `Segment ${seg.index + 1}`}
             onMouseEnter={() => onHover(seg.index)}
             onMouseLeave={() => onHover(null)}
-            onFocus={() => onHover(seg.index)}
+            onFocus={() => {
+              onHover(seg.index);
+              setFocusStop(seg.index);
+            }}
             onBlur={() => onHover(null)}
             onClick={() => onSelect(seg.index)}
             className="absolute top-1/2 h-10 -translate-y-1/2 rounded-sm"
@@ -169,7 +197,7 @@ export function WaveformTimeline({
               left: `${left}%`,
               width: `${segWidth}%`,
               backgroundColor: speakerColor(seg.speaker),
-              opacity: hoveredIndex === seg.index ? 1 : 0.55,
+              opacity: hoveredIndex === seg.index || isActive ? 1 : 0.55,
             }}
           />
         );

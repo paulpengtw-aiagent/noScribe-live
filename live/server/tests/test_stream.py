@@ -97,3 +97,26 @@ def test_latest_stream_switches_when_the_status_watcher_marks_the_newest_run_sta
     assert '"run_id": "B"' in opening[3]
     assert runs_message.startswith("event: runs\n")
     assert '"run_id": "A"' in snapshot_message
+
+
+def test_an_idle_stream_sends_a_ping_event(monkeypatch):
+    """The heartbeat is a named event: EventSource ignores comment lines, so only an event can show liveness."""
+    import json
+
+    from server import app as app_module
+
+    monkeypatch.setattr(app_module, "HEARTBEAT_S", 0.0)
+    monkeypatch.setattr(app_module, "DISCONNECT_CHECK_S", 0.01)
+    registry = RunRegistry()
+
+    async def scenario():
+        stream = _sse_messages(_Connected(), registry, "latest")
+        for _ in range(4):                                  # retry, padding, hello, snapshot
+            await stream.__anext__()
+        message = await asyncio.wait_for(stream.__anext__(), timeout=5)
+        await stream.aclose()
+        return message
+
+    message = asyncio.run(scenario())
+    assert message.startswith("event: ping\ndata: ")
+    assert isinstance(json.loads(message.split("data: ", 1)[1])["t"], float)

@@ -1,7 +1,6 @@
 import { useRef } from "react";
 import { Check } from "lucide-react";
 import { Orb } from "@/components/aicss/Orb";
-import { ThinkingState } from "@/components/aicss/ThinkingState";
 import { ActivityOrb, type OrbMode } from "@/components/live/activity-orb";
 import { ErrorDetails } from "@/components/live/error-details";
 import { StatusChip } from "@/components/live/status-chip";
@@ -76,6 +75,8 @@ export function StageCard({
     { label: "Segments", value: run ? String(run.segments.length) : DASH, hint: SEGMENTS_HINT },
   ];
 
+  const timed = hasTimeline(run, phase);
+
   return (
     <section aria-label="Run status" className="live-card flex min-h-0 flex-1 flex-col gap-3 p-5">
       <div ref={orbArea} className={cn("flex items-center justify-center", compact ? "shrink-0" : "min-h-0 flex-1")}>
@@ -102,8 +103,10 @@ export function StageCard({
           />
         </div>
         <div className="mt-2 flex items-baseline justify-between gap-3 text-[12px] tabular-nums">
-          <span className="font-mono text-ink-3">{transcribed}</span>
-          <span className="text-ink-2">{run ? formatPercent(progress) : DASH}</span>
+          <span className={cn("min-w-0 truncate text-ink-3", timed && "font-mono")}>
+            {timed ? transcribed : run ? PHASE_LABEL[phase] : DASH}
+          </span>
+          <span className="shrink-0 text-ink-2">{run ? formatPercent(progress) : DASH}</span>
         </div>
       </div>
 
@@ -128,6 +131,15 @@ export function StageCard({
   );
 }
 
+/**
+ * True when "mm:ss of mm:ss" can be shown: the audio length is known and transcription has begun
+ * (or the run has ended). Before that the line names the phase instead, so it never reads "00:00 of —".
+ */
+function hasTimeline(run: RunState | null, phase: DisplayPhase): boolean {
+  if (!run || run.duration === null || run.duration <= 0) return false;
+  return phase === "transcribing" || phase === "finished" || phase === "error" || phase === "canceled";
+}
+
 function speakerHint(run: RunState | null, speakerName: (label: string) => string): string {
   return run && run.speakers.length > 0
     ? `Speaker labels found in the audio: ${run.speakers.map((label) => speakerName(label)).join(", ")}.`
@@ -141,12 +153,7 @@ function PhaseRow({ run, phase, elapsed }: { run: RunState | null; phase: Displa
       return <Orb variant="C2" pill label="Listening for a run…" />;
     case "loading":
     case "listening":
-      return (
-        <div className="flex items-center gap-3">
-          <Orb variant="S1" pill label={phaseLabel(run, phase)} />
-          <ThinkingState />
-        </div>
-      );
+      return <Orb variant="S1" pill label={phaseLabel(run, phase)} />;
     case "converting":
       return <Orb variant="S2" pill label={phaseLabel(run, phase)} />;
     case "diarizing":

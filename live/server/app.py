@@ -21,7 +21,7 @@ from .peaks import AudioDecodeError, compute_peaks
 
 logger = logging.getLogger("server.app")
 
-HEARTBEAT_S = 15.0          # ": ping" comment interval on an open stream
+HEARTBEAT_S = 15.0          # "ping" event interval on an open stream (EventSource cannot see comments)
 STATUS_CHECK_S = 2.0        # how often run statuses are checked for changes (e.g. a killed CLI goes stale)
 DISCONNECT_CHECK_S = 1.0    # an idle stream checks for a departed client this often
 PEAKS_CACHE_MAX = 32        # cached peak results (entries, not bytes)
@@ -91,7 +91,7 @@ async def _sse_messages(request: Request, registry: RunRegistry, run_param: str)
             except asyncio.TimeoutError:
                 if loop.time() - last_ping >= HEARTBEAT_S:
                     last_ping = loop.time()
-                    yield ": ping\n\n"
+                    yield sse("ping", {"t": time.time()})
                 continue
 
             if kind == "dropped":

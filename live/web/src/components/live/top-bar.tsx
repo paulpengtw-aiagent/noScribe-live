@@ -1,12 +1,11 @@
 import { Moon, Sun } from "lucide-react";
 import { Orb } from "@/components/aicss/Orb";
+import { RunPicker } from "@/components/live/run-picker";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { Connection } from "@/hooks/use-live-feed";
 import type { Theme } from "@/hooks/use-theme";
-import { formatTimeOfDay } from "@/lib/format";
 import type { RunState } from "@/lib/live-state";
-import { FOLLOW_NEWEST, RUN_STATUS_WORD, runName, runStateBadge } from "@/lib/live-view";
+import { runStateBadge } from "@/lib/live-view";
 import type { RunSummary } from "@/lib/live-types";
 import { cn } from "@/lib/utils";
 
@@ -33,20 +32,13 @@ export function TopBar({
   theme,
   onToggleTheme,
 }: TopBarProps) {
-  const chosen = runs.find((item) => item.run_id === runParam);
   const badge = runStateBadge(run);
-  // The trigger shows a shorter label on narrow screens so it never clips to "Follow newest r".
-  const triggerLabel =
-    runParam === FOLLOW_NEWEST ? (
-      <>
-        <span className="sm:hidden">Follow newest</span>
-        <span className="hidden sm:inline">Follow newest run</span>
-      </>
-    ) : chosen ? (
-      runName(chosen)
-    ) : (
-      runParam
-    );
+  // "Live" only while the run is live and the feed is connected. Otherwise the badge says why not.
+  // data-state keeps the run status either way.
+  let badgeText = badge?.text ?? null;
+  if (badge?.status === "running" && connection !== "live") {
+    badgeText = connection === "connecting" ? "Connecting…" : "Reconnecting…";
+  }
 
   return (
     <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center border-b border-hairline bg-background/80 backdrop-blur-xl">
@@ -73,26 +65,7 @@ export function TopBar({
             </Button>
           )}
 
-          <Select value={runParam} onValueChange={onRunChange}>
-            <SelectTrigger
-              aria-label="Choose a run"
-              className="h-8 w-[150px] rounded-full border-transparent bg-raised px-3.5 text-[13px] shadow-ring hover:bg-raised dark:bg-raised dark:hover:bg-raised sm:w-[260px]"
-            >
-              <SelectValue>{triggerLabel}</SelectValue>
-            </SelectTrigger>
-            <SelectContent position="popper" align="end" className="min-w-[260px] rounded-[14px]">
-              <SelectItem value={FOLLOW_NEWEST}>Follow newest run</SelectItem>
-              {runs.map((item) => (
-                <SelectItem key={item.run_id} value={item.run_id}>
-                  <span className="flex w-full min-w-0 items-center gap-3">
-                    <span className="min-w-0 flex-1 truncate">{runName(item)}</span>
-                    <span className="shrink-0 text-ink-2">{RUN_STATUS_WORD[item.status]}</span>
-                    <span className="shrink-0 tabular-nums text-ink-3">{formatTimeOfDay(item.started_t, true)}</span>
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <RunPicker runs={runs} value={runParam} onChange={onRunChange} />
 
           <div role="status" className="flex items-center gap-3 text-[13px] text-ink-2">
             <span data-testid="conn-state" data-state={connection} className="flex items-center gap-2">
@@ -113,9 +86,13 @@ export function TopBar({
               <span data-testid="run-state" data-state={badge.status} className="flex items-center gap-2">
                 <span
                   aria-hidden="true"
-                  className={cn("size-1.5 rounded-full", badge.status === "running" ? "bg-foreground" : "bg-ink-3")}
+                  className={cn(
+                    "size-1.5 rounded-full",
+                    badge.status === "running" && connection === "live" ? "bg-foreground" : "bg-ink-3",
+                    badge.status === "running" && connection !== "live" && "animate-pulse",
+                  )}
                 />
-                {badge.text}
+                {badgeText}
               </span>
             )}
           </div>

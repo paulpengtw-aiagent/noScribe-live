@@ -86,6 +86,8 @@ export interface LiveState {
   runs: RunSummary[];
   serverT: number | null;
   run: RunState | null;
+  /** True once a hello arrived on this page: the run list is known, even when it is empty. */
+  helloed: boolean;
 }
 
 export type LiveAction =
@@ -95,7 +97,7 @@ export type LiveAction =
   | { type: "snapshot"; runId: string | null; summary: RunSummary | null; events: FeedEvent[]; now: number }
   | { type: "feed"; runId: string; event: FeedEvent; now: number };
 
-export const INITIAL_LIVE_STATE: LiveState = { runs: [], serverT: null, run: null };
+export const INITIAL_LIVE_STATE: LiveState = { runs: [], serverT: null, run: null, helloed: false };
 
 function endFromStatus(status: RunStatus | undefined): EndStatus | null {
   return status === "finished" || status === "error" || status === "canceled" ? status : null;
@@ -296,7 +298,7 @@ export function liveReducer(state: LiveState, action: LiveAction): LiveState {
     case "reset":
       return { ...state, run: null };
     case "hello":
-      return applyRunSummaries({ ...state, runs: action.runs, serverT: action.serverT }, action.runs);
+      return applyRunSummaries({ ...state, runs: action.runs, serverT: action.serverT, helloed: true }, action.runs);
     case "runs":
       return applyRunSummaries({ ...state, runs: action.runs }, action.runs);
     case "snapshot": {

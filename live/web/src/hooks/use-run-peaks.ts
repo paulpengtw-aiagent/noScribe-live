@@ -3,7 +3,7 @@ import type { PeaksPayload } from "@/lib/live-types";
 
 /**
  * Why a run has no waveform: its audio file is gone (`missing`), cannot be decoded (`undecodable`),
- * or the request failed for another reason (`failed`). Null when the peaks are loaded or not asked for yet.
+ * or the server kept failing (`failed`). Null when the peaks are loaded or not asked for yet.
  */
 export type PeaksError = "missing" | "undecodable" | "failed" | null;
 
@@ -19,11 +19,14 @@ interface PeaksEntry extends RunPeaks {
 }
 
 const NO_PEAKS: RunPeaks = { peaks: null, error: null };
-const RETRY_MS = 2000;
+/** Waits before each retry of a network error or 5xx: 1, 2, 4, 8, 16 s. Then the load gives up. */
+const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 16000];
 
 /**
- * Loudness peaks for a run, or why there are none. 404 (no audio file) and 422 (audio cannot be decoded)
- * are final and never retried. Any other failure retries once after 2 s, and again when the run ends.
+ * Loudness peaks for a run, or why there are none. Requested as soon as the caller has a run id
+ * (the server reads the input file, which exists from the start, so live runs get a waveform too).
+ * 404 (no audio file) and 422 (audio cannot be decoded) are final and never retried. Network errors
+ * and 5xx responses retry on RETRY_DELAYS_MS; after that the load fails until the run's `ended` flag changes.
  */
 export function useRunPeaks(runId: string | null, ended: boolean): RunPeaks {
   const [entry, setEntry] = useState<PeaksEntry>({ runId: "", peaks: null, error: null, ended: false });
@@ -31,19 +34,18 @@ export function useRunPeaks(runId: string | null, ended: boolean): RunPeaks {
   useEffect(() => {
     if (!runId) return;
     // `entry` is the value from the render that scheduled this effect, which is the latest one.
-    const final = entry.error === "missing" || entry.error === "undecodable";
-    const failedThisEnd = entry.error === "failed" && entry.ended === ended;
-    if (entry.runId === runId && (entry.peaks || final || failedThisEnd)) return;
+    const sameRun = entry.runId === runId;
+    if (sameRun && (entry.peaks || entry.error === "missing" || entry.error === "undecodable")) return;
+    if (sameRun && entry.error === "failed" && entry.ended === ended) return;
 
     const ctrl = new AbortController();
     let retryTimer: number | undefined;
-    let retried = false;
 
     const settle = (next: RunPeaks) => {
       if (!ctrl.signal.aborted) setEntry({ runId, ended, ...next });
     };
 
-    const load = async (): Promise<void> => {
+    const load = async (attempt: number): Promise<void> => {
       try {
         const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/peaks?n=1200`, { signal: ctrl.signal });
         if (res.ok) {
@@ -53,20 +55,19 @@ export function useRunPeaks(runId: string | null, ended: boolean): RunPeaks {
           settle({ peaks: null, error: "missing" });
         } else if (res.status === 422) {
           settle({ peaks: null, error: "undecodable" });
-        } else {
+        } else if (res.status >= 500) {
           throw new Error(`peaks ${res.status}`);
+        } else {
+          settle({ peaks: null, error: "failed" });
         }
       } catch {
         if (ctrl.signal.aborted) return;
-        if (!retried) {
-          retried = true;
-          retryTimer = window.setTimeout(() => void load(), RETRY_MS);
-          return;
-        }
-        settle({ peaks: null, error: "failed" });
+        const delay = RETRY_DELAYS_MS[attempt];
+        if (delay === undefined) settle({ peaks: null, error: "failed" });
+        else retryTimer = window.setTimeout(() => void load(attempt + 1), delay);
       }
     };
-    void load();
+    void load(0);
     return () => {
       ctrl.abort();
       window.clearTimeout(retryTimer);
