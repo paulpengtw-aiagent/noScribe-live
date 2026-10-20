@@ -221,14 +221,26 @@ function basenameOf(path: string | null): string | null {
   return parts[parts.length - 1] || path;
 }
 
+/** Carries the server's view of the followed run (stale, or ended) into `state.run`. */
+function applyRunSummaries(state: LiveState, runs: RunSummary[]): LiveState {
+  const run = state.run;
+  if (!run) return state;
+  const summary = runs.find((r) => r.run_id === run.runId);
+  if (!summary) return state;
+  const stale = summary.status === "stale";
+  const endStatus = run.endStatus ?? endFromStatus(summary.status);
+  if (run.stale === stale && run.endStatus === endStatus) return state;
+  return { ...state, run: { ...run, stale, endStatus } };
+}
+
 export function liveReducer(state: LiveState, action: LiveAction): LiveState {
   switch (action.type) {
     case "reset":
       return { ...state, run: null };
     case "hello":
-      return { ...state, runs: action.runs, serverT: action.serverT };
+      return applyRunSummaries({ ...state, runs: action.runs, serverT: action.serverT }, action.runs);
     case "runs":
-      return { ...state, runs: action.runs };
+      return applyRunSummaries({ ...state, runs: action.runs }, action.runs);
     case "snapshot": {
       if (!action.runId) return { ...state, run: null };
       let run = emptyRun(action.runId, action.summary);
