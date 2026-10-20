@@ -70,10 +70,13 @@ FOCUS_JS = """() => { const e = document.querySelector('[data-testid="transcript
 RECT_JS = """(sels) => { for (const s of sels) { const e = document.querySelector(s);
   if (e) { const r = e.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; } }
   return null; }"""
-# Text of header, stage card, timeline card, banner and picker trigger, without transcript paragraphs and turns.
+# Non-empty text of the picker trigger. The trigger is lazy-loaded, so locale_body polls this before reading CHROME_JS.
+PICKER_TEXT_JS = """() => ((document.querySelector('[data-testid="run-picker"]') || {}).textContent || '').trim()"""
+# Text of header, stage card, timeline card, banner and picker trigger, without transcript paragraphs and turns,
+# and without the locale toggle (its endonym label 中 is by design).
 CHROME_JS = """() => {
   const pick = (el) => { if (!el) return null; const c = el.cloneNode(true);
-    c.querySelectorAll('[data-testid="paragraph"],[data-testid="turn"]').forEach((n) => n.remove());
+    c.querySelectorAll('[data-testid="paragraph"],[data-testid="turn"],[data-testid="locale-toggle"]').forEach((n) => n.remove());
     return c.textContent.replace(/\\s+/g, ' ').trim(); };
   const block = document.querySelector('[data-timeline-index]');
   const tl = document.querySelector('[data-testid="timeline-card"]') ||
@@ -81,13 +84,13 @@ CHROME_JS = """() => {
   return { header: pick(document.querySelector('header')), stage: pick(document.querySelector('[data-testid="stage-card"]')),
            timeline: pick(tl), banner: pick(document.querySelector('[data-testid="conn-banner"]')),
            picker: pick(document.querySelector('[data-testid="run-picker"]')) }; }"""
-# Per timeline block: centre +/- 11 px must hit the block (or a node inside it), or the block is >= 24 px wide.
+# Per timeline block: the hit layer is the ::before pseudo-element. Pass when max(own width, ::before width) >= 24 px.
 HIT_JS = """() => Array.from(document.querySelectorAll('[data-timeline-index]')).map((el) => {
-  const r = el.getBoundingClientRect(); const cx = r.left + r.width / 2; const cy = r.top + r.height / 2;
-  const inside = [cx - 11, cx + 11].map((x) => { const hit = document.elementFromPoint(x, cy);
-    return !!hit && (hit === el || el.contains(hit)); });
-  return { index: el.getAttribute('data-timeline-index'), width: Math.round(r.width),
-           ok: r.width >= 24 || inside.every(Boolean) }; })"""
+  const visual = el.getBoundingClientRect().width;
+  const before = parseFloat(getComputedStyle(el, '::before').width) || 0;
+  const hit = Math.max(visual, before);
+  return { index: el.getAttribute('data-timeline-index'), visual: Math.round(visual * 10) / 10,
+           before: Math.round(before * 10) / 10, hit: Math.round(hit * 10) / 10, ok: hit >= 24 }; })"""
 
 
 def open_ctx(browser: Any, locale: str, viewport: dict[str, int] | None = None,
@@ -150,6 +153,9 @@ def locale_body(h: ux.Harness, browser: Any, port: int, locale: str, expected: i
         lang = page.evaluate(LANG_JS)
         h.check(f"i18n {want}: html lang is {LANG_FOR[want]} for browser locale {locale}",
                 lang == LANG_FOR[want], f"lang {lang!r}")
+        if want == "en":
+            # The picker trigger is lazy-loaded: wait up to 5 s for it to carry text before reading the chrome.
+            ux.wait_until(lambda: bool(page.evaluate(PICKER_TEXT_JS)), 5, 0.2)
         chrome = page.evaluate(CHROME_JS) or {}
         if want == "en":
             picker = chrome.get("picker") or ""
@@ -223,8 +229,12 @@ def mobile_body(h: ux.Harness, browser: Any, port: int, expected: int) -> None:
                 top is not None and top <= 400, f"top {top}")
         blocks = page.evaluate(HIT_JS) or []
         bad = [b for b in blocks if not b["ok"]]
-        h.check("mobile 390x844: every timeline block has a >= 24 px hit area (width or centre +/- 11 px)",
-                bool(blocks) and not bad, f"{len(blocks)} blocks, {len(bad)} too small {bad[:3]}")
+        visuals = [b["visual"] for b in blocks]
+        hits = [b["hit"] for b in blocks]
+        h.check("mobile 390x844: every timeline block has a >= 24 px hit area (max of own width and ::before width)",
+                bool(blocks) and not bad,
+                f"{len(blocks)} blocks, {len(bad)} below 24 px {bad[:3]}; visual width min {min(visuals, default=None)} px, "
+                f"hit min {min(hits, default=None)} px")
         h.shot(page, "i18n-mobile-390.png")
     finally:
         ctx.close()

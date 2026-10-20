@@ -948,12 +948,13 @@ def notice_body(h: Harness, page: Any, feeds: Path, zh_run_id: str) -> None:
             f"visible {bool(notice)}, text {ntext[:60]!r}, url {page.url}")
     h.shot(page, "para-new-run-notice.png")
     try:
-        page.locator('[data-testid="new-run-notice"]').get_by_text("切換").first.click(timeout=5000)
+        # The notice has one button: the localised switch action (en: "Switch"). Click the button, not its text.
+        page.locator('[data-testid="new-run-notice"] button').first.click(timeout=5000)
         switched = wait_until(lambda: f"run={new_id}" in page.url, 5, 0.2)
     except Exception as exc:
         switched = False
-        print(f"  (切換 click failed: {type(exc).__name__})", flush=True)
-    h.check("para new-run notice: 切換 shows the new run", bool(switched), f"url {page.url}")
+        print(f"  (switch button click failed: {type(exc).__name__})", flush=True)
+    h.check("para new-run notice: the action button shows the new run", bool(switched), f"url {page.url}")
 
 
 def group_para(h: Harness, browser: Any) -> None:

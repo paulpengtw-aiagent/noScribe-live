@@ -48,6 +48,7 @@ export function TimelineCard({
   const status = timed ? t.timeline.transcribed(transcribed) : phase === "waiting" ? DASH : t.stage.phase[phase];
   return (
     <section
+      data-testid="timeline-card"
       aria-label={t.timeline.title}
       data-peaks={peaksState}
       data-frozen={frozen ? "true" : "false"}
