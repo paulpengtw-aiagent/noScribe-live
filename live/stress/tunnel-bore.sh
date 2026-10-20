@@ -8,8 +8,12 @@
 #   REMOTE_PORT  defaults to the port in PORT_FILE (default live/logs/bore-port). If that file does not
 #                exist, a random port in 20000-60000 is picked once and saved there. An explicit
 #                REMOTE_PORT is used and saved too, so later runs without it keep the same URL.
-# Stop:  send TERM to the script. It kills its bore child and exits.
-# Env:   BORE (default $REPO/.tools/bore), URL_FILE, PORT_FILE.
+# Stop:  send TERM to the script. It kills its probe and its bore child, then exits.
+# Env:   BORE (default $REPO/.tools/bore), URL_FILE, PORT_FILE, PROBE_S (default 60).
+# Dead-tunnel check: a background probe curls $URL/ every PROBE_S seconds (curl -m 15). Any HTTP
+# response, whatever the status, counts as alive; no response (refused, timeout, reset) counts as a
+# failure. After 2 failures in a row the bore child is killed and the main loop reconnects to the same
+# remote port.
 #
 # Why bore: Cloudflare quick tunnels return 200 but 0 bytes for /api/stream, even with a 2 KB pad and
 # no-transform. localhost.run's free tier rotates its URL about every 20 min.
@@ -50,6 +54,14 @@ case "${2:-}" in
     ;;
 esac
 
+PROBE_S="${PROBE_S:-60}"
+case "$PROBE_S" in
+  '' | *[!0-9]* | 0)
+    echo "PROBE_S must be a positive number of seconds, got '$PROBE_S'" >&2
+    exit 2
+    ;;
+esac
+
 if [ ! -x "$BORE" ]; then
   echo "$(ts) bore binary not found or not executable at $BORE" >&2
   echo "  download the static musl build from https://github.com/ekzhang/bore/releases into $REPO/.tools/ (or set BORE)" >&2
@@ -74,8 +86,12 @@ FIFO="$FIFO_DIR/bore-stdout"
 mkfifo "$FIFO" || exit 1
 BORE_PID=""
 SLEEP_PID=""
+PROBE_PID=""
+PROBE_TIMEOUT=15
+PROBE_FAILS_MAX=2
 
 cleanup() {
+  if [ -n "$PROBE_PID" ]; then kill "$PROBE_PID" 2>/dev/null; fi
   if [ -n "$BORE_PID" ]; then kill "$BORE_PID" 2>/dev/null; fi
   if [ -n "$SLEEP_PID" ]; then kill "$SLEEP_PID" 2>/dev/null; fi
   rm -rf "$FIFO_DIR"
@@ -89,6 +105,47 @@ trap on_signal TERM INT
 trap cleanup EXIT
 
 echo "$(ts) tunnel 127.0.0.1:$LOCAL_PORT via bore.pub on remote port $REMOTE_PORT, url file $URL_FILE"
+
+# Runs as a background subshell. It reads the public URL from URL_FILE on every probe and the bore
+# child's pid from $FIFO_DIR/bore.pid, which the main loop keeps up to date.
+probe_loop() {
+  trap - EXIT
+  local fails=0 url rc bore_pid
+  child=""
+  trap 'if [ -n "$child" ]; then kill "$child" 2>/dev/null; fi; exit 0' TERM INT
+  while true; do
+    sleep "$PROBE_S" &
+    child=$!
+    wait "$child"
+    child=""
+    url="$(head -n 1 "$URL_FILE" 2>/dev/null)"
+    if [ -z "$url" ]; then continue; fi
+    curl -s -o /dev/null -m "$PROBE_TIMEOUT" "$url/" &
+    child=$!
+    wait "$child"
+    rc=$?
+    child=""
+    if [ "$rc" -eq 0 ]; then
+      fails=0
+      continue
+    fi
+    fails=$(( fails + 1 ))
+    echo "$(ts) probe $url failed ($fails in a row, curl rc=$rc)"
+    if [ "$fails" -ge "$PROBE_FAILS_MAX" ]; then
+      echo "$(ts) public URL unreachable twice; restarting the bore client"
+      fails=0
+      if [ -s "$FIFO_DIR/bore.pid" ]; then
+        bore_pid="$(<"$FIFO_DIR/bore.pid")"
+        # TERM, then CONT: a stopped bore child still dies, since the pending TERM is delivered on resume.
+        kill -TERM "$bore_pid" 2>/dev/null
+        kill -CONT "$bore_pid" 2>/dev/null
+      fi
+    fi
+  done
+}
+probe_loop &
+PROBE_PID=$!
+echo "$(ts) probing $URL_FILE every ${PROBE_S}s"
 delay=$MIN_BACKOFF
 busy_streak=0
 while true; do
@@ -97,6 +154,7 @@ while true; do
   connected=0
   "$BORE" local "$LOCAL_PORT" --to bore.pub --port "$REMOTE_PORT" >"$FIFO" 2>&1 &
   BORE_PID=$!
+  printf '%s\n' "$BORE_PID" >"$FIFO_DIR/bore.pid"
   while IFS= read -r line || [ -n "$line" ]; do
     if [[ $line =~ $URL_RE ]]; then
       connected=1
@@ -111,6 +169,7 @@ while true; do
   wait "$BORE_PID"
   rc=$?
   BORE_PID=""
+  rm -f "$FIFO_DIR/bore.pid"
   if [ $(( $(date +%s) - start )) -gt "$STABLE_SECS" ]; then
     delay=$MIN_BACKOFF
   fi

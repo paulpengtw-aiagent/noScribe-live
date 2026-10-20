@@ -27,9 +27,36 @@ LOCKED_HTML = """<!doctype html>
 """
 
 
+def _first_value(header: str) -> str:
+    """First element of a comma-separated header, trimmed and lowercased."""
+    return header.split(",")[0].strip().lower()
+
+
+def _forwarded_proto(header: str) -> str:
+    """The ``proto=`` parameter of the first element of a RFC 7239 ``Forwarded`` header, or ""."""
+    for pair in header.split(",")[0].split(";"):
+        key, _, value = pair.partition("=")
+        if key.strip().lower() == "proto":
+            return value.strip().strip('"').lower()
+    return ""
+
+
 def _is_https(request: Request) -> bool:
-    forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
-    return request.url.scheme == "https" or forwarded == "https"
+    """True when the viewer was reached over https, directly or through a proxy that says so.
+
+    Plain-HTTP access (the bore tunnel) sends none of these, so its cookie has no Secure flag.
+    """
+    headers = request.headers
+    if request.url.scheme == "https":
+        return True
+    if _first_value(headers.get("x-forwarded-proto", "")) == "https":
+        return True
+    if _forwarded_proto(headers.get("forwarded", "")) == "https":
+        return True
+    if _first_value(headers.get("x-forwarded-ssl", "")) == "on":
+        return True
+    # Last resort: the browser's own Origin or Referer names an https page.
+    return any(headers.get(name, "").lower().startswith("https://") for name in ("origin", "referer"))
 
 
 class TokenGate:

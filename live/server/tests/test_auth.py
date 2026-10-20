@@ -86,3 +86,48 @@ def test_bearer_token_works_without_a_cookie(dirs):
     assert ok.status_code == 200
     bad = client.get("/api/runs", headers={"Authorization": "Bearer nope"}, follow_redirects=False)
     assert bad.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"X-Forwarded-Proto": "https"},
+        {"X-Forwarded-Proto": "https, http"},
+        {"Forwarded": "for=192.0.2.60;proto=https;by=203.0.113.43"},
+        {"Forwarded": "proto=https"},
+        {"X-Forwarded-Ssl": "on"},
+        {"Origin": "https://viewer.example"},
+        {"Referer": "https://viewer.example/some/page"},
+    ],
+)
+def test_each_https_indicator_gives_a_secure_cookie(dirs, headers):
+    client = make_client(dirs, TOKEN)
+    response = client.get(f"/?token={TOKEN}", headers=headers, follow_redirects=False)
+    assert response.status_code == 303
+    assert "Secure" in response.headers["set-cookie"]
+
+
+def test_an_https_request_url_gives_a_secure_cookie(dirs):
+    feeds, static = dirs
+    client = TestClient(create_app(feeds, static, token=TOKEN), base_url="https://testserver")
+    response = client.get(f"/?token={TOKEN}", follow_redirects=False)
+    assert response.status_code == 303
+    assert "Secure" in response.headers["set-cookie"]
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},
+        {"X-Forwarded-Proto": "http"},
+        {"Forwarded": "for=192.0.2.60;proto=http"},
+        {"X-Forwarded-Ssl": "off"},
+        {"Origin": "http://bore.pub:20000"},
+        {"Referer": "http://bore.pub:20000/"},
+    ],
+)
+def test_plain_http_has_no_secure_flag(dirs, headers):
+    client = make_client(dirs, TOKEN)
+    response = client.get(f"/?token={TOKEN}", headers=headers, follow_redirects=False)
+    assert response.status_code == 303
+    assert "Secure" not in response.headers["set-cookie"]

@@ -114,19 +114,26 @@ export function WaveformTimeline({
   // Roving tabindex: one block is in the tab order (the last one focused, else the active one, else the newest).
   const [focusStop, setFocusStop] = useState<number | null>(null);
   const newestIndex = segments.length > 0 ? segments[segments.length - 1].index : null;
-  const stopIndex = focusStop ?? activeIndex ?? newestIndex;
+  // A remembered index whose block has gone (the segments were replaced) must not leave the timeline with no tab stop.
+  const isBlock = (index: number | null | undefined) => index != null && segments.some((seg) => seg.index === index);
+  const stopIndex = [focusStop, activeIndex].find(isBlock) ?? newestIndex;
 
-  // Left and Right arrows move focus between blocks, so the timeline is one tab stop.
+  // Arrow keys move focus between blocks, Home and End go to the first and last, so the timeline is one tab stop.
+  // Enter and Space select through the native button click.
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    const { key } = event;
+    if (key !== "ArrowLeft" && key !== "ArrowRight" && key !== "Home" && key !== "End") return;
     const root = rootRef.current;
     if (!root) return;
     const blocks = Array.from(root.querySelectorAll<HTMLButtonElement>("[data-timeline-index]"));
     const at = blocks.indexOf(event.target as HTMLButtonElement);
     if (at < 0) return;
     event.preventDefault();
-    const step = event.key === "ArrowRight" ? 1 : -1;
-    blocks[Math.min(blocks.length - 1, Math.max(0, at + step))]?.focus();
+    let next = at;
+    if (key === "Home") next = 0;
+    else if (key === "End") next = blocks.length - 1;
+    else next = Math.min(blocks.length - 1, Math.max(0, at + (key === "ArrowRight" ? 1 : -1)));
+    blocks[next]?.focus();
   };
 
   // The canvas fills the root without padding, so the root's content box is the drawing area.
@@ -193,12 +200,11 @@ export function WaveformTimeline({
             }}
             onBlur={() => onHover(null)}
             onClick={() => onSelect(seg.index)}
-            className="absolute top-1/2 h-10 -translate-y-1/2 rounded-sm"
+            className="timeline-block absolute top-1/2 h-10 -translate-y-1/2 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
             style={{
               left: `${left}%`,
               width: `${segWidth}%`,
               backgroundColor: speakerColor(seg.speaker),
-              opacity: hoveredIndex === seg.index || isActive ? 1 : 0.55,
             }}
           />
         );

@@ -1,6 +1,6 @@
+import { lazy, Suspense } from "react";
 import { Moon, Sun } from "lucide-react";
 import { Orb } from "@/components/aicss/Orb";
-import { RunPicker } from "@/components/live/run-picker";
 import { Button } from "@/components/ui/button";
 import type { Connection } from "@/hooks/use-live-feed";
 import type { Theme } from "@/hooks/use-theme";
@@ -8,6 +8,11 @@ import type { RunState } from "@/lib/live-state";
 import { runStateBadge } from "@/lib/live-view";
 import type { RunSummary } from "@/lib/live-types";
 import { cn } from "@/lib/utils";
+
+// The run picker (popover + cmdk command palette) is its own chunk, fetched on first render.
+const RunPicker = lazy(() =>
+  import("@/components/live/run-picker").then((mod) => ({ default: mod.RunPicker })),
+);
 
 export interface TopBarProps {
   runs: RunSummary[];
@@ -33,12 +38,21 @@ export function TopBar({
   onToggleTheme,
 }: TopBarProps) {
   const badge = runStateBadge(run);
-  // "Live" only while the run is live and the feed is connected. Otherwise the badge says why not.
+  const live = badge?.status === "running";
+  // A live run whose feed is reconnecting or stale says 連線中斷 in the warning colour. "Live" needs a connected feed.
   // data-state keeps the run status either way.
+  const cutOff = live && (connection === "reconnecting" || connection === "stale");
   let badgeText = badge?.text ?? null;
-  if (badge?.status === "running" && connection !== "live") {
-    badgeText = connection === "connecting" ? "Connecting…" : "Reconnecting…";
+  if (live && connection !== "live") {
+    badgeText = cutOff ? "連線中斷" : "Connecting…";
   }
+  const dotClass = cutOff
+    ? "bg-amber-500 animate-pulse"
+    : live && connection === "live"
+      ? "bg-foreground"
+      : live
+        ? "bg-ink-3 animate-pulse"
+        : "bg-ink-3";
 
   return (
     <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center border-b border-hairline bg-background/80 backdrop-blur-xl">
@@ -65,7 +79,9 @@ export function TopBar({
             </Button>
           )}
 
-          <RunPicker runs={runs} value={runParam} onChange={onRunChange} />
+          <Suspense fallback={null}>
+            <RunPicker runs={runs} value={runParam} onChange={onRunChange} />
+          </Suspense>
 
           <div role="status" className="flex items-center gap-3 text-[13px] text-ink-2">
             <span data-testid="conn-state" data-state={connection} className="flex items-center gap-2">
@@ -74,24 +90,22 @@ export function TopBar({
               ) : (
                 <>
                   <span aria-hidden="true" className="size-1.5 animate-pulse rounded-full bg-ink-3" />
-                  {connection === "reconnecting" ? (
-                    <span>重新連線中…</span>
-                  ) : (
-                    <span className="sr-only sm:not-sr-only">Connecting</span>
-                  )}
+                  <span className={cutOff ? "sr-only" : "sr-only sm:not-sr-only"}>
+                    {connection === "reconnecting" ? "重新連線中…" : "Connecting"}
+                  </span>
                 </>
               )}
             </span>
             {badge && (
-              <span data-testid="run-state" data-state={badge.status} className="flex items-center gap-2">
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    "size-1.5 rounded-full",
-                    badge.status === "running" && connection === "live" ? "bg-foreground" : "bg-ink-3",
-                    badge.status === "running" && connection !== "live" && "animate-pulse",
-                  )}
-                />
+              <span
+                data-testid="run-state"
+                data-state={badge.status}
+                className={cn(
+                  "flex items-center gap-2 rounded-full bg-raised px-2.5 py-0.5 text-[12px] font-medium shadow-ring",
+                  cutOff ? "text-amber-700 dark:text-amber-400" : "text-foreground",
+                )}
+              >
+                <span aria-hidden="true" className={cn("size-1.5 rounded-full", dotClass)} />
                 {badgeText}
               </span>
             )}

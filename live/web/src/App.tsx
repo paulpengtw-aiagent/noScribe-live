@@ -271,7 +271,8 @@ export default function App() {
               <motion.div className="live-timeline" {...entrance(2, reduceMotion)}>
                 <TimelineCard
                   speakers={speakers}
-                  transcribed={run ? `Transcribed ${transcribed}` : DASH}
+                  phase={phase}
+                  transcribed={run ? transcribed : DASH}
                   waveform={waveform}
                   peaksError={peaksError}
                 />

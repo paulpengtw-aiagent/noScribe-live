@@ -448,7 +448,9 @@ export function TranscriptCard({
   const end = run ? describeEnd(run) : null;
 
   return (
-    <section aria-label="Transcript" className="live-card relative flex min-h-0 flex-1 flex-col overflow-hidden">
+    // Below the sm breakpoint the box has a fixed 70vh height: it stays a scroller that follows new text, and the
+    // page keeps scrolling outside it. Streaming text then cannot push the timeline card down.
+    <section aria-label="Transcript" className="live-card relative flex min-h-0 flex-1 flex-col overflow-hidden max-sm:h-[70vh] max-sm:flex-none">
       {run ? (
         <header className="shrink-0 px-6 pt-5 pb-4">
           <h2 title={name ?? undefined} className="truncate text-[22px] leading-tight font-medium tracking-[-0.02em]">
@@ -473,7 +475,7 @@ export function TranscriptCard({
       <div
         ref={scrollRef}
         role="region"
-        aria-label="Transcript text"
+        aria-label="Transcript"
         tabIndex={0}
         data-testid="transcript-scroll"
         data-following={following ? "true" : "false"}
@@ -497,16 +499,23 @@ export function TranscriptCard({
           <div ref={contentRef} className="shrink-0">
             {visibleBlocks.map(({ block, paragraphs }) => (
               <section key={block.id} data-testid="turn" className="mt-[18px] first:mt-0">
-                <header data-testid="speaker-header" className="flex items-center gap-2 text-[13px] leading-5">
+                <header
+                  data-testid="speaker-header"
+                  title={block.speaker || undefined}
+                  className="flex min-w-0 items-center gap-2 text-[13px] leading-5"
+                >
                   <span
                     aria-hidden="true"
-                    className="size-2 rounded-full"
+                    className="size-2 shrink-0 rounded-full"
                     style={{ backgroundColor: speakerColor(speakers, block.speaker) }}
                   />
-                  {block.speaker ? <span className="font-medium text-ink-2">{speakerName(block.speaker)}</span> : null}
-                  {block.speaker && speakerName(block.speaker) !== block.speaker ? (
-                    <span className="text-[12px] text-ink-3">{block.speaker}</span>
+                  {block.speaker ? (
+                    <>
+                      <span className="truncate font-medium text-ink-2">{speakerName(block.speaker)}</span>
+                      <span aria-hidden="true" className="text-ink-3">·</span>
+                    </>
                   ) : null}
+                  <span className="font-mono text-[12px] tabular-nums text-ink-3">{formatElapsed(block.start)}</span>
                 </header>
                 {paragraphs.map((paragraph: Paragraph) => (
                   <div

@@ -64,18 +64,21 @@
   --secondary: #f1f2f4;
   --secondary-foreground: #1a1a1a;
   --muted: #f4f5f7;
-  --muted-foreground: #737373;
+  --muted-foreground: #5c5c5c;
   --accent: #f4f5f7;
   --accent-foreground: #1a1a1a;
-  --destructive: #737373;
+  --destructive: #5c5c5c;
   --border: rgba(0, 0, 0, 0.08);
   --input: rgba(0, 0, 0, 0.1);
   --ring: #737373;
   --hairline: rgba(0, 0, 0, 0.08);
   --raised: #f4f5f7;
-  --ink-2: #737373;
-  --ink-3: #a1a1a1;
+  --ink-2: #5c5c5c;
+  --ink-3: #6b6b6b;
   --ink-4: #d4d4d4;
+  /* Timeline blocks: darkened and nearly opaque on light, so each reaches 3:1 against the card. */
+  --timeline-rest-opacity: 0.9;
+  --timeline-block-filter: brightness(0.6);
   --radius: 10px;
   --pill-shadow:
     0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.05), 0 2px 4px rgba(0, 0, 0, 0.02);
@@ -106,8 +109,10 @@
   --hairline: rgba(255, 255, 255, 0.08);
   --raised: #1a1a1a;
   --ink-2: #a3a3a3;
-  --ink-3: #737373;
+  --ink-3: #8f8f8f;
   --ink-4: #404040;
+  --timeline-rest-opacity: 0.85;
+  --timeline-block-filter: none;
   --pill-shadow:
     0 0 0 0.5px rgba(255, 255, 255, 0.12), 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3);
 }
@@ -176,6 +181,16 @@
   /* Fresh text settles from tertiary to ink over 600 ms. */
   .segment-fresh {
     animation: segment-settle 600ms ease-out both;
+  }
+
+  /* Timeline block: rest opacity and tone come from the theme tokens. Hovered or active blocks are opaque. */
+  .timeline-block {
+    opacity: var(--timeline-rest-opacity);
+    filter: var(--timeline-block-filter);
+  }
+  .timeline-block[data-hovered="true"],
+  .timeline-block[data-active="true"] {
+    opacity: 1;
   }
 }
 
