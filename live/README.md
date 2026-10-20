@@ -21,6 +21,14 @@ live/run.sh --rebuild    # also rebuilds the frontend in live/web
 - `HOST`: bind address (default `127.0.0.1`). `HOST=0.0.0.0` listens on all interfaces.
 - `LIVE_TOKEN`: if set, every path needs this token. Open `http://HOST:8765/?token=VALUE` once; a cookie (7 days) then keeps the browser in, and `curl -H "Authorization: Bearer VALUE"` also works. Without it nothing is gated. `python -m server --token VALUE` does the same, but `LIVE_TOKEN` keeps the value out of `ps`.
 
+## Share the viewer through a tunnel
+
+1. Start the gated viewer: `LIVE_TOKEN=... PORT=8766 SKIP_WEB_BUILD=1 live/run.sh`.
+2. Run `live/stress/tunnel.sh 8766`. It keeps an SSH reverse tunnel up and prints the public URL.
+3. Open `<URL>/?token=<token>` once; that sets a cookie.
+
+Cloudflare quick tunnels buffer SSE (Server-Sent Events), so this uses localhost.run (SSH, no account). Its URL can change on every reconnect; the current one is in `live/logs/tunnel-url.txt`.
+
 ## Transcribe alongside it
 
 From the repo root, in another terminal:

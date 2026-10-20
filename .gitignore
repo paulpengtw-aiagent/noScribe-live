@@ -42,3 +42,7 @@ diarize_x86_64_mod_unsigned
 /pyinstaller/win_installer
 /.history-memo
 AGENTS.md
+
+# noScribe Live: local tools and logs
+.tools/
+live/logs/
