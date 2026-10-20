@@ -1,7 +1,9 @@
 // How a run ended, in the words the page uses for it, and a readable form of raw CLI errors.
-// Pure: no React, no DOM, no clock. The raw error text is kept verbatim for a disclosure; the
-// humanised form is only ever shown as a headline or sub-line.
+// Pure: no React, no DOM, no clock. The words come from the caller's errors catalog (the active locale),
+// passed in as `labels`. The raw error text is kept verbatim for a disclosure; the humanised form is only
+// ever shown as a headline or sub-line.
 
+import type { ErrorsMessages } from "@/i18n/catalog/errors";
 import type { RunState } from "@/lib/live-state";
 
 export type EndKind =
@@ -30,8 +32,6 @@ export interface EndDescription {
 /** The fields `describeEnd` reads. A whole RunState satisfies it. */
 export type EndInput = Pick<RunState, "endStatus" | "stale" | "error" | "segments">;
 
-export const UNREADABLE_AUDIO_TITLE = "無法讀取音訊檔（格式不支援或檔案損毀）";
-const STALE_DETAIL = "noScribe 在完成前停止了（行程已結束）。";
 const MAX_HUMAN_CHARS = 120;
 
 /** Lower-case substrings that mean the audio could not be read. */
@@ -63,16 +63,16 @@ function isUnreadableAudio(lower: string): boolean {
 }
 
 /**
- * One readable line for a raw CLI error: a known cause in Chinese, otherwise the first line with its
+ * One readable line for a raw CLI error: a known cause (from `labels`), otherwise the first line with its
  * paths reduced to file names, trimmed to about 120 characters. Null when there is no error text.
  */
-export function humanizeError(raw: string | null | undefined): string | null {
+export function humanizeError(raw: string | null | undefined, labels: ErrorsMessages): string | null {
   const text = raw?.trim();
   if (!text) return null;
   const lower = text.toLowerCase();
-  if (isUnreadableAudio(lower)) return UNREADABLE_AUDIO_TITLE;
-  if (lower.includes("cuda out of memory")) return "GPU 記憶體不足";
-  if (lower.includes("no such file or directory")) return "找不到音訊檔";
+  if (isUnreadableAudio(lower)) return labels.endUnreadable;
+  if (lower.includes("cuda out of memory")) return labels.causeGpuMemory;
+  if (lower.includes("no such file or directory")) return labels.causeAudioNotFound;
   const firstLine = text.split(/\r?\n/, 1)[0].trim();
   return clip(stripPaths(firstLine), MAX_HUMAN_CHARS);
 }
@@ -81,25 +81,25 @@ export function humanizeError(raw: string | null | undefined): string | null {
  * What the page says about a run that has ended or gone stale. Returns null while the run is still
  * active. Precedence matches `displayPhase`: a recorded end status wins over the stale flag.
  */
-export function describeEnd(run: EndInput): EndDescription | null {
+export function describeEnd(run: EndInput, labels: ErrorsMessages): EndDescription | null {
   const rawError = run.error?.trim() || null;
 
   if (run.endStatus === "finished") {
     return run.segments.length === 0
-      ? { kind: "no-speech", title: "沒有偵測到語音", detail: null, rawError }
-      : { kind: "finished", title: "轉錄完成", detail: null, rawError };
+      ? { kind: "no-speech", title: labels.endNoSpeech, detail: null, rawError }
+      : { kind: "finished", title: labels.endFinished, detail: null, rawError };
   }
   if (run.endStatus === "canceled") {
-    return { kind: "canceled", title: "已取消", detail: null, rawError };
+    return { kind: "canceled", title: labels.endCanceled, detail: null, rawError };
   }
   if (run.endStatus === "error") {
     if (rawError && isUnreadableAudio(rawError.toLowerCase())) {
-      return { kind: "unreadable-audio", title: UNREADABLE_AUDIO_TITLE, detail: null, rawError };
+      return { kind: "unreadable-audio", title: labels.endUnreadable, detail: null, rawError };
     }
-    return { kind: "failed", title: "轉錄失敗", detail: humanizeError(rawError), rawError };
+    return { kind: "failed", title: labels.endFailed, detail: humanizeError(rawError, labels), rawError };
   }
   if (run.stale) {
-    return { kind: "stale", title: "轉錄意外中止", detail: STALE_DETAIL, rawError };
+    return { kind: "stale", title: labels.endStopped, detail: labels.endStoppedDetail, rawError };
   }
   return null;
 }

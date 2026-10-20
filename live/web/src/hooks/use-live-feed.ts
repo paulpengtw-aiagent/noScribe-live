@@ -3,19 +3,21 @@ import { INITIAL_LIVE_STATE, liveReducer } from "@/lib/live-state";
 import type { FeedPayload, HelloPayload, RunsPayload, SegmentEvent, SnapshotPayload } from "@/lib/live-types";
 
 /**
- * connecting: first attempt. live: a hello arrived. reconnecting: the stream went down and is retrying.
- * stale: nothing at all (not even a ping) arrived for STALE_AFTER_MS, so the stream was closed and is retrying.
+ * One connection state for the page.
+ * connecting: until the first hello ever. live: a hello has arrived and the stream is up.
+ * reconnecting: any loss after that (stream error, browser gave up, heartbeat timeout),
+ * until the next hello, which makes it live again. It never goes back to connecting.
  */
-export type Connection = "connecting" | "live" | "reconnecting" | "stale";
+export type Connection = "connecting" | "live" | "reconnecting";
 
-/** Reconnect progress: reconnects scheduled since the last hello, and the unix ms of the next one (null if none). */
+/** Reconnect progress: reconnect attempts since the last hello, and the unix ms of the next one (null if unknown). */
 export interface RetryInfo {
   attempt: number;
   nextAt: number | null;
 }
 
 const NO_RETRY: RetryInfo = { attempt: 0, nextAt: null };
-/** A stream that stays down this long without reopening is shown as reconnecting. */
+/** An error the browser retries by itself only counts as a loss if the stream stays down this long. */
 const DOWN_AFTER_MS = 2000;
 /** Retry delays for a stream the browser gave up on: 1 s, 2 s, 4 s, ... capped at 10 s. */
 const RETRY_BASE_MS = 1000;
@@ -71,18 +73,13 @@ function parse<T>(ev: MessageEvent<string>): T | null {
  * Each connect starts with hello and a snapshot, so every snapshot simply replaces
  * the run state and feed lines that were already applied are dropped by seq.
  * The run state is kept across connection loss; it is reset only when the run changes.
+ * `lastUpdateT` is the epoch seconds of the last message of any type (null before the first).
  */
 export function useLiveFeed(runParam: string) {
   const [state, dispatch] = useReducer(liveReducer, INITIAL_LIVE_STATE);
-  // The link state records which run id it belongs to, so a switch reads as "connecting" at once.
-  const [link, setLink] = useState<{ runParam: string; state: Connection; retry: RetryInfo }>({
-    runParam,
-    state: "connecting",
-    retry: NO_RETRY,
-  });
-  const current = link.runParam === runParam;
-  const connection: Connection = current ? link.state : "connecting";
-  const retry: RetryInfo = current ? link.retry : NO_RETRY;
+  const [connection, setConnection] = useState<Connection>("connecting");
+  const [retry, setRetry] = useState<RetryInfo>(NO_RETRY);
+  const [lastUpdateT, setLastUpdateT] = useState<number | null>(null);
 
   useEffect(() => {
     let closed = false;
@@ -92,26 +89,29 @@ export function useLiveFeed(runParam: string) {
     let staleTimer: number | undefined;
     let failures = 0;
     let attempts = 0;
-    const setConnection = (next: Connection, nextAt: number | null = null) =>
-      setLink({ runParam, state: next, retry: { attempt: attempts, nextAt } });
+
+    const showReconnecting = (nextAt: number | null) => {
+      setConnection("reconnecting");
+      setRetry({ attempt: attempts, nextAt });
+    };
 
     const cancelDownTimer = () => {
       window.clearTimeout(downTimer);
       downTimer = undefined;
     };
 
-    // Any error means the stream is down. It only shows as reconnecting if it
-    // does not reopen within DOWN_AFTER_MS; only a new hello clears it.
+    // An error the browser retries by itself. It becomes a loss only if it does not reopen within DOWN_AFTER_MS.
     const markDown = () => {
       if (downTimer !== undefined) return;
       downTimer = window.setTimeout(() => {
         downTimer = undefined;
-        setConnection("reconnecting");
+        attempts += 1;
+        showReconnecting(null);
       }, DOWN_AFTER_MS);
     };
 
     // Ends the current stream and reconnects after the backoff delay. One reconnect is pending at a time.
-    function reconnectLater(next: Connection) {
+    function reconnectLater() {
       window.clearTimeout(retryTimer);
       window.clearTimeout(staleTimer);
       cancelDownTimer();
@@ -120,15 +120,15 @@ export function useLiveFeed(runParam: string) {
       const delay = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** failures);
       failures += 1;
       attempts += 1;
-      setConnection(next, Date.now() + delay);
+      showReconnecting(Date.now() + delay);
       retryTimer = window.setTimeout(connect, delay);
     }
 
     function onStale() {
-      if (!closed) reconnectLater("stale");
+      if (!closed) reconnectLater();
     }
 
-    // Every message of any type (ping included) re-arms the staleness timer.
+    // Every message of any type (ping included) re-arms the staleness timer. Opening a stream is not a message.
     function armStale() {
       window.clearTimeout(staleTimer);
       staleTimer = window.setTimeout(onStale, window.__NSLIVE_HEARTBEAT_TIMEOUT_MS ?? STALE_AFTER_MS);
@@ -143,13 +143,14 @@ export function useLiveFeed(runParam: string) {
       const on = (type: string, handle: (ev: MessageEvent<string>) => void) =>
         es.addEventListener(type, (ev) => {
           armStale();
+          setLastUpdateT(Date.now() / 1000);
           handle(ev as MessageEvent<string>);
         });
       es.onopen = () => cancelDownTimer();
       es.onerror = () => {
         if (es.readyState === EventSource.CLOSED) {
           // The browser gives up after a non-200 response, so retry by hand with backoff.
-          reconnectLater("reconnecting");
+          reconnectLater();
           return;
         }
         markDown();
@@ -162,6 +163,7 @@ export function useLiveFeed(runParam: string) {
         failures = 0;
         attempts = 0;
         setConnection("live");
+        setRetry(NO_RETRY);
         dispatch({ type: "hello", serverT: d.server_t, runs: d.runs });
       });
       on("snapshot", (ev) => {
@@ -192,5 +194,5 @@ export function useLiveFeed(runParam: string) {
     };
   }, [runParam]);
 
-  return { state, connection, retry };
+  return { state, connection, retry, lastUpdateT };
 }

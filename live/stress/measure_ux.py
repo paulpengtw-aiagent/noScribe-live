@@ -3,7 +3,11 @@
 bundle, and screenshots. Prints one JSON summary and writes it to OUTDIR/summary.json.
 
     /usr/bin/python3 -I live/stress/measure_ux.py --static DIR --out OUTDIR [--axe PATH] [--port 8775]
-        [--python PY] [--work DIR]
+        [--python PY] [--work DIR] [--locale en|zh-TW]
+
+  --locale  sets localStorage key noscribe-live-locale (src/i18n) before the app loads, so axe and the
+           shots run in that UI language and the html lang is checked. Default: no key is set (the
+           browser language decides, en-US in Playwright). Run once per locale with its own --out.
 
   axe      axe-core (violations only) on a FINISHED run, replayed at speed 8 first. Three configs:
            1440x900 dark, 1440x900 light, 390x844 dark. The theme is set through the localStorage key
@@ -45,6 +49,8 @@ DEFAULT_AXE = "/tmp/nslive-r5/axe.min.js"
 FEEDS_SRC = Path("/workspace/noScribe-live/live/feeds")  # read only
 DEMO_NAME = "20261020-052449-demo-en-zh.ndjson"          # 50 segments, 2 speakers, EN + ZH
 THEME_KEY = "noscribe-live-theme"                        # src/hooks/use-theme.ts
+LOCALE_KEY = "noscribe-live-locale"                      # src/i18n (values: en | zh-TW)
+LOCALES = ("en", "zh-TW")
 DEFAULT_PORT = 8775
 DESKTOP = {"width": 1440, "height": 900}
 PHONE = {"width": 390, "height": 844}
@@ -133,6 +139,17 @@ CLS_READ_JS = "() => window.__nsCLS || null"
 
 def theme_script(theme: str) -> str:
     return "(() => { try { localStorage.setItem('%s', '%s'); } catch (e) {} })();" % (THEME_KEY, theme)
+
+
+def locale_script(locale: str) -> str:
+    return "(() => { try { localStorage.setItem('%s', '%s'); } catch (e) {} })();" % (LOCALE_KEY, locale)
+
+
+LANG_JS = "() => document.documentElement.getAttribute('lang')"
+
+
+def page_scripts(base: list[str], locale: str | None) -> list[str]:
+    return base + ([locale_script(locale)] if locale else [])
 
 
 def _exit_on_term(signum: int, _frame: Any) -> None:
@@ -415,7 +432,7 @@ class Rig:
 
 # ---- measures --------------------------------------------------------------------------------------
 def measure_finished(rig: Rig, browser: Any, src: Path, axe_path: Path, out: Path,
-                     summary: dict[str, Any]) -> None:
+                     summary: dict[str, Any], locale: str | None = None) -> None:
     """axe-core on the finished run (three configs), then dark screenshots at two phone sizes."""
     print("== finished run: axe-core and screenshots", flush=True)
     feeds = rig.feeds_dir("finished")
@@ -432,7 +449,7 @@ def measure_finished(rig: Rig, browser: Any, src: Path, axe_path: Path, out: Pat
         axe: dict[str, Any] = {}
         for label, viewport, theme in AXE_CONFIGS:
             errs: list[str] = []
-            ctx, page = open_page(browser, viewport, [INIT_JS, theme_script(theme)], errs)
+            ctx, page = open_page(browser, viewport, page_scripts([INIT_JS, theme_script(theme)], locale), errs)
             try:
                 page.goto(rig.base, wait_until="domcontentloaded", timeout=30000)
                 state = wait_finished(page, run_id, expected)
@@ -442,6 +459,8 @@ def measure_finished(rig: Rig, browser: Any, src: Path, axe_path: Path, out: Pat
                     "viewport": f"{viewport['width']}x{viewport['height']}",
                     "theme": theme,
                     "theme_applied": page.evaluate(THEME_READ_JS),
+                    "locale": locale or "default",
+                    "html_lang": page.evaluate(LANG_JS),
                     **state,
                     **summarize_axe(violations),
                     "page_errors": errs[:3],
@@ -455,7 +474,7 @@ def measure_finished(rig: Rig, browser: Any, src: Path, axe_path: Path, out: Pat
 
         shots: list[str] = []
         for viewport in SHOT_VIEWPORTS:
-            ctx, page = open_page(browser, viewport, [INIT_JS, theme_script("dark")], [])
+            ctx, page = open_page(browser, viewport, page_scripts([INIT_JS, theme_script("dark")], locale), [])
             try:
                 page.goto(rig.base, wait_until="domcontentloaded", timeout=30000)
                 wait_finished(page, run_id, expected)
@@ -471,7 +490,7 @@ def measure_finished(rig: Rig, browser: Any, src: Path, axe_path: Path, out: Pat
         rig.stop(server)
 
 
-def measure_cls(rig: Rig, browser: Any, src: Path, summary: dict[str, Any]) -> None:
+def measure_cls(rig: Rig, browser: Any, src: Path, summary: dict[str, Any], locale: str | None = None) -> None:
     """CLS at 1440x900 with the page open before a replay (speed 2, max-gap 2) starts."""
     print("== CLS during a replay (1440x900)", flush=True)
     feeds = rig.feeds_dir("cls")
@@ -480,7 +499,7 @@ def measure_cls(rig: Rig, browser: Any, src: Path, summary: dict[str, Any]) -> N
     replay = None
     try:
         errs: list[str] = []
-        ctx, page = open_page(browser, DESKTOP, [INIT_JS, CLS_JS], errs)
+        ctx, page = open_page(browser, DESKTOP, page_scripts([INIT_JS, CLS_JS], locale), errs)
         try:
             page.goto(rig.base, wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(1000)  # the page is open and settled before the replay starts
@@ -496,6 +515,7 @@ def measure_cls(rig: Rig, browser: Any, src: Path, summary: dict[str, Any]) -> N
         summary["cls"] = {
             "viewport": "1440x900",
             "theme": "default",
+            "locale": locale or "default",
             "replay": {"speed": 2, "max_gap": 2, "estimated_s": expected_s, "run_id": run_id},
             "run_end_seen": ended,
             "observer": data.get("observer"),
@@ -531,6 +551,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--python", default=DEFAULT_PY, help="python with the server deps (default: live venv)")
     parser.add_argument("--work", default=None, help="scratch dir for feeds, logs and the source copy "
                                                      "(default: OUTDIR/work)")
+    parser.add_argument("--locale", choices=LOCALES, default=None,
+                        help="UI locale set in localStorage before load (default: none, browser language decides)")
     return parser.parse_args(argv)
 
 
@@ -568,6 +590,7 @@ def main(argv: list[str] | None = None) -> int:
         "work": str(work),
         "source": str(FEEDS_SRC / DEMO_NAME),
         "source_segments": expected,
+        "locale": args.locale or "default",
     }
     errors: list[dict[str, str]] = []
     rig = Rig(args.python, args.port, static, work)
@@ -581,11 +604,11 @@ def main(argv: list[str] | None = None) -> int:
             browser = pw.chromium.launch()
             try:
                 try:
-                    measure_finished(rig, browser, src, axe_path, out, summary)
+                    measure_finished(rig, browser, src, axe_path, out, summary, args.locale)
                 except Exception as exc:
                     record(errors, "finished", exc)
                 try:
-                    measure_cls(rig, browser, src, summary)
+                    measure_cls(rig, browser, src, summary, args.locale)
                 except Exception as exc:
                     record(errors, "cls", exc)
             finally:

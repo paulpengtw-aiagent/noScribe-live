@@ -10,6 +10,7 @@ import {
 } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowDown, Check, Copy } from "lucide-react";
+import { useI18n } from "@/i18n";
 import { StreamingTextInline } from "@/components/aicss/streaming-text-inline";
 import { ErrorDetails } from "@/components/live/error-details";
 import { Button } from "@/components/ui/button";
@@ -89,6 +90,10 @@ export interface TranscriptCardProps {
   activeIndex?: number | null;
   /** Called when the reader clicks a segment's text. */
   onSelect?: (index: number) => void;
+  /** The page has frozen the feed: no caret and no reveal; pending text is shown at once. */
+  frozen?: boolean;
+  /** Wall-clock ms of the newest feed update, or null. The page passes it; the card does not read it yet. */
+  lastUpdateT?: number | null;
   ref?: Ref<TranscriptHandle>;
 }
 
@@ -197,10 +202,11 @@ const SegmentSpan = memo(function SegmentSpan({
 });
 
 function OverlapTag({ speaker }: { speaker: string }) {
+  const { t } = useI18n();
   const speakerName = useSpeakerName();
   return (
     <span className="mr-1.5 inline-block rounded-full px-1.5 align-[2px] text-[11px] leading-4 text-ink-2 shadow-ring">
-      overlap · {speakerName(speaker)}
+      {t.transcript.overlap(speakerName(speaker))}
     </span>
   );
 }
@@ -217,6 +223,7 @@ function EndNotice({ end }: { end: EndDescription }) {
 }
 
 function CommandBlock() {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -246,7 +253,7 @@ function CommandBlock() {
           className="rounded-full shadow-ring"
         >
           {copied ? <Check /> : <Copy />}
-          {copied ? "Copied" : "Copy"}
+          {copied ? t.transcript.copied : t.transcript.copy}
         </Button>
       </div>
     </div>
@@ -261,8 +268,10 @@ export function TranscriptCard({
   onHover,
   activeIndex = null,
   onSelect,
+  frozen = false,
   ref,
 }: TranscriptCardProps) {
+  const { t } = useI18n();
   const reduce = useReducedMotion() ?? false;
   const speakerName = useSpeakerName();
   const toDisplay = useZhTw();
@@ -308,8 +317,8 @@ export function TranscriptCard({
     [queueable, segments, doneThrough],
   );
   const oldest = pendingQueue.length > 0 ? pendingQueue[0] : null;
-  // Behind by too much: the pending text is shown at once, and the reveal state catches up.
-  const behind = oldest !== null && (pendingQueue.length > FLUSH_SEGMENTS || now - oldest.recvAt > FLUSH_MS);
+  // Behind by too much, or frozen: the pending text is shown at once, and the reveal state catches up.
+  const behind = oldest !== null && (frozen || pendingQueue.length > FLUSH_SEGMENTS || now - oldest.recvAt > FLUSH_MS);
   // Adjusts the reveal state during render (React's pattern for state that follows props); the next render has nothing pending.
   if (behind) setRevealed({ runId, through: highestLiveIndex(segments) });
   const queueing = queueable && !behind;
@@ -319,7 +328,7 @@ export function TranscriptCard({
   // A segment whose turn has not come yet: nothing is drawn for it.
   const isWaiting = (segment: Segment) => queueing && segment.index !== headIndex && isQueued(segment, doneThrough);
   // The caret sits on the segment revealing now, or on the last segment while the run is live and idle.
-  const caretIndex = head ? head.index : active ? lastIndex : null;
+  const caretIndex = frozen ? null : head ? head.index : active ? lastIndex : null;
   // The queue's last segment is due BURST_MS after its arrival. A finished run drains the queue within FINISH_MS.
   const revealMs = head
     ? active
@@ -348,7 +357,7 @@ export function TranscriptCard({
       const lines: SpokenLine[] = [];
       for (const segment of fresh) {
         const text = toDisplay(segment.text.trim());
-        if (text) lines.push({ key: segment.seq, text: segment.speaker ? `${speakerName(segment.speaker)}: ${text}` : text });
+        if (text) lines.push({ key: segment.seq, text: segment.speaker ? t.transcript.srLine(speakerName(segment.speaker), text) : text });
       }
       const seen = new Set(announcer.seen);
       for (const segment of fresh) seen.add(segment.seq);
@@ -445,12 +454,12 @@ export function TranscriptCard({
   // The jump button shows whenever the view is not at the newest text, live or ended.
   const showJump = !following && segments.length > 0;
   // How the run ended, or null while it is still running.
-  const end = run ? describeEnd(run) : null;
+  const end = run ? describeEnd(run, t.errors) : null;
 
   return (
     // Below the sm breakpoint the box has a fixed 70vh height: it stays a scroller that follows new text, and the
     // page keeps scrolling outside it. Streaming text then cannot push the timeline card down.
-    <section aria-label="Transcript" className="live-card relative flex min-h-0 flex-1 flex-col overflow-hidden max-sm:h-[70vh] max-sm:flex-none">
+    <section aria-label={t.transcript.transcriptLabel} className="live-card relative flex min-h-0 flex-1 flex-col overflow-hidden max-sm:h-[70vh] max-sm:flex-none">
       {run ? (
         <header className="shrink-0 px-6 pt-5 pb-4">
           <h2 title={name ?? undefined} className="truncate text-[22px] leading-tight font-medium tracking-[-0.02em]">
@@ -465,7 +474,7 @@ export function TranscriptCard({
             {run.model ? (
               <>
                 {run.outputName ? <span aria-hidden="true" className="text-ink-3">·</span> : null}
-                <span className="shrink-0 whitespace-nowrap">Model {run.model}</span>
+                <span className="shrink-0 whitespace-nowrap">{t.transcript.model(run.model)}</span>
               </>
             ) : null}
           </div>
@@ -475,7 +484,7 @@ export function TranscriptCard({
       <div
         ref={scrollRef}
         role="region"
-        aria-label="Transcript"
+        aria-label={t.transcript.transcriptLabel}
         tabIndex={0}
         data-testid="transcript-scroll"
         data-following={following ? "true" : "false"}
@@ -484,14 +493,14 @@ export function TranscriptCard({
         onTouchStart={stopFollowing}
         onTouchMove={stopFollowing}
         onKeyDown={onKeyDown}
-        className="quiet-scroll flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pb-8 outline-none focus-visible:shadow-ring"
+        className="quiet-scroll flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pb-8 outline-none focus-visible:ring-2 ring-ring ring-offset-2 ring-offset-card"
         style={{ maskImage: edgeMask(edges), WebkitMaskImage: edgeMask(edges) }}
       >
         {!run ? (
           <div className="m-auto flex w-full max-w-[600px] flex-col items-center gap-5 py-10 text-center">
-            <h2 className="text-[28px] leading-tight font-medium tracking-[-0.025em]">Waiting for a transcription</h2>
+            <h2 className="text-[28px] leading-tight font-medium tracking-[-0.025em]">{t.transcript.waiting}</h2>
             <p className="text-[15px] leading-relaxed text-ink-2">
-              Start a noScribe run with --live-feed and it appears here as it is transcribed.
+              {t.transcript.waitingHint}
             </p>
             <CommandBlock />
           </div>
@@ -510,21 +519,23 @@ export function TranscriptCard({
                     style={{ backgroundColor: speakerColor(speakers, block.speaker) }}
                   />
                   {block.speaker ? (
+                    <span className="truncate font-medium text-ink-2">{speakerName(block.speaker)}</span>
+                  ) : null}
+                  {formatElapsed(paragraphs[0].start) !== formatElapsed(block.start) ? (
                     <>
-                      <span className="truncate font-medium text-ink-2">{speakerName(block.speaker)}</span>
-                      <span aria-hidden="true" className="text-ink-3">·</span>
+                      {block.speaker ? <span aria-hidden="true" className="text-ink-3">·</span> : null}
+                      <span className="font-mono text-[12px] tabular-nums text-ink-3">{formatElapsed(block.start)}</span>
                     </>
                   ) : null}
-                  <span className="font-mono text-[12px] tabular-nums text-ink-3">{formatElapsed(block.start)}</span>
                 </header>
                 {paragraphs.map((paragraph: Paragraph) => (
                   <div
                     key={paragraph.id}
                     data-testid="paragraph"
                     data-start={paragraph.start}
-                    className="mt-2 grid grid-cols-[5rem_minmax(0,1fr)] gap-x-3"
+                    className="mt-2 flex flex-col gap-0.5 sm:grid sm:grid-cols-[5rem_minmax(0,1fr)] sm:gap-x-3 sm:gap-y-0"
                   >
-                    <span data-testid="paragraph-time" className="pt-[5px] font-mono text-[12px] leading-5 tabular-nums text-ink-3">
+                    <span data-testid="paragraph-time" className="font-mono text-[12px] leading-5 tabular-nums text-ink-3 sm:pt-[5px]">
                       {formatElapsed(paragraph.start)}
                     </span>
                     <p className="max-w-[70ch] text-pretty text-[17px] leading-[1.7] text-foreground">
@@ -563,7 +574,7 @@ export function TranscriptCard({
           </div>
         ) : active ? (
           <p className="m-auto px-2 py-10 text-[15px] text-ink-2">
-            Segments appear here as soon as the model hears speech.
+            {t.transcript.segmentsHint}
           </p>
         ) : end ? (
           <EndNotice end={end} />
@@ -590,7 +601,7 @@ export function TranscriptCard({
             className="absolute right-6 bottom-5 inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3.5 text-[13px] font-medium text-secondary-foreground shadow-ring hover:bg-raised"
           >
             <ArrowDown className="size-3.5" aria-hidden="true" />
-            {active ? "Jump to live" : "Jump to end"}
+            {active ? t.transcript.jumpToLive : t.transcript.jumpToEnd}
           </motion.button>
         ) : null}
       </AnimatePresence>

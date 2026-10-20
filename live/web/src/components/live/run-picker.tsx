@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useNow } from "@/hooks/use-now";
-import { DASH, formatDateTime, formatDay, formatElapsed } from "@/lib/format";
+import { useI18n } from "@/i18n";
+import { DASH, formatDateTime, formatDay, formatDayHeading, formatElapsed } from "@/lib/format";
 import { FOLLOW_NEWEST, isLiveSummary, runName } from "@/lib/live-view";
 import type { RunStatus, RunSummary } from "@/lib/live-types";
 import { cn } from "@/lib/utils";
@@ -18,14 +19,6 @@ const PICKER_STATUS: Record<RunStatus, PickerStatus> = {
   error: "failed",
   stale: "stopped",
   canceled: "canceled",
-};
-
-const STATUS_LABEL: Record<PickerStatus, string> = {
-  live: "Live",
-  finished: "Finished",
-  failed: "Failed",
-  stopped: "Stopped",
-  canceled: "Canceled",
 };
 
 /** Dot and label colours per status. Live pulses; canceled is a hollow grey dot. */
@@ -45,7 +38,10 @@ function pickerStatus(run: RunSummary): PickerStatus {
 }
 
 interface RunDay {
+  /** Local calendar day as YYYY-MM-DD (or DASH), the group's key. */
   day: string;
+  /** Start time of the group's first run; null for runs without one. Used for the locale heading. */
+  startedT: number | null;
   runs: RunSummary[];
 }
 
@@ -57,15 +53,15 @@ function groupRunsByDay(runs: readonly RunSummary[]): RunDay[] {
     const day = run.started_t == null ? DASH : formatDay(run.started_t);
     const last = days[days.length - 1];
     if (last && last.day === day) last.runs.push(run);
-    else days.push({ day, runs: [run] });
+    else days.push({ day, startedT: run.started_t, runs: [run] });
   }
   return days;
 }
 
-/** Filter by file name, run id or status. `query` is already trimmed and lower-cased. */
-function matchesQuery(run: RunSummary, query: string): boolean {
+/** Filter by file name, run id, or the status word (in the shown language or raw). `query` is trimmed and lower-cased. */
+function matchesQuery(run: RunSummary, query: string, statusWord: string): boolean {
   if (!query) return true;
-  const haystack = [runName(run), run.run_id, STATUS_LABEL[pickerStatus(run)], run.status].join(" ").toLowerCase();
+  const haystack = [runName(run), run.run_id, statusWord, run.status].join(" ").toLowerCase();
   return haystack.includes(query);
 }
 
@@ -73,10 +69,6 @@ function matchesQuery(run: RunSummary, query: string): boolean {
 function durationText(run: RunSummary, status: PickerStatus, nowMs: number): string {
   if (status === "live") return run.started_t == null ? DASH : formatElapsed(nowMs / 1000 - run.started_t);
   return formatElapsed(run.duration);
-}
-
-function segmentText(count: number): string {
-  return count === 1 ? "1 segment" : `${count} segments`;
 }
 
 export interface RunPickerProps {
@@ -91,12 +83,16 @@ export interface RunPickerProps {
  * runs grouped by day. Built on the shadcn Popover and Command (cmdk), which handle the keyboard.
  */
 export function RunPicker({ runs, value, onChange }: RunPickerProps) {
+  const { locale, t } = useI18n();
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   // The clock ticks only while the list is open, for the elapsed time of live runs.
   const now = useNow(open);
   const query = filter.trim().toLowerCase();
-  const days = useMemo(() => groupRunsByDay(runs.filter((run) => matchesQuery(run, query))), [runs, query]);
+  const days = useMemo(
+    () => groupRunsByDay(runs.filter((run) => matchesQuery(run, query, t.picker.status[pickerStatus(run)]))),
+    [runs, query, t],
+  );
   const visible = days.reduce((count, day) => count + day.runs.length, 0);
   const chosen = value === FOLLOW_NEWEST ? null : (runs.find((run) => run.run_id === value) ?? null);
 
@@ -130,8 +126,8 @@ export function RunPicker({ runs, value, onChange }: RunPickerProps) {
             </span>
           ) : value === FOLLOW_NEWEST ? (
             <span className="min-w-0 flex-1 truncate text-left">
-              <span className="sm:hidden">Follow newest</span>
-              <span className="hidden sm:inline">Follow newest run</span>
+              <span className="sm:hidden">{t.picker.followNewestShort}</span>
+              <span className="hidden sm:inline">{t.picker.followNewest}</span>
             </span>
           ) : (
             <span className="min-w-0 flex-1 truncate text-left">{value}</span>
@@ -144,8 +140,8 @@ export function RunPicker({ runs, value, onChange }: RunPickerProps) {
         <Command shouldFilter={false} className="rounded-[14px]">
           <CommandInput
             data-testid="run-filter"
-            aria-label="Filter runs"
-            placeholder="Filter by file, run id or status"
+            aria-label={t.picker.filterRuns}
+            placeholder={t.picker.filterPlaceholder}
             value={filter}
             onValueChange={setFilter}
           />
@@ -155,11 +151,16 @@ export function RunPicker({ runs, value, onChange }: RunPickerProps) {
                 aria-hidden="true"
                 className={cn("size-4 shrink-0", value === FOLLOW_NEWEST ? "opacity-100" : "opacity-0")}
               />
-              <span>Follow newest run</span>
+              <span>{t.picker.followNewest}</span>
             </CommandItem>
 
             {days.map((group) => (
-              <CommandGroup key={group.day} heading={group.day} data-testid="run-group" data-day={group.day}>
+              <CommandGroup
+                key={group.day}
+                heading={group.startedT == null ? t.picker.noStartTime : formatDayHeading(group.startedT, locale)}
+                data-testid="run-group"
+                data-day={group.day}
+              >
                 {group.runs.map((run) => {
                   const status = pickerStatus(run);
                   const style = STATUS_STYLE[status];
@@ -177,14 +178,14 @@ export function RunPicker({ runs, value, onChange }: RunPickerProps) {
                       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                         <span className="flex min-w-0 items-center gap-2">
                           <span className="min-w-0 flex-1 truncate font-medium">{runName(run)}</span>
-                          <span className={cn("shrink-0 text-[12px]", style.text)}>{STATUS_LABEL[status]}</span>
+                          <span className={cn("shrink-0 text-[12px]", style.text)}>{t.picker.status[status]}</span>
                         </span>
                         <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-[12px] tabular-nums text-ink-2">
                           <span>{formatDateTime(run.started_t)}</span>
                           <span aria-hidden="true">·</span>
                           <span>{durationText(run, status, now)}</span>
                           <span aria-hidden="true">·</span>
-                          <span>{segmentText(run.segments)}</span>
+                          <span>{t.picker.segments(run.segments)}</span>
                         </span>
                       </span>
                     </CommandItem>
@@ -195,7 +196,7 @@ export function RunPicker({ runs, value, onChange }: RunPickerProps) {
 
             {visible === 0 && (
               <p className="px-3 py-6 text-center text-[13px] text-ink-2">
-                {runs.length === 0 ? "No runs yet." : `No runs match "${filter.trim()}".`}
+                {runs.length === 0 ? t.picker.noRuns : t.picker.noMatch(filter.trim())}
               </p>
             )}
           </CommandList>

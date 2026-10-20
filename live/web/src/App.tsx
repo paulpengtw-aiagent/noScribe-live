@@ -17,6 +17,7 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import { useNow } from "@/hooks/use-now";
 import { useRunPeaks } from "@/hooks/use-run-peaks";
 import { useTheme } from "@/hooks/use-theme";
+import { useI18n, type Messages } from "@/i18n";
 import { DASH } from "@/lib/format";
 import {
   displayPhase,
@@ -74,21 +75,26 @@ function readRunParam(): string {
   return new URLSearchParams(window.location.search).get("run") || FOLLOW_NEWEST;
 }
 
-/** Tab title: the shown run's file and how it stands, so a background tab says what is happening. */
-function documentTitle(run: RunState | null, connection: Connection): string {
-  if (!run) return "noScribe Live";
-  const name = run.audioName || run.runId;
-  if (run.endStatus === "finished") return `✓ Finished – ${name}`;
-  if (run.endStatus === "error") return `✕ Failed – ${name}`;
-  if (run.endStatus === "canceled") return `○ Canceled – ${name}`;
-  if (run.stale || connection === "stale") return `■ Stopped – ${name}`;
-  if (connection === "live") return `● Live – ${name}`;
-  return "noScribe Live";
+/**
+ * Tab title: the shown run's file and how it stands, so a background tab says what is happening.
+ * A lost connection is never reported as the run having stopped.
+ */
+function documentTitle(run: RunState | null, connection: Connection, hasHello: boolean, t: Messages["app"]): string {
+  const name = run ? run.audioName || run.runId : null;
+  if (hasHello && connection !== "live") return t.titleReconnecting(name ?? t.titleIdle);
+  if (name === null) return t.titleIdle;
+  if (run?.endStatus === "finished") return t.titleFinished(name);
+  if (run?.endStatus === "error") return t.titleFailed(name);
+  if (run?.endStatus === "canceled") return t.titleCanceled(name);
+  if (run?.stale) return t.titleStopped(name);
+  if (connection === "live") return t.titleLive(name);
+  return t.titleIdle;
 }
 
 export default function App() {
   const [runParam, setRunParam] = useState(readRunParam);
-  const { state, connection, retry } = useLiveFeed(runParam);
+  const { state, connection, retry, lastUpdateT } = useLiveFeed(runParam);
+  const { t } = useI18n();
   const { theme, toggle: toggleTheme } = useTheme();
   const wide = useMediaQuery(WIDE_QUERY);
   const reduceMotion = useReducedMotion() ?? false;
@@ -96,7 +102,10 @@ export default function App() {
   // A run that has no start event is a stale or unknown id: show the waiting state.
   const run: RunState | null = state.run && state.run.startedT !== null ? state.run : null;
   const active = isRunActive(run);
+  // Frozen while the stream is down: the run panel stops at the last message instead of counting on.
+  const frozen = connection !== "live" && state.helloed;
   const now = useNow(active, 250);
+  const clockNow = frozen && lastUpdateT !== null ? lastUpdateT * 1000 : now;
   // Offers a switch to another still-running run; never moves the user off a run they picked.
   const otherLive = otherLiveRun(state.runs, run?.runId ?? null, active, runParam === FOLLOW_NEWEST);
   // The waveform is requested as soon as the run's audio is known, live or not.
@@ -120,8 +129,8 @@ export default function App() {
   }, [runParam]);
 
   useEffect(() => {
-    document.title = documentTitle(run, connection);
-  }, [run, connection]);
+    document.title = documentTitle(run, connection, state.helloed, t.app);
+  }, [run, connection, state.helloed, t]);
 
   // A run that starts while an explicit run is shown gets a notice. It never switches by itself.
   const seenRuns = useRef<Set<string> | null>(null);
@@ -135,10 +144,10 @@ export default function App() {
       if (seenRuns.current.has(item.run_id)) continue;
       seenRuns.current.add(item.run_id);
       if (item.status === "running" && runParam !== FOLLOW_NEWEST) {
-        notifyNewRun(runName(item), () => setRunParam(item.run_id));
+        notifyNewRun(t.app.newRunStarted(runName(item)), t.app.newRunSwitch, () => setRunParam(item.run_id));
       }
     }
-  }, [state.helloed, state.runs, runParam]);
+  }, [state.helloed, state.runs, runParam, t]);
 
   const phase = displayPhase(run);
   const segments = run?.segments;
@@ -158,8 +167,8 @@ export default function App() {
   const progress = progressFraction(run);
 
   const latency = useMemo(() => latencyStats(run), [run]);
-  const rtf = realTimeFactor(run, now);
-  const elapsed = elapsedSeconds(run, now);
+  const rtf = realTimeFactor(run, clockNow);
+  const elapsed = elapsedSeconds(run, clockNow);
 
   const envelope = useMemo(
     () => envelopeFor(peaks, duration, startOffset, lastSegment),
@@ -203,7 +212,7 @@ export default function App() {
     onHover: setHoveredIndex,
     activeIndex,
     onSelect: selectSegment,
-    live: active,
+    live: active && !frozen,
   };
 
   return (
@@ -220,7 +229,7 @@ export default function App() {
             theme={theme}
             onToggleTheme={toggleTheme}
           />
-          <ConnBanner connection={connection} retry={retry} />
+          <ConnBanner connection={connection} retry={retry} lastUpdateT={lastUpdateT} />
           <main className="live-page">
             {!state.helloed ? (
               <LoadingSkeleton />
@@ -241,6 +250,8 @@ export default function App() {
                   latency={latency}
                   rtf={rtf}
                   elapsed={elapsed}
+                  frozen={frozen}
+                  lastUpdateT={lastUpdateT}
                 />
               </motion.div>
 
@@ -258,7 +269,9 @@ export default function App() {
                   ref={transcriptRef}
                   run={run}
                   speakers={speakers}
-                  now={now}
+                  now={clockNow}
+                  frozen={frozen}
+                  lastUpdateT={lastUpdateT}
                   hoveredIndex={hoveredIndex}
                   onHover={setHoveredIndex}
                   activeIndex={activeIndex}
@@ -275,6 +288,8 @@ export default function App() {
                   transcribed={run ? transcribed : DASH}
                   waveform={waveform}
                   peaksError={peaksError}
+                  frozen={frozen}
+                  lastUpdateT={lastUpdateT}
                 />
               </motion.div>
             </div>
@@ -282,7 +297,7 @@ export default function App() {
           </main>
         </div>
       </SpeakerOrderContext.Provider>
-      <Toaster theme={theme} />
+      <Toaster theme={theme} position="top-center" offset={72} />
     </TooltipProvider>
   );
 }

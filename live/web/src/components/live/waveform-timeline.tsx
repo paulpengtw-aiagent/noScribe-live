@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from "react";
+import { useI18n } from "@/i18n";
 import { useSpeakerName } from "@/lib/speaker-names";
 import { cn } from "@/lib/utils";
 
@@ -106,6 +107,7 @@ export function WaveformTimeline({
   onSelect,
   className,
 }: WaveformTimelineProps): JSX.Element {
+  const { t } = useI18n();
   const speakerName = useSpeakerName();
   const rootRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -182,6 +184,8 @@ export function WaveformTimeline({
         const segWidth = Math.max(0.3, pct(seg.end) - left);
         const name = speakerName(seg.speaker);
         const isActive = activeIndex === seg.index;
+        // The block's own box can be a few pixels wide. The ::before pseudo-element is an invisible 24 px hit area,
+        // centred on the block; the bar itself keeps its width.
         return (
           <button
             key={seg.index}
@@ -191,7 +195,7 @@ export function WaveformTimeline({
             data-hovered={hoveredIndex === seg.index ? "true" : undefined}
             aria-current={isActive ? "true" : undefined}
             tabIndex={seg.index === stopIndex ? 0 : -1}
-            aria-label={name ? `Segment ${seg.index + 1}, ${name}` : `Segment ${seg.index + 1}`}
+            aria-label={name ? t.timeline.segment(seg.index + 1, name) : t.timeline.segmentPlain(seg.index + 1)}
             onMouseEnter={() => onHover(seg.index)}
             onMouseLeave={() => onHover(null)}
             onFocus={() => {
@@ -200,7 +204,7 @@ export function WaveformTimeline({
             }}
             onBlur={() => onHover(null)}
             onClick={() => onSelect(seg.index)}
-            className="timeline-block absolute top-1/2 h-10 -translate-y-1/2 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+            className="timeline-block absolute top-1/2 h-10 -translate-y-1/2 rounded-sm before:absolute before:top-0 before:left-1/2 before:h-full before:w-6 before:-translate-x-1/2 before:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
             style={{
               left: `${left}%`,
               width: `${segWidth}%`,

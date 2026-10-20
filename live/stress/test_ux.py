@@ -704,17 +704,17 @@ def conn_heartbeat(h: Harness, browser: Any) -> None:
             wait_until(lambda: seg_count(page) >= 2, 60, 0.3)
             os.kill(srv.pid, signal.SIGSTOP)
             t0 = time.monotonic()
-            stale = wait_until(lambda: conn_state(page) == "stale", 10, 0.2)
+            reconnecting = wait_until(lambda: conn_state(page) == "reconnecting", 10, 0.2)
             took = time.monotonic() - t0
             banner = wait_until(lambda: banner_visible(page), 3, 0.2)
             rs = page.evaluate(RUN_STATE_JS)
             segs = seg_count(page)
-            h.check("conn stale: 4 s heartbeat timeout marks the page stale within 10 s of SIGSTOP",
-                    bool(stale), f"conn-state {conn_state(page)!r} after {took:.1f} s")
-            h.check("conn stale: banner visible, run-state not Live, transcript keeps segments",
+            h.check("conn reconnecting: 4 s heartbeat timeout sets data-state reconnecting within 10 s of SIGSTOP",
+                    bool(reconnecting), f"conn-state {conn_state(page)!r} after {took:.1f} s")
+            h.check("conn reconnecting: banner visible, run-state not Live, transcript keeps segments",
                     bool(banner) and rs.get("text") != "Live" and segs >= 1,
                     f"banner visible {bool(banner)}, run-state {rs}, segments {segs}")
-            h.shot(page, "conn-stale.png")
+            h.shot(page, "conn-reconnecting.png")
             os.kill(srv.pid, signal.SIGCONT)
             t1 = time.monotonic()
             live = wait_until(lambda: conn_state(page) == "live", 10, 0.2)

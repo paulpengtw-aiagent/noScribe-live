@@ -14,6 +14,15 @@
 #   FEEDS_DIR=live/feeds            feed directory the viewer reads (real runs write here, replays read and write here)
 #   MIN_FREE_BYTES=4294967296       free memory needed to start a real run (4 GiB)
 #   RUN_TIMEOUT_S=900               a real run is killed after this long
+#   KILL_EVERY=3                    fault injection (below) every this many cycles
+#   KILL_MIN_INTERVAL_S=3600        ... and at most once per this many seconds (the schedule is once per hour)
+#   KILL_AFTER_S=35                 the killed run's CLI gets SIGKILL after this long
+#   KILL_CLIP=live/samples/stress/03-multi-speaker.mp3   clip for the killed run (same guards as a real run)
+#   FAIL_CLIP=live/samples/stress/90-corrupt.mp3         clip for the failed run (fails in ~2 s, no GPU)
+#
+# Fault injection, when due: (a) a killed run: a real run, SIGKILL to the CLI after KILL_AFTER_S, with its
+# multiprocessing children (found with pgrep -P before the kill) killed too; (b) a failed run: the CLI on the
+# corrupt clip. Both write their feeds to FEEDS_DIR like any other run.
 #
 # Every step is logged with a timestamp to live/logs/driver.log.
 set -uo pipefail
@@ -29,6 +38,14 @@ NOSCRIBE_PY="${NOSCRIBE_PY:-/home/cheng/noScribe/venv/bin/python}"
 FEEDS_DIR="${FEEDS_DIR:-live/feeds}"
 MIN_FREE_BYTES="${MIN_FREE_BYTES:-4294967296}"
 RUN_TIMEOUT_S="${RUN_TIMEOUT_S:-900}"
+KILL_EVERY="${KILL_EVERY:-3}"
+KILL_MIN_INTERVAL_S="${KILL_MIN_INTERVAL_S:-3600}"
+KILL_AFTER_S="${KILL_AFTER_S:-35}"
+KILL_CLIP="${KILL_CLIP:-live/samples/stress/03-multi-speaker.mp3}"
+FAIL_CLIP="${FAIL_CLIP:-live/samples/stress/90-corrupt.mp3}"
+FAULT_CYCLE=0
+FAULT_LAST_CYCLE=0
+FAULT_LAST_TIME=0
 OUT_DIR=/tmp/nslive-driver
 LOG="$LIVE_DIR/logs/driver.log"
 CLIP_INDEX=0
@@ -170,9 +187,101 @@ replay() {
   log "end replay feed=$feed exit=$STATUS"
 }
 
+# Killed run: a real run on KILL_CLIP with the same guards as real_run; SIGKILL to the CLI after KILL_AFTER_S.
+# The CLI's multiprocessing children are listed with pgrep -P before the kill, since they would be orphaned
+# (re-parented) once the CLI dies; they are SIGKILLed too.
+# True while the process runs (a zombie, exited but not yet waited for, counts as gone).
+alive() {
+  local state
+  state=$(awk '/^State:/ {print $2}' "/proc/$1/status" 2>/dev/null)
+  [ -n "$state" ] && [ "$state" != "Z" ]
+}
+
+killed_run() {
+  local clip="$KILL_CLIP" reason cli out status kids="" waited=0 k
+  case "$clip" in
+    /*) ;;
+    *) clip="$REPO_ROOT/$clip" ;;
+  esac
+  if [ ! -f "$clip" ]; then
+    log "skip killed run: $clip does not exist"
+    return 0
+  fi
+  if reason="$(real_run_blocker)"; then
+    log "skip killed run: $reason"
+    return 0
+  fi
+  mkdir -p "$OUT_DIR"
+  out="$OUT_DIR/killed-$(date +%Y%m%d-%H%M%S).html"
+  log "start killed run clip=$clip model=$MODEL output=$out (SIGKILL after ${KILL_AFTER_S}s)"
+  cd "$REPO_ROOT" || return 1
+  env PYTHONDONTWRITEBYTECODE=1 "$NOSCRIBE_PY" -m noScribe --no-gui --model "$MODEL" \
+    --speaker-detection auto --timestamps --live-feed "$FEEDS_DIR/" "$clip" "$out" &
+  cli=$!
+  CHILD="$cli"
+  while [ "$waited" -lt "$KILL_AFTER_S" ] && alive "$cli"; do
+    sleep 1
+    waited=$(( waited + 1 ))
+  done
+  if alive "$cli"; then
+    kids="$(pgrep -P "$cli" -f multiprocessing 2>/dev/null | tr '\n' ' ')"
+    log "killed run: SIGKILL to cli pid=$cli after ${waited}s; multiprocessing children: ${kids:-none}"
+    kill -KILL "$cli" 2>/dev/null
+    for k in $kids; do
+      kill -KILL "$k" 2>/dev/null
+    done
+  else
+    log "killed run: cli pid=$cli exited before the kill"
+  fi
+  wait "$cli" 2>/dev/null
+  status=$?
+  CHILD=""
+  log "end killed run clip=$clip exit=$status"
+}
+
+# Failed run: the CLI on the corrupt clip. It fails in about 2 s and needs no GPU, so no GPU guard.
+failed_run() {
+  local clip="$FAIL_CLIP" out
+  case "$clip" in
+    /*) ;;
+    *) clip="$REPO_ROOT/$clip" ;;
+  esac
+  if [ ! -f "$clip" ]; then
+    log "skip failed run: $clip does not exist"
+    return 0
+  fi
+  mkdir -p "$OUT_DIR"
+  out="$OUT_DIR/failed-$(date +%Y%m%d-%H%M%S).html"
+  log "start failed run clip=$clip (expected to fail in about 2 s)"
+  cd "$REPO_ROOT" || return 1
+  run_child env PYTHONDONTWRITEBYTECODE=1 timeout --kill-after=30 "$RUN_TIMEOUT_S" \
+    "$NOSCRIBE_PY" -m noScribe --no-gui --model "$MODEL" --speaker-detection auto --timestamps \
+    --live-feed "$FEEDS_DIR/" "$clip" "$out"
+  log "end failed run clip=$clip exit=$STATUS"
+}
+
+# Due when KILL_EVERY cycles have passed since the last injection and KILL_MIN_INTERVAL_S seconds too.
+fault_due() {
+  [ $(( FAULT_CYCLE - FAULT_LAST_CYCLE )) -ge "$KILL_EVERY" ] &&
+    [ $(( $(date +%s) - FAULT_LAST_TIME )) -ge "$KILL_MIN_INTERVAL_S" ]
+}
+
+fault_injection() {
+  FAULT_LAST_CYCLE=$FAULT_CYCLE
+  FAULT_LAST_TIME=$(date +%s)
+  log "fault injection at cycle $FAULT_CYCLE: killed run, then failed run"
+  killed_run
+  pause
+  failed_run
+}
+
 DEADLINE=$(( $(date +%s) + DURATION_S ))
-log "driver start duration=${DURATION_S}s gap=${GAP_S}s feeds=$FEEDS_DIR clips=\"$CLIPS\""
+log "driver start duration=${DURATION_S}s gap=${GAP_S}s feeds=$FEEDS_DIR clips=\"$CLIPS\" kill_every=${KILL_EVERY} cycles, min interval ${KILL_MIN_INTERVAL_S}s"
 while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+  FAULT_CYCLE=$(( FAULT_CYCLE + 1 ))
+  if fault_due; then
+    fault_injection
+  fi
   if ! next_clip; then
     log "skip real run: no clip in \"$CLIPS\" exists"
     replay

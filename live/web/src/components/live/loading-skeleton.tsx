@@ -1,4 +1,5 @@
 import { Skeleton } from "@/components/ui/skeleton";
+import { useI18n } from "@/i18n";
 
 /** Transcript-column placeholder while a run's start is awaited. */
 export function TranscriptSkeleton() {
@@ -20,8 +21,15 @@ export function TranscriptSkeleton() {
 
 /** Page placeholder before the first hello: three cards shaped like the live layout. */
 export function LoadingSkeleton() {
+  const { t } = useI18n();
   return (
-    <div data-testid="loading-skeleton" role="status" aria-label="正在載入" aria-busy="true" className="live-grid">
+    <div
+      data-testid="loading-skeleton"
+      role="status"
+      aria-label={t.app.loadingLabel}
+      aria-busy="true"
+      className="live-grid"
+    >
       <div className="live-stage live-card flex flex-col gap-4 p-5">
         <Skeleton className="h-6 w-32" />
         <Skeleton className="h-36 w-full" />

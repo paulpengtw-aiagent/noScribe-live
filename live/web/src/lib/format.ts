@@ -105,3 +105,13 @@ export function shortDeviceName(name: string | null | undefined): string | null 
   if (!name) return null;
   return name.replace(/^NVIDIA\s+(GeForce\s+)?/i, "").trim() || null;
 }
+
+/** Local calendar day as a heading in the given locale, e.g. "Wed, Oct 21, 2026" or "2026年10月21日 週三". */
+export function formatDayHeading(unixSeconds: number, locale: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  }).format(new Date(unixSeconds * 1000));
+}
