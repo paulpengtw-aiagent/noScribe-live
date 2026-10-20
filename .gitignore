@@ -46,3 +46,4 @@ AGENTS.md
 # noScribe Live: local tools and logs
 .tools/
 live/logs/
+.review/

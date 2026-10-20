@@ -108,6 +108,7 @@ faster-whisper yields segments per 30 s decoding window, so they arrive in burst
 - No AICSS Pro components are used.
 - Built here: the canvas activity orb (`live/web/src/lib/orb-renderer.ts`), the timeline, the layout and the status chips.
 - Chinese segment text is shown in Traditional (Taiwan) through `opencc-js` (cn→tw), converted for display only and loaded lazily; the feed and the saved HTML are unchanged.
+- From the ObsidianUI shadcn registry (MIT), installed with `pnpm dlx shadcn@latest add https://www.obsidianui.dev/r/alert.json https://www.obsidianui.dev/r/skeleton.json https://www.obsidianui.dev/r/sonner.json https://www.obsidianui.dev/r/command.json https://www.obsidianui.dev/r/popover.json https://www.obsidianui.dev/r/input.json` into `live/web/src/components/ui/`: `Alert`, `Skeleton`, `Sonner` (theme passed as a prop; next-themes not used), `Command` (with its `Dialog` dependency), `Popover` and `Input`.
 
 ## Tests
 
