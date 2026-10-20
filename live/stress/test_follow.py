@@ -31,7 +31,6 @@ import argparse
 import glob
 import json
 import os
-import re
 import shutil
 import signal
 import subprocess
@@ -142,12 +141,13 @@ def elapsed(page: Any) -> str | None:
     return page.evaluate(ELAPSED_JS)
 
 
-def pick(page: Any, status_word: str) -> str:
-    """Open the run picker, choose the entry whose status word matches (Running / Finished); return its text."""
-    page.get_by_role("combobox", name="Choose a run").click()
-    option = page.get_by_role("option", name=re.compile(status_word)).first
+def pick(page: Any, run_id: str) -> str:
+    """Open the run picker (Popover trigger), choose the option whose data-run-id is run_id; return its text."""
+    page.locator('[data-testid="run-picker"]').click(timeout=5000)
+    option = page.locator(f'[data-testid="run-option"][data-run-id="{run_id}"]')
+    option.wait_for(state="visible", timeout=5000)
     text = option.inner_text()
-    option.click()
+    option.click(timeout=5000)
     return text
 
 
@@ -279,7 +279,7 @@ def scenario_2(lab: Lab, page: Any, path_a: Path, run_a: str, run_b: str) -> Non
               "run_end" not in a_feed, f"feed {path_a.name}")
     started_b = next((r.get("started_t") for r in lab.api_runs() if r.get("run_id") == run_b), None)
     expected = time.strftime("%H:%M:%S", time.localtime(started_b)) if started_b else "?"
-    text = pick(page, "Finished")
+    text = pick(page, run_b)
     wait_until(lambda: state(page) == "finished" and shown_run(page) == run_b, 10)
     info = run_info(page)
     on_b = shown_run(page) == run_b
