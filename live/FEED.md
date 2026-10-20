@@ -25,7 +25,7 @@ While a job runs, the CLI can write one JSON object per line (NDJSON) to a feed.
 
 | type | written when | event keys (besides the common keys) |
 |---|---|---|
-| `run_start` | the job starts | `audio_file`, `output_file` (absolute paths), `model`, `language`, `speaker_detection`, `options` (`overlapping`, `timestamps`, `disfluencies`, `pause`), `pid`, `noscribe_version` |
+| `run_start` | the job starts | `audio_file`, `output_file` (absolute paths), `model`, `language`, `speaker_detection`, `options` (`overlapping`, `timestamps`, `disfluencies`, `pause`), `pid` (the CLI process; the viewer uses it to spot a killed run), `noscribe_version` |
 | `phase` | a stage starts: `converting`, `diarizing`, `transcribing` | `phase` |
 | `progress` | percent within a phase; a repeat of the same phase, detail and whole percent is skipped | `phase`, `pct` (0-100), `detail` (`segmentation` or `embeddings` while diarizing, otherwise null) |
 | `audio` | the audio duration is known | `duration` (s), `start_offset` (s) |

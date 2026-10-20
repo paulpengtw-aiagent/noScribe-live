@@ -3,7 +3,8 @@
     cd live && .venv/bin/python -m server.replay SRC.ndjson [--feeds DIR] [--speed 1.0] [--max-gap 5]
 
 Every run found in SRC is written as a new file ``<feeds>/replay-<timestamp>-<orig run_id>.ndjson``.
-Its events get the new run_id and ``t`` set to the time they are written. Lines keep their order,
+Its events get the new run_id and ``t`` set to the time they are written, and run_start gets the
+replay process's ``pid`` (so the viewer sees the replay as alive while it runs). Lines keep their order,
 and the pause before each line is the original gap divided by ``--speed``, capped at ``--max-gap``
 seconds. Each line is flushed as soon as it is written, so the tailer only sees complete lines.
 """
@@ -13,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import re
 import sys
 import time
@@ -91,6 +93,8 @@ def replay_events(
                 previous_t = t
             new_id, _path, fh = outputs[orig]
             replayed = dict(event, run_id=new_id, t=time.time())
+            if event.get("type") == "run_start":
+                replayed["pid"] = os.getpid()     # the replay is the process that is alive while it runs
             fh.write(json.dumps(replayed, ensure_ascii=False) + "\n")
             fh.flush()
             counts[orig] += 1

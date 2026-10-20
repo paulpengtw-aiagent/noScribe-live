@@ -7,6 +7,9 @@
 #
 # Environment:
 #   PORT=8765          port to serve on
+#   HOST=127.0.0.1     address to bind (0.0.0.0 to listen on all interfaces)
+#   LIVE_TOKEN=...     require this token on every path (empty: no gate). Not put on the command line;
+#                      the server reads it from the environment, which exec passes on.
 #   SKIP_WEB_BUILD=1   never run pnpm/npm in live/web; serve whatever is in live/web/dist
 #   NOSCRIBE_PY=...    Python with noScribe installed; only used in the command this script prints
 set -euo pipefail
@@ -17,7 +20,8 @@ Usage: live/run.sh [--rebuild]
 
   --rebuild          rebuild the frontend in live/web even if live/web/dist exists
 
-Environment: PORT (default 8765), SKIP_WEB_BUILD=1, NOSCRIBE_PY=/path/to/python
+Environment: PORT (default 8765), HOST (default 127.0.0.1), LIVE_TOKEN (optional token gate),
+             SKIP_WEB_BUILD=1, NOSCRIBE_PY=/path/to/python
 EOF
 }
 
@@ -29,6 +33,7 @@ REQ_FILE="$LIVE_DIR/requirements.txt"
 REQ_STAMP="$VENV_DIR/.req-stamp"
 WEB_DIR="$LIVE_DIR/web"
 PORT="${PORT:-8765}"
+HOST="${HOST:-127.0.0.1}"
 REBUILD=0
 
 for arg in "$@"; do
@@ -119,4 +124,4 @@ EOF
 
 # exec replaces this shell, so the PID you background is the server's PID.
 cd "$LIVE_DIR"
-exec "$VENV_PY" -m server --feeds "$LIVE_DIR/feeds" --static "$LIVE_DIR/web/dist" --port "$PORT"
+exec "$VENV_PY" -m server --feeds "$LIVE_DIR/feeds" --static "$LIVE_DIR/web/dist" --host "$HOST" --port "$PORT"

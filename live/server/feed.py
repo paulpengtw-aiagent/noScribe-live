@@ -28,6 +28,7 @@ __all__ = ["FeedTailer", "Run", "RunRegistry", "drain_queue"]
 logger = logging.getLogger("server.feed")
 
 STALE_AFTER_S = 30 * 60        # a running run with no event for this long is reported as "stale"
+DEAD_PID_GRACE_S = 5.0         # a running run whose CLI pid is gone and that has been quiet this long is "stale"
 STARTUP_MAX_FILES = 30         # at startup only this many (most recently modified) feed files are read
 READ_CHUNK = 1 << 20           # bytes read from one feed file per poll (bounds memory and loop time)
 MAX_LINE_BYTES = 1 << 20       # longer lines are dropped; real events are a few hundred bytes
@@ -51,6 +52,38 @@ def _fmt(value: Any, spec: str) -> str:
 def _basename(path: str) -> str:
     """Last component of a path. Accepts both / and \\ because the CLI may run on Windows."""
     return re.split(r"[\\/]", path.rstrip("\\/"))[-1]
+
+
+def pid_alive(pid: int) -> bool:
+    """True if a process with this pid exists. A zombie (exited, not yet reaped) counts as gone.
+
+    Tests replace this function. On Windows, ``os.kill(pid, 0)`` would terminate the process,
+    so there it answers True and the 30-minute rule alone applies.
+    """
+    if os.name == "nt":
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:          # PermissionError: the process exists but belongs to someone else
+        return True
+    return not _is_zombie(pid)
+
+
+def _is_zombie(pid: int) -> bool:
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as fh:
+            stat_line = fh.read().decode("ascii", "replace")
+    except OSError:          # no /proc (not Linux) or the process vanished: not a zombie as far as we know
+        return False
+    fields = stat_line.rsplit(")", 1)[-1].split()   # the state follows the command name in parentheses
+    return bool(fields) and fields[0] == "Z"
+
+
+def _pid(value: Any) -> int | None:
+    """A usable process id, or None."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
 
 def drain_queue(queue: asyncio.Queue) -> None:
@@ -84,6 +117,7 @@ class Run:
     device: str | None = None          # whisper device: "cuda" or "cpu"
     device_name: str | None = None
     segments: int = 0
+    pid: int | None = None             # CLI process id from run_start; a dead pid means the CLI was killed
     started_t: float | None = None     # CLI wall-clock time of run_start (decides "latest")
     ended_t: float | None = None
     last_t: float | None = None        # CLI wall-clock time of the newest event
@@ -98,6 +132,7 @@ class Run:
         if kind == "run_start":
             self.started_t = t
             self.status = "running"
+            self.pid = _pid(ev.get("pid"))
             self.audio_file = ev.get("audio_file")
             self.output_file = ev.get("output_file")
             self.model = ev.get("model")
@@ -127,11 +162,21 @@ class Run:
             self.error = ev.get("error")
             self.output_file = ev.get("output_file") or self.output_file
 
+    def effective_status(self, now: float) -> str:
+        """The status viewers see. A running run is "stale" when its CLI is gone (the pid is dead and
+        the run has been quiet for DEAD_PID_GRACE_S), or when it has been quiet for STALE_AFTER_S."""
+        if self.status != "running" or self.last_t is None:
+            return self.status
+        idle = now - self.last_t
+        if idle > STALE_AFTER_S:
+            return "stale"
+        if self.pid is not None and idle > DEAD_PID_GRACE_S and not pid_alive(self.pid):
+            return "stale"
+        return self.status
+
     def summary(self, now: float) -> dict[str, Any]:
-        """JSON-ready summary. A running run with no event for STALE_AFTER_S seconds is "stale"."""
-        status = self.status
-        if status == "running" and self.last_t is not None and now - self.last_t > STALE_AFTER_S:
-            status = "stale"
+        """JSON-ready summary, with the status from effective_status()."""
+        status = self.effective_status(now)
         return {
             "run_id": self.run_id,
             "audio_name": _basename(self.audio_file) if self.audio_file else None,
@@ -163,6 +208,7 @@ class RunRegistry:
     def __init__(self) -> None:
         self._runs: dict[str, Run] = {}
         self._subscribers: set[asyncio.Queue] = set()
+        self._last_statuses: dict[str, str] = {}   # run_id -> effective status seen by the last check
 
     def __len__(self) -> int:
         return len(self._runs)
@@ -189,6 +235,18 @@ class RunRegistry:
             return run.last_t if run.last_t is not None else 0.0
 
         return [run.summary(now) for run in sorted(self._runs.values(), key=newest_key, reverse=True)]
+
+    def check_status_changes(self, now: float | None = None) -> bool:
+        """Compare every run's effective status with the last check. If one changed (running -> stale,
+        say), publish ``("runs", None, {})`` to all subscribers. Runs seen for the first time are
+        recorded silently: their run_start already published a change. Returns True if it published."""
+        now = time.time() if now is None else now
+        statuses = {run.run_id: run.effective_status(now) for run in self._runs.values()}
+        changed = any(self._last_statuses.get(run_id, status) != status for run_id, status in statuses.items())
+        self._last_statuses = statuses
+        if changed:
+            self._publish(("runs", None, {}))
+        return changed
 
     # ---- ingestion -------------------------------------------------------
 
@@ -267,9 +325,12 @@ class RunRegistry:
         self._subscribers.discard(queue)
 
     def _broadcast(self, run_id: str, wrapped: dict[str, Any]) -> None:
+        self._publish(("event", run_id, wrapped))
+
+    def _publish(self, item: tuple) -> None:
         for queue in list(self._subscribers):
             try:
-                queue.put_nowait(("event", run_id, wrapped))
+                queue.put_nowait(item)
             except asyncio.QueueFull:
                 # A client that falls this far behind is cut off. Its stream ends with a
                 # "dropped" marker, and the browser reconnects and gets a fresh snapshot.

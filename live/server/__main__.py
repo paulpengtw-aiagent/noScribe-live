@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 from pathlib import Path
 
 import uvicorn
@@ -29,6 +30,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--host", default="127.0.0.1", help="bind address (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8765, help="port (default: 8765)")
     parser.add_argument("--poll", type=float, default=0.05, help="feed poll interval in seconds (default: 0.05)")
+    parser.add_argument(
+        "--token", default=os.environ.get("LIVE_TOKEN", ""),
+        help="require this secret on every path (default: $LIVE_TOKEN; empty = no gate). Prefer the "
+             "environment variable: a command-line value is visible in ps.",
+    )
     args = parser.parse_args(argv)
 
     # uvicorn configures only its own loggers, so set up the root logger for our INFO lines.
@@ -37,8 +43,11 @@ def main(argv: list[str] | None = None) -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
-    app = create_app(args.feeds.resolve(), args.static.resolve(), args.poll)
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    if args.token:
+        logging.getLogger("server.main").info("token gate on (the token is not logged)")
+    app = create_app(args.feeds.resolve(), args.static.resolve(), args.poll, token=args.token or None)
+    # The access log would write ?token=... from the request line, so it is off while the gate is on.
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info", access_log=not args.token)
 
 
 if __name__ == "__main__":

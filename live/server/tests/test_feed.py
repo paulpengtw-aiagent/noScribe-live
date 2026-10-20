@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from server import feed
 from server.feed import STALE_AFTER_S, FeedTailer, RunRegistry
 from server.peaks import compute_peaks
 from server.replay import replay_events
@@ -314,3 +315,79 @@ def test_replay_writes_a_new_run_with_new_ids_and_fresh_times(tmp_path):
     assert all(e["run_id"] == new_id for e in lines)
     assert all(abs(e["t"] - time.time()) < 60 for e in lines)
     assert [e["type"] for e in lines] == ["run_start", "segment", "run_end"]
+    assert lines[0]["pid"] == os.getpid()          # the replay process, alive while it replays
+    assert all("pid" not in e for e in lines[1:])
+
+
+# ---- liveness by pid ----------------------------------------------------------------
+
+def test_pid_alive_sees_this_process_and_not_a_reaped_child():
+    assert feed.pid_alive(os.getpid()) is True
+    child = subprocess.Popen(["true"])
+    child.wait()
+    assert feed.pid_alive(child.pid) is False
+
+
+@pytest.mark.skipif(not os.path.isdir("/proc/self"), reason="the zombie check reads /proc")
+def test_pid_alive_treats_an_unreaped_zombie_as_gone():
+    child = subprocess.Popen(["true"])
+    time.sleep(0.3)                       # it has exited, and stays a zombie until waited for
+    try:
+        assert feed.pid_alive(child.pid) is False
+    finally:
+        child.wait()
+
+
+def test_a_run_whose_cli_is_gone_turns_stale_after_the_grace_period(monkeypatch):
+    monkeypatch.setattr(feed, "pid_alive", lambda pid: False)
+    now = time.time()
+    registry = RunRegistry()
+    registry.ingest(start("killed", now - 10), server_t=now)      # pid 4242, last event 10 s ago
+    assert registry.summaries(now=now)[0]["status"] == "stale"
+
+
+def test_a_run_whose_cli_just_went_quiet_is_not_stale_yet(monkeypatch):
+    monkeypatch.setattr(feed, "pid_alive", lambda pid: False)
+    now = time.time()
+    registry = RunRegistry()
+    registry.ingest(start("fresh", now - 2), server_t=now)
+    assert registry.summaries(now=now)[0]["status"] == "running"
+
+
+def test_a_live_cli_keeps_a_quiet_run_running(monkeypatch):
+    checked = []
+    monkeypatch.setattr(feed, "pid_alive", lambda pid: checked.append(pid) or True)
+    now = time.time()
+    registry = RunRegistry()
+    registry.ingest(start("quiet", now - 600), server_t=now)      # 10 minutes quiet, under the 30-minute rule
+    assert registry.summaries(now=now)[0]["status"] == "running"
+    assert checked == [4242]
+
+
+def test_a_run_without_a_pid_only_goes_stale_by_the_30_minute_rule(monkeypatch):
+    checked = []
+    monkeypatch.setattr(feed, "pid_alive", lambda pid: checked.append(pid) or False)
+    now = time.time()
+    registry = RunRegistry()
+    event = start("nopid", now - 600)
+    del event["pid"]
+    registry.ingest(event, server_t=now)
+    assert registry.summaries(now=now)[0]["status"] == "running"
+    assert checked == []
+
+
+def test_check_status_changes_publishes_once_when_a_run_goes_stale(monkeypatch):
+    monkeypatch.setattr(feed, "pid_alive", lambda pid: True)
+    now = time.time()
+    registry = RunRegistry()
+    registry.ingest(start("job", now - 60), server_t=now)
+    queue = registry.subscribe()
+    assert registry.check_status_changes() is False     # the first check only records the statuses
+    assert registry.check_status_changes() is False     # nothing changed
+
+    monkeypatch.setattr(feed, "pid_alive", lambda pid: False)
+    assert registry.check_status_changes() is True      # running -> stale
+    assert registry.check_status_changes() is False     # already published
+
+    assert queue.get_nowait() == ("runs", None, {})
+    assert queue.empty()

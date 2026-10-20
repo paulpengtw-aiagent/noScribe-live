@@ -18,6 +18,8 @@ live/run.sh --rebuild    # also rebuilds the frontend in live/web
 - `PORT`: port to serve on (default `8765`).
 - `SKIP_WEB_BUILD=1`: never run pnpm or npm; serve whatever is in `live/web/dist`.
 - `NOSCRIBE_PY`: Python with noScribe installed. It only changes the command that `run.sh` prints.
+- `HOST`: bind address (default `127.0.0.1`). `HOST=0.0.0.0` listens on all interfaces.
+- `LIVE_TOKEN`: if set, every path needs this token. Open `http://HOST:8765/?token=VALUE` once; a cookie (7 days) then keeps the browser in, and `curl -H "Authorization: Bearer VALUE"` also works. Without it nothing is gated. `python -m server --token VALUE` does the same, but `LIVE_TOKEN` keeps the value out of `ps`.
 
 ## Transcribe alongside it
 
@@ -80,6 +82,7 @@ faster-whisper yields segments per 30 s decoding window, so they arrive in burst
 
 - `noScribe/live_feed.py`: opt-in NDJSON writer. The format is documented in [FEED.md](FEED.md).
 - `live/server`: FastAPI. It tails `live/feeds`. `GET /api/stream` is server-sent events with `hello` (server time and run list), `snapshot` (catch-up for a run) and `feed` (one event). It also serves `GET /api/runs` and `GET /api/runs/{id}/peaks`.
+- Killed runs: a run with no `run_end` is "stale" once its CLI pid (from `run_start`) is gone and it has been quiet for 5 s. Without a pid, the 30-minute rule applies. A check every 2 s pushes status changes to open streams as `runs` messages.
 - `live/web`: React, Vite, TypeScript, Tailwind v4, shadcn/ui and motion.
 
 ## UI components and licensing

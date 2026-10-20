@@ -15,12 +15,14 @@ from typing import Any
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 
+from .auth import TokenGate
 from .feed import FeedTailer, RunRegistry, drain_queue
 from .peaks import compute_peaks
 
 logger = logging.getLogger("server.app")
 
 HEARTBEAT_S = 10.0          # ": ping" comment interval on an open stream
+STATUS_CHECK_S = 2.0        # how often run statuses are checked for changes (e.g. a killed CLI goes stale)
 DISCONNECT_CHECK_S = 1.0    # an idle stream checks for a departed client this often
 PEAKS_CACHE_MAX = 32        # cached peak results (entries, not bytes)
 
@@ -104,6 +106,9 @@ async def _sse_messages(request: Request, registry: RunRegistry, run_param: str)
                     yield message
                 continue
 
+            if kind == "runs":
+                yield sse("runs", {"runs": registry.summaries()})
+                continue
             if payload.get("type") in ("run_start", "run_end"):
                 yield sse("runs", {"runs": registry.summaries()})
             if run_id == followed:
@@ -112,8 +117,21 @@ async def _sse_messages(request: Request, registry: RunRegistry, run_param: str)
         registry.unsubscribe(queue)
 
 
-def create_app(feeds_dir: str | Path, static_dir: str | Path, poll: float = 0.05) -> FastAPI:
-    """Build the app. The feed tailer starts and stops with the app's lifespan."""
+async def _watch_statuses(registry: RunRegistry) -> None:
+    """Every STATUS_CHECK_S seconds, publish a change to the open streams when a run's status changed."""
+    while True:
+        try:
+            registry.check_status_changes()
+        except Exception:  # one bad check must not stop the watcher
+            logger.exception("status check failed; will retry")
+        await asyncio.sleep(STATUS_CHECK_S)
+
+
+def create_app(feeds_dir: str | Path, static_dir: str | Path, poll: float = 0.05, token: str | None = None) -> FastAPI:
+    """Build the app. The feed tailer starts and stops with the app's lifespan.
+
+    With a non-empty ``token`` every HTTP path needs it (see ``server.auth``); otherwise nothing is gated.
+    """
     feeds_path = Path(feeds_dir)
     static_path = Path(static_dir)
     registry = RunRegistry()
@@ -123,13 +141,21 @@ def create_app(feeds_dir: str | Path, static_dir: str | Path, poll: float = 0.05
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         tailer.start()
+        watcher = asyncio.get_running_loop().create_task(_watch_statuses(registry), name="status-watch")
         logger.info("watching %s for feeds (poll %.3fs)", feeds_path, poll)
         try:
             yield
         finally:
+            watcher.cancel()
+            try:
+                await watcher
+            except asyncio.CancelledError:
+                pass
             await tailer.stop()
 
     app = FastAPI(title="noScribe Live", lifespan=lifespan)
+    if token:
+        app.add_middleware(TokenGate, token=token)
     app.state.registry = registry
     app.state.tailer = tailer
 
