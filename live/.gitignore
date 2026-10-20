@@ -7,3 +7,13 @@ web/node_modules/
 web/dist/
 __pycache__/
 .pytest_cache/
+
+# stress-run outputs (live/stress/run_real.sh); keep the README
+stress/results/*
+!stress/results/README.md
+# Stress test-audio set (live/samples/stress): generated media and downloads stay out of git;
+# the build script and SOURCES.md are tracked.
+samples/stress/*
+!samples/stress/*.sh
+!samples/stress/*.md
+samples/stress/dl/
