@@ -77,7 +77,7 @@ export default function App() {
   const now = useNow(active, 250);
   // Offers a switch to another still-running run; never moves the user off a run they picked.
   const otherLive = otherLiveRun(state.runs, run?.runId ?? null, active, runParam === FOLLOW_NEWEST);
-  const { peaks } = useRunPeaks(run?.runId ?? null, !active);
+  const { peaks, error: peaksError } = useRunPeaks(run?.runId ?? null, !active);
 
   const phase = displayPhase(run);
   const segments = run?.segments;
@@ -189,6 +189,7 @@ export default function App() {
                   speakers={speakers}
                   transcribed={run ? `Transcribed ${transcribed}` : DASH}
                   waveform={waveform}
+                  peaksError={peaksError}
                 />
               </motion.div>
             </div>

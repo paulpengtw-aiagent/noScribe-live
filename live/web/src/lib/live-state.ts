@@ -20,6 +20,8 @@ export type DisplayPhase =
 
 export interface Segment {
   index: number;
+  /** Feed `seq` of the segment event that wrote it; -1 when the event carries none. */
+  seq: number;
   start: number;
   end: number;
   speaker: string;
@@ -183,6 +185,7 @@ function applyEvent(run: RunState, ev: FeedEvent, ctx: { now: number; live: bool
     case "segment": {
       const seg: Segment = {
         index: ev.index,
+        seq: typeof ev.seq === "number" ? ev.seq : -1,
         start: ev.start,
         end: ev.end,
         speaker: ev.speaker ?? "",

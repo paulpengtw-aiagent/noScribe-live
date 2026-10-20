@@ -124,6 +124,7 @@ const SegmentSpan = memo(function SegmentSpan({
       <span
         data-index={segment.index}
         data-segment-index={segment.index}
+        data-segment-seq={segment.seq}
         lang={isMostlyCjk(text) ? "zh-Hant" : undefined}
         onMouseEnter={() => onHover(segment.index)}
         onMouseLeave={() => onHover(null)}
