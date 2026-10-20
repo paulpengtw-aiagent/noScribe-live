@@ -173,18 +173,35 @@ if [[ -n "$RECORDER_PID" ]]; then
 fi
 
 # ---- 5. result.json and results.tsv ---------------------------------------------------------------
-AUDIO_S="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$AUDIO" 2>/dev/null || true)"
+# ffprobe fails on undecodable input (and some builds print N/A): keep only a plain number, else the
+# duration is unknown and audio_s and rtf stay null. This step must never abort the script.
+AUDIO_S="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$AUDIO" 2>/dev/null | head -n 1 || true)"
+if [[ ! "$AUDIO_S" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+  echo "run_real: ffprobe gave no usable duration for $AUDIO; audio_s and rtf are null" >&2
+  AUDIO_S=""
+fi
 EXTRA_JSON="$(printf '%s\n' ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} | /usr/bin/python3 -I -c 'import json,sys; print(json.dumps([l for l in sys.stdin.read().split("\n") if l]))')"
 mkdir -p "$RESULTS_DIR"
-/usr/bin/python3 -I - "$OUTDIR" "$AUDIO" "$MODEL" "$EXTRA_JSON" "$CLI_RC" "$WALL_S" "${AUDIO_S:-}" \
+if ! /usr/bin/python3 -I - "$OUTDIR" "$AUDIO" "$MODEL" "$EXTRA_JSON" "$CLI_RC" "$WALL_S" "${AUDIO_S:-}" \
   "$REPO_ROOT" "$LIVE_FEED" "${REC_RC:-}" "$RESULTS_TSV" "$RECORDER_ARGS" <<'PY'
-import glob, json, os, sys, time
+import glob, json, math, os, sys, time
 
 (outdir, audio, model, extra_json, cli_rc, wall_s, audio_s, repo_root, live_feed,
  rec_rc, results_tsv, recorder_args) = sys.argv[1:13]
+
+
+def number(text):
+    """A finite positive float, or None for empty, N/A or otherwise unusable text."""
+    try:
+        value = float(text)
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) and value > 0 else None
+
+
 extra = json.loads(extra_json)
-wall = float(wall_s)
-audio_len = float(audio_s) if audio_s.strip() else None
+wall = number(wall_s) or 0.0
+audio_len = number(audio_s)
 
 # Newest feed file whose run_start names this audio file.
 feed_file, run_id, status, segments = None, None, None, None
@@ -196,7 +213,7 @@ for path in glob.glob(os.path.join(repo_root, "live", "feeds", "*.ndjson")):
             first = json.loads(fh.readline() or "{}")
     except (OSError, ValueError):
         continue
-    if first.get("type") != "run_start" or not first.get("audio_file"):
+    if not isinstance(first, dict) or first.get("type") != "run_start" or not isinstance(first.get("audio_file"), str):
         continue
     if os.path.realpath(first["audio_file"]) != audio_real:
         continue
@@ -211,6 +228,8 @@ if best is not None:
             try:
                 ev = json.loads(line)
             except ValueError:
+                continue
+            if not isinstance(ev, dict):
                 continue
             if ev.get("type") == "segment":
                 segments += 1
@@ -280,3 +299,16 @@ with open(results_tsv, "a", encoding="utf-8") as fh:
     fh.write("\t".join(str(value).replace("\t", " ").replace("\n", " ") for _, value in columns) + "\n")
 print(json.dumps(result, ensure_ascii=False, indent=2))
 PY
+then
+  # Last resort: the full writer crashed, so still leave a result.json for this run.
+  echo "run_real: result writer failed; writing a minimal result.json (no results.tsv row)" >&2
+  /usr/bin/python3 -I -c '
+import json, sys
+outdir, audio, model, cli_rc, wall_s = sys.argv[1:6]
+result = {"audio": audio, "model": model, "exit_code": cli_rc, "wall_s": wall_s, "audio_s": None,
+          "rtf": None, "error": "result writer failed; see cli.log"}
+with open(outdir + "/result.json", "w", encoding="utf-8") as fh:
+    json.dump(result, fh, ensure_ascii=False, indent=2)
+    fh.write("\n")
+' "$OUTDIR" "$AUDIO" "$MODEL" "$CLI_RC" "$WALL_S" || true
+fi
