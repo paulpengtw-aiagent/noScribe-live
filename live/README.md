@@ -90,6 +90,7 @@ faster-whisper yields segments per 30 s decoding window, so they arrive in burst
 
 - `noScribe/live_feed.py`: opt-in NDJSON writer. The format is documented in [FEED.md](FEED.md).
 - `live/server`: FastAPI. It tails `live/feeds`. `GET /api/stream` is server-sent events with `hello` (server time and run list), `snapshot` (catch-up for a run) and `feed` (one event). It also serves `GET /api/runs` and `GET /api/runs/{id}/peaks`.
+- Proxies: `/api/stream` sends `Cache-Control: no-cache, no-transform`, `X-Accel-Buffering: no`, a 2 KB comment after `retry`, and `: ping` every 15 s. Do not put compression middleware in front of it.
 - Killed runs: a run with no `run_end` is "stale" once its CLI pid (from `run_start`) is gone and it has been quiet for 5 s. Without a pid, the 30-minute rule applies. A check every 2 s pushes status changes to open streams as `runs` messages.
 - Latest (`/api/stream?run=latest`) follows the newest run that is still live, or the newest run when none is. Summaries carry `live` (status is running), `inferred_end_t` (`last_t` for a stale run, `ended_t` for an ended one, null while running) and `output_name` (basename of `output_file` if that file exists, else null).
 - `GET /api/runs/{id}/peaks`: 404 for an unknown run, a run without audio, or a missing audio file; 422 `{"error": "audio could not be decoded", "detail": "..."}` when ffprobe or ffmpeg cannot read the file; 500 only for a server failure such as a missing ffmpeg.

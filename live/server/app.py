@@ -21,10 +21,14 @@ from .peaks import AudioDecodeError, compute_peaks
 
 logger = logging.getLogger("server.app")
 
-HEARTBEAT_S = 10.0          # ": ping" comment interval on an open stream
+HEARTBEAT_S = 15.0          # ": ping" comment interval on an open stream
 STATUS_CHECK_S = 2.0        # how often run statuses are checked for changes (e.g. a killed CLI goes stale)
 DISCONNECT_CHECK_S = 1.0    # an idle stream checks for a departed client this often
 PEAKS_CACHE_MAX = 32        # cached peak results (entries, not bytes)
+
+# Sent right after "retry:". A proxy or tunnel may hold a small response until its buffer fills; this
+# padding fills it at once. EventSource ignores comment lines.
+SSE_OPENING_PADDING = ":" + " " * 2048 + "\n\n"
 
 PLACEHOLDER_HTML = """<!doctype html>
 <html lang="en">
@@ -71,6 +75,7 @@ async def _sse_messages(request: Request, registry: RunRegistry, run_param: str)
     try:
         opening = [
             "retry: 1500\n\n",
+            SSE_OPENING_PADDING,
             sse("hello", {"server_t": time.time(), "runs": registry.summaries()}),
             sse("snapshot", _snapshot(registry, followed)),
         ]
@@ -169,10 +174,13 @@ def create_app(feeds_dir: str | Path, static_dir: str | Path, poll: float = 0.05
 
     @app.get("/api/stream")
     async def stream(request: Request, run: str = "latest") -> StreamingResponse:
+        # Proxy-friendly: no-transform stops a tunnel (e.g. Cloudflare) from rewriting the body, and
+        # X-Accel-Buffering: no stops nginx from buffering it. Do not add compression middleware (GZipMiddleware)
+        # over this route: a compressed SSE body is held back until the compressor flushes.
         return StreamingResponse(
             _sse_messages(request, registry, run or "latest"),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            media_type="text/event-stream; charset=utf-8",
+            headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
         )
 
     @app.get("/api/runs/{run_id}/peaks")

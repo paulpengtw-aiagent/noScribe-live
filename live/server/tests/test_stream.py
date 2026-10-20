@@ -34,7 +34,7 @@ def test_a_status_change_reaches_an_open_stream_as_a_runs_message(monkeypatch):
 
     async def scenario():
         stream = _sse_messages(_Connected(), registry, "latest")
-        opening = [await stream.__anext__() for _ in range(3)]    # retry, hello, snapshot
+        opening = [await stream.__anext__() for _ in range(4)]    # retry, padding, hello, snapshot
         monkeypatch.setattr(feed, "pid_alive", lambda pid: False)  # the CLI was killed
         assert registry.check_status_changes() is True
         message = await asyncio.wait_for(stream.__anext__(), timeout=5)
@@ -42,7 +42,7 @@ def test_a_status_change_reaches_an_open_stream_as_a_runs_message(monkeypatch):
         return opening, message
 
     opening, message = asyncio.run(scenario())
-    assert '"status": "running"' in opening[1]
+    assert '"status": "running"' in opening[2]
     assert message.startswith("event: runs\n")
     assert '"status": "stale"' in message
 
@@ -61,14 +61,14 @@ def test_latest_stream_switches_to_an_older_live_run_when_the_newest_run_ends(mo
 
     async def scenario():
         stream = _sse_messages(_Connected(), registry, "latest")
-        opening = [await stream.__anext__() for _ in range(3)]
+        opening = [await stream.__anext__() for _ in range(4)]
         registry.ingest(_run_end("B", now - 40), server_t=now)    # B ends
         messages = [await asyncio.wait_for(stream.__anext__(), timeout=5) for _ in range(2)]
         await stream.aclose()
         return opening, messages
 
     opening, (runs_message, snapshot_message) = asyncio.run(scenario())
-    assert '"run_id": "B"' in opening[2]
+    assert '"run_id": "B"' in opening[3]
     assert runs_message.startswith("event: runs\n")
     assert snapshot_message.startswith("event: snapshot\n")
     assert '"run_id": "A"' in snapshot_message
@@ -86,7 +86,7 @@ def test_latest_stream_switches_when_the_status_watcher_marks_the_newest_run_sta
 
     async def scenario():
         stream = _sse_messages(_Connected(), registry, "latest")
-        opening = [await stream.__anext__() for _ in range(3)]
+        opening = [await stream.__anext__() for _ in range(4)]
         monkeypatch.setattr(feed, "pid_alive", lambda pid: pid != 5151)   # B's CLI was killed
         assert registry.check_status_changes() is True                    # the watcher's publish
         messages = [await asyncio.wait_for(stream.__anext__(), timeout=5) for _ in range(2)]
@@ -94,6 +94,6 @@ def test_latest_stream_switches_when_the_status_watcher_marks_the_newest_run_sta
         return opening, messages
 
     opening, (runs_message, snapshot_message) = asyncio.run(scenario())
-    assert '"run_id": "B"' in opening[2]
+    assert '"run_id": "B"' in opening[3]
     assert runs_message.startswith("event: runs\n")
     assert '"run_id": "A"' in snapshot_message
