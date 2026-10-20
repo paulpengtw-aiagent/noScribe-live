@@ -11,10 +11,11 @@ import {
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowDown, Check, Copy } from "lucide-react";
 import { StreamingTextInline } from "@/components/aicss/streaming-text-inline";
+import { ErrorDetails } from "@/components/live/error-details";
 import { Button } from "@/components/ui/button";
+import { describeEnd, type EndDescription } from "@/lib/end-state";
 import { formatTimecode, isMostlyCjk } from "@/lib/format";
 import { isRunActive, type RunState, type Segment } from "@/lib/live-state";
-import { splitPath } from "@/lib/live-view";
 import { useSpeakerName } from "@/lib/speaker-names";
 import { speakerColor, speakerKey } from "@/lib/speakers";
 import { useZhTw } from "@/lib/zh-tw";
@@ -122,6 +123,7 @@ const SegmentSpan = memo(function SegmentSpan({
       {spaceBefore ? " " : null}
       <span
         data-index={segment.index}
+        data-segment-index={segment.index}
         lang={isMostlyCjk(text) ? "zh-Hant" : undefined}
         onMouseEnter={() => onHover(segment.index)}
         onMouseLeave={() => onHover(null)}
@@ -157,14 +159,14 @@ function OverlapTag({ speaker }: { speaker: string }) {
   );
 }
 
-/** The output file, with its directory cut in the middle of the path and the file name kept. */
-function PathLine({ path }: { path: string }) {
-  const { dir, file } = splitPath(path);
+/** How a run ended, shown in place of the transcript when it produced no segments. */
+function EndNotice({ end }: { end: EndDescription }) {
   return (
-    <span title={path} className="flex min-w-0 items-baseline">
-      <span className="min-w-0 truncate">{dir}</span>
-      <span className="max-w-[70%] shrink-0 truncate">{file}</span>
-    </span>
+    <div className="m-auto flex w-full max-w-[600px] flex-col items-center gap-2 px-2 py-10 text-center">
+      <h3 className="text-[18px] leading-tight font-medium tracking-[-0.01em]">{end.title}</h3>
+      {end.detail ? <p className="text-[15px] leading-relaxed text-ink-2">{end.detail}</p> : null}
+      {end.rawError ? <ErrorDetails raw={end.rawError} className="mt-3 w-full max-w-[560px]" /> : null}
+    </div>
   );
 }
 
@@ -315,6 +317,8 @@ export function TranscriptCard({ run, speakers, now, hoveredIndex, onHover, ref 
   };
 
   const showJump = active && !pinned && segments.length > 0;
+  // How the run ended, or null while it is still running.
+  const end = run ? describeEnd(run) : null;
 
   return (
     <section aria-label="Transcript" className="live-card relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -324,10 +328,14 @@ export function TranscriptCard({ run, speakers, now, hoveredIndex, onHover, ref 
             {name}
           </h2>
           <div className="mt-1.5 flex min-w-0 items-center gap-2 text-[13px] leading-5 text-ink-2">
-            {run.outputFile ? <PathLine path={run.outputFile} /> : null}
+            {run.outputName ? (
+              <span title={run.outputName} className="min-w-0 truncate">
+                {run.outputName}
+              </span>
+            ) : null}
             {run.model ? (
               <>
-                {run.outputFile ? <span aria-hidden="true" className="text-ink-3">·</span> : null}
+                {run.outputName ? <span aria-hidden="true" className="text-ink-3">·</span> : null}
                 <span className="shrink-0 whitespace-nowrap">Model {run.model}</span>
               </>
             ) : null}
@@ -397,11 +405,13 @@ export function TranscriptCard({ run, speakers, now, hoveredIndex, onHover, ref 
               </section>
             ))}
           </div>
-        ) : (
+        ) : active ? (
           <p className="m-auto px-2 py-10 text-[15px] text-ink-2">
-            {active ? "Segments appear here as soon as the model hears speech." : "No speech was transcribed in this run."}
+            Segments appear here as soon as the model hears speech.
           </p>
-        )}
+        ) : end ? (
+          <EndNotice end={end} />
+        ) : null}
       </div>
 
       <AnimatePresence>

@@ -3,8 +3,10 @@ import { Check } from "lucide-react";
 import { Orb } from "@/components/aicss/Orb";
 import { ThinkingState } from "@/components/aicss/ThinkingState";
 import { ActivityOrb, type OrbMode } from "@/components/live/activity-orb";
+import { ErrorDetails } from "@/components/live/error-details";
 import { StatusChip } from "@/components/live/status-chip";
 import { useElementSize } from "@/hooks/use-element-size";
+import { describeEnd } from "@/lib/end-state";
 import { DASH, formatElapsed, formatMs, formatPercent, formatRtf } from "@/lib/format";
 import { PHASE_LABEL, phaseLabel, type DisplayPhase, type LatencyStats, type RunState } from "@/lib/live-state";
 import { deviceText, languageText, latencyHint } from "@/lib/live-view";
@@ -160,14 +162,17 @@ function PhaseRow({ run, phase, elapsed }: { run: RunState | null; phase: Displa
       );
     case "error":
     case "canceled": {
-      const message =
-        run?.error ?? (phase === "canceled" ? "The run was canceled." : "The run stopped without an error message.");
+      const end = run ? describeEnd(run) : null;
       return (
         <div className="min-w-0 max-w-full">
           <p className="text-[14px] font-medium text-foreground">{phaseLabel(run, phase)}</p>
-          <p title={message} className="mt-1 line-clamp-2 text-[13px] leading-5 text-ink-2">
-            {message}
-          </p>
+          {end ? (
+            <>
+              <p className="mt-1 text-[13px] leading-5 break-words text-ink-2">{end.title}</p>
+              {end.detail ? <p className="text-[13px] leading-5 break-words text-ink-3">{end.detail}</p> : null}
+              {end.rawError ? <ErrorDetails raw={end.rawError} className="mt-2" /> : null}
+            </>
+          ) : null}
         </div>
       );
     }

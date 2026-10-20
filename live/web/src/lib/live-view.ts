@@ -2,7 +2,7 @@
 // Nothing here touches React or the DOM.
 
 import { DASH, formatClock, shortDeviceName } from "@/lib/format";
-import type { LatencyStats, RunState } from "@/lib/live-state";
+import { isRunActive, type LatencyStats, type RunState } from "@/lib/live-state";
 import type { RunStatus, RunSummary } from "@/lib/live-types";
 
 /** Run picker value that follows the newest run. */
@@ -19,6 +19,38 @@ export const RUN_STATUS_WORD: Record<RunStatus, string> = {
 /** Name of a run in the picker: its audio file, or its id when the file is unknown. */
 export function runName(run: RunSummary): string {
   return run.audio_name || run.run_id;
+}
+
+/** True while the server reports a run as running. */
+export function isLiveSummary(run: RunSummary): boolean {
+  return run.live === true || run.status === "running";
+}
+
+/**
+ * The newest run other than the one shown that is still running. Null when following
+ * and the shown run is live (the server already picked it), so no hint is needed.
+ */
+export function otherLiveRun(
+  runs: readonly RunSummary[],
+  shownRunId: string | null,
+  shownLive: boolean,
+  following: boolean,
+): RunSummary | null {
+  if (following && shownLive) return null;
+  let newest: RunSummary | null = null;
+  for (const run of runs) {
+    if (run.run_id === shownRunId || !isLiveSummary(run)) continue;
+    if (!newest || (run.started_t ?? -Infinity) > (newest.started_t ?? -Infinity)) newest = run;
+  }
+  return newest;
+}
+
+/** Header badge for the selected run: "Live" while it runs, else how it stopped. Null with no run. */
+export function runStateBadge(run: RunState | null): { text: string; status: RunStatus } | null {
+  if (!run) return null;
+  if (isRunActive(run)) return { text: "Live", status: "running" };
+  const status: RunStatus = run.endStatus ?? "stale";
+  return { text: RUN_STATUS_WORD[status], status };
 }
 
 /**

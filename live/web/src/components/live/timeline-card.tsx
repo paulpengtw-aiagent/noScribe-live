@@ -1,17 +1,27 @@
 import { WaveformTimeline, type WaveformTimelineProps } from "@/components/live/waveform-timeline";
+import type { PeaksError } from "@/hooks/use-run-peaks";
 import { useSpeakerName } from "@/lib/speaker-names";
 import { cn } from "@/lib/utils";
+
+/** Shown under the timeline when its waveform cannot be drawn. A failed request shows no note. */
+const PEAKS_NOTE: Partial<Record<NonNullable<PeaksError>, string>> = {
+  undecodable: "無法顯示波形：音訊檔無法讀取",
+  missing: "無法顯示波形：找不到音訊檔",
+};
 
 export interface TimelineCardProps {
   speakers: string[];
   /** "Transcribed 01:12 of 03:23", or a dash before a run. */
   transcribed: string;
   waveform: WaveformTimelineProps;
+  /** Why the waveform is missing, from `useRunPeaks`. The speaker bars still show. */
+  peaksError?: PeaksError;
   className?: string;
 }
 
-export function TimelineCard({ speakers, transcribed, waveform, className }: TimelineCardProps) {
+export function TimelineCard({ speakers, transcribed, waveform, peaksError = null, className }: TimelineCardProps) {
   const speakerName = useSpeakerName();
+  const note = peaksError ? PEAKS_NOTE[peaksError] : undefined;
   return (
     <section aria-label="Timeline" className={cn("live-card flex min-h-0 flex-1 flex-col gap-4 p-5", className)}>
       <header className="flex min-w-0 items-center justify-between gap-4">
@@ -35,6 +45,7 @@ export function TimelineCard({ speakers, transcribed, waveform, className }: Tim
       <div className="relative min-h-0 flex-1">
         <WaveformTimeline {...waveform} />
       </div>
+      {note ? <p className="shrink-0 text-[12px] leading-5 text-ink-3">{note}</p> : null}
     </section>
   );
 }

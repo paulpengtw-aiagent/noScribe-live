@@ -70,6 +70,14 @@ export interface RunState {
   elapsed: number | null;
   /** The server reports the run as stale: it died without writing run_end. */
   stale: boolean;
+  /** Server's inferred end for a stale run (its last event time); null otherwise. */
+  inferredEndT: number | null;
+  /** Basename of the output HTML from the server summary; null until that file exists. */
+  outputName: string | null;
+  /** `t` of the last applied event; the stop time of a stale run that has no inferred end. */
+  lastT: number | null;
+  /** Highest feed `seq` applied so far (-1 before any). Lines at or below it are duplicates. */
+  lastSeq: number;
 }
 
 export interface LiveState {
@@ -120,6 +128,10 @@ function emptyRun(runId: string, summary: RunSummary | null): RunState {
     error: null,
     elapsed: null,
     stale: summary?.status === "stale",
+    inferredEndT: summary?.inferred_end_t ?? null,
+    outputName: summary?.output_name ?? null,
+    lastT: null,
+    lastSeq: -1,
   };
 }
 
@@ -221,16 +233,59 @@ function basenameOf(path: string | null): string | null {
   return parts[parts.length - 1] || path;
 }
 
-/** Carries the server's view of the followed run (stale, or ended) into `state.run`. */
+/** applyEvent plus the bookkeeping for dedupe (lastSeq) and the stop-time fallback (lastT). */
+function applyLine(run: RunState, ev: FeedEvent, ctx: { now: number; live: boolean }): RunState {
+  const next = applyEvent(run, ev, ctx);
+  return {
+    ...next,
+    lastSeq: typeof ev.seq === "number" ? Math.max(run.lastSeq, ev.seq) : run.lastSeq,
+    lastT: typeof ev.t === "number" ? ev.t : run.lastT,
+  };
+}
+
+/** Copies the server's view of a run (stale, end, inferred end, output name) onto its state. Returns `run` itself when nothing changed. */
+function withSummary(run: RunState, summary: RunSummary): RunState {
+  const stale = summary.status === "stale";
+  const endStatus = run.endStatus ?? endFromStatus(summary.status);
+  const endedT = run.endedT ?? summary.ended_t ?? null;
+  const inferredEndT = summary.inferred_end_t ?? null;
+  const outputName = summary.output_name ?? null;
+  if (
+    run.stale === stale &&
+    run.endStatus === endStatus &&
+    run.endedT === endedT &&
+    run.inferredEndT === inferredEndT &&
+    run.outputName === outputName
+  ) {
+    return run;
+  }
+  return { ...run, stale, endStatus, endedT, inferredEndT, outputName };
+}
+
+/** Carries the server's view of the followed run into `state.run`. */
 function applyRunSummaries(state: LiveState, runs: RunSummary[]): LiveState {
   const run = state.run;
   if (!run) return state;
   const summary = runs.find((r) => r.run_id === run.runId);
   if (!summary) return state;
-  const stale = summary.status === "stale";
-  const endStatus = run.endStatus ?? endFromStatus(summary.status);
-  if (run.stale === stale && run.endStatus === endStatus) return state;
-  return { ...state, run: { ...run, stale, endStatus } };
+  const next = withSummary(run, summary);
+  return next === run ? state : { ...state, run: next };
+}
+
+/**
+ * A snapshot for the run already on screen (the stream reconnected) rebuilds the run
+ * from its events. Keep the segment objects that did not change, so their reveal
+ * state survives, and keep the pulse counter so the orb does not jump.
+ */
+function keepRevealState(previous: RunState, next: RunState): RunState {
+  const before = new Map(previous.segments.map((seg) => [seg.index, seg]));
+  const segments = next.segments.map((seg) => {
+    const old = before.get(seg.index);
+    const same =
+      old !== undefined && old.start === seg.start && old.end === seg.end && old.speaker === seg.speaker && old.text === seg.text;
+    return same ? old : seg;
+  });
+  return { ...next, segments, liveCount: previous.liveCount, lastSeq: Math.max(previous.lastSeq, next.lastSeq) };
 }
 
 export function liveReducer(state: LiveState, action: LiveAction): LiveState {
@@ -243,15 +298,19 @@ export function liveReducer(state: LiveState, action: LiveAction): LiveState {
       return applyRunSummaries({ ...state, runs: action.runs }, action.runs);
     case "snapshot": {
       if (!action.runId) return { ...state, run: null };
-      let run = emptyRun(action.runId, action.summary);
-      for (const ev of action.events) run = applyEvent(run, ev, { now: action.now, live: false });
-      return { ...state, run };
+      const summary = action.summary ?? state.runs.find((r) => r.run_id === action.runId) ?? null;
+      let run = emptyRun(action.runId, summary);
+      for (const ev of action.events) run = applyLine(run, ev, { now: action.now, live: false });
+      const previous = state.run && state.run.runId === action.runId ? state.run : null;
+      return { ...state, run: previous ? keepRevealState(previous, run) : run };
     }
     case "feed": {
       // Events for a run we are not following are ignored; the server sends a
       // fresh snapshot whenever the followed run changes.
       if (!state.run || state.run.runId !== action.runId) return state;
-      return { ...state, run: applyEvent(state.run, action.event, { now: action.now, live: true }) };
+      // Already applied (for example replayed after a reconnect): drop it.
+      if (action.event.seq <= state.run.lastSeq) return state;
+      return { ...state, run: applyLine(state.run, action.event, { now: action.now, live: true }) };
     }
     default:
       return state;
@@ -321,10 +380,20 @@ export function latencyStats(run: RunState | null): LatencyStats {
   };
 }
 
-/** Elapsed run time in seconds; frozen once the run has ended. */
+/**
+ * When a run stopped, in unix seconds: the run_end time (or the summary's ended_t) for an
+ * ended run, the server's inferred end (else the last event) for a stale one. Null while running.
+ */
+export function stoppedT(run: RunState): number | null {
+  if (run.endStatus) return run.endedT ?? run.lastT ?? run.startedT;
+  if (run.stale) return run.inferredEndT ?? run.lastT ?? run.startedT;
+  return null;
+}
+
+/** Elapsed run time in seconds; frozen once the run has ended or stopped. */
 export function elapsedSeconds(run: RunState | null, nowMs: number): number | null {
   if (!run || run.startedT === null) return null;
-  const end = run.endedT ?? nowMs / 1000;
+  const end = stoppedT(run) ?? nowMs / 1000;
   return Math.max(0, end - run.startedT);
 }
 
@@ -337,7 +406,8 @@ export function realTimeFactor(run: RunState | null, nowMs: number): number | nu
   const last = run.segments[run.segments.length - 1];
   if (!last) return null;
   const audio = Math.max(0.001, last.end - run.startOffset);
-  return (nowMs / 1000 - run.startedT) / audio;
+  const end = stoppedT(run) ?? nowMs / 1000;
+  return (end - run.startedT) / audio;
 }
 
 /** Media seconds transcribed so far (end of the last segment). */

@@ -5,28 +5,36 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import type { Connection } from "@/hooks/use-live-feed";
 import type { Theme } from "@/hooks/use-theme";
 import { formatTimeOfDay } from "@/lib/format";
-import { FOLLOW_NEWEST, RUN_STATUS_WORD, runName } from "@/lib/live-view";
+import type { RunState } from "@/lib/live-state";
+import { FOLLOW_NEWEST, RUN_STATUS_WORD, runName, runStateBadge } from "@/lib/live-view";
 import type { RunSummary } from "@/lib/live-types";
 import { cn } from "@/lib/utils";
-
-const CONNECTION_TEXT: Record<Connection, string> = {
-  connecting: "Connecting",
-  live: "Live",
-  reconnecting: "Reconnecting",
-};
 
 export interface TopBarProps {
   runs: RunSummary[];
   runParam: string;
   onRunChange: (runParam: string) => void;
+  /** The shown run, or null when none is shown. */
+  run: RunState | null;
+  /** A still-running run other than the shown one; offers a switch. Null when there is none. */
+  otherLive: RunSummary | null;
   connection: Connection;
   theme: Theme;
   onToggleTheme: () => void;
 }
 
-export function TopBar({ runs, runParam, onRunChange, connection, theme, onToggleTheme }: TopBarProps) {
-  const chosen = runs.find((run) => run.run_id === runParam);
-  const connectionText = CONNECTION_TEXT[connection];
+export function TopBar({
+  runs,
+  runParam,
+  onRunChange,
+  run,
+  otherLive,
+  connection,
+  theme,
+  onToggleTheme,
+}: TopBarProps) {
+  const chosen = runs.find((item) => item.run_id === runParam);
+  const badge = runStateBadge(run);
   // The trigger shows a shorter label on narrow screens so it never clips to "Follow newest r".
   const triggerLabel =
     runParam === FOLLOW_NEWEST ? (
@@ -51,6 +59,20 @@ export function TopBar({ runs, runParam, onRunChange, connection, theme, onToggl
         </div>
 
         <div className="flex shrink-0 items-center gap-3 sm:gap-5">
+          {otherLive && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              data-testid="other-live-run"
+              onClick={() => onRunChange(otherLive.run_id)}
+              className="h-8 rounded-full bg-raised px-3 text-[13px] text-foreground shadow-ring hover:bg-raised dark:bg-raised dark:hover:bg-raised"
+            >
+              <span aria-hidden="true" className="size-1.5 animate-pulse rounded-full bg-foreground" />
+              另一個轉錄正在進行 → 切換
+            </Button>
+          )}
+
           <Select value={runParam} onValueChange={onRunChange}>
             <SelectTrigger
               aria-label="Choose a run"
@@ -60,24 +82,42 @@ export function TopBar({ runs, runParam, onRunChange, connection, theme, onToggl
             </SelectTrigger>
             <SelectContent position="popper" align="end" className="min-w-[260px] rounded-[14px]">
               <SelectItem value={FOLLOW_NEWEST}>Follow newest run</SelectItem>
-              {runs.map((run) => (
-                <SelectItem key={run.run_id} value={run.run_id}>
+              {runs.map((item) => (
+                <SelectItem key={item.run_id} value={item.run_id}>
                   <span className="flex w-full min-w-0 items-center gap-3">
-                    <span className="min-w-0 flex-1 truncate">{runName(run)}</span>
-                    <span className="shrink-0 text-ink-2">{RUN_STATUS_WORD[run.status]}</span>
-                    <span className="shrink-0 tabular-nums text-ink-3">{formatTimeOfDay(run.started_t)}</span>
+                    <span className="min-w-0 flex-1 truncate">{runName(item)}</span>
+                    <span className="shrink-0 text-ink-2">{RUN_STATUS_WORD[item.status]}</span>
+                    <span className="shrink-0 tabular-nums text-ink-3">{formatTimeOfDay(item.started_t)}</span>
                   </span>
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
 
-          <div role="status" className="flex items-center gap-2 text-[13px] text-ink-2">
-            <span
-              aria-hidden="true"
-              className={cn("size-1.5 rounded-full", connection === "live" ? "bg-foreground" : "animate-pulse bg-ink-3")}
-            />
-            <span className="sr-only sm:not-sr-only">{connectionText}</span>
+          <div role="status" className="flex items-center gap-3 text-[13px] text-ink-2">
+            <span data-testid="conn-state" data-state={connection} className="flex items-center gap-2">
+              {connection === "live" ? (
+                <span className="sr-only">Connected</span>
+              ) : (
+                <>
+                  <span aria-hidden="true" className="size-1.5 animate-pulse rounded-full bg-ink-3" />
+                  {connection === "reconnecting" ? (
+                    <span>重新連線中…</span>
+                  ) : (
+                    <span className="sr-only sm:not-sr-only">Connecting</span>
+                  )}
+                </>
+              )}
+            </span>
+            {badge && (
+              <span data-testid="run-state" data-state={badge.status} className="flex items-center gap-2">
+                <span
+                  aria-hidden="true"
+                  className={cn("size-1.5 rounded-full", badge.status === "running" ? "bg-foreground" : "bg-ink-3")}
+                />
+                {badge.text}
+              </span>
+            )}
           </div>
 
           <Button

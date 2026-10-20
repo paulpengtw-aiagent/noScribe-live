@@ -24,7 +24,7 @@ import {
   type DisplayPhase,
   type RunState,
 } from "@/lib/live-state";
-import { clockText, envelopeFor, FOLLOW_NEWEST } from "@/lib/live-view";
+import { clockText, envelopeFor, FOLLOW_NEWEST, otherLiveRun } from "@/lib/live-view";
 import { SpeakerOrderContext } from "@/lib/speaker-names";
 import { speakerColor } from "@/lib/speakers";
 
@@ -75,7 +75,9 @@ export default function App() {
   const run: RunState | null = state.run && state.run.startedT !== null ? state.run : null;
   const active = isRunActive(run);
   const now = useNow(active, 250);
-  const peaks = useRunPeaks(run?.runId ?? null, !active);
+  // Offers a switch to another still-running run; never moves the user off a run they picked.
+  const otherLive = otherLiveRun(state.runs, run?.runId ?? null, active, runParam === FOLLOW_NEWEST);
+  const { peaks } = useRunPeaks(run?.runId ?? null, !active);
 
   const phase = displayPhase(run);
   const segments = run?.segments;
@@ -145,6 +147,8 @@ export default function App() {
             runs={state.runs}
             runParam={runParam}
             onRunChange={setRunParam}
+            run={run}
+            otherLive={otherLive}
             connection={connection}
             theme={theme}
             onToggleTheme={toggleTheme}
