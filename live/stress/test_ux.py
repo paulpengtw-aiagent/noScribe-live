@@ -88,14 +88,19 @@ REC_JS = r"""
   if (window.__nsRecInstalled) return;
   window.__nsRecInstalled = true;
   window.__nsAnn = [];
+  window.__nsAnnSeen = new WeakSet();
   window.__nsSegRec = {};
   const note = () => {
     const now = performance.now();
     const ann = document.querySelector('[data-testid="sr-announcer"]');
     if (ann) {
-      const txt = ann.textContent.trim();
-      const arr = window.__nsAnn;
-      if (txt && (arr.length === 0 || arr[arr.length - 1] !== txt)) arr.push(txt);
+      // One entry per announcer line, recorded when the line first appears (lines are never edited in place).
+      for (const child of ann.children) {
+        if (window.__nsAnnSeen.has(child)) continue;
+        window.__nsAnnSeen.add(child);
+        const txt = child.textContent.trim();
+        if (txt) window.__nsAnn.push(txt);
+      }
     }
     for (const el of document.querySelectorAll('[data-segment-seq]')) {
       const seq = el.getAttribute('data-segment-seq');
@@ -131,8 +136,8 @@ TURNS_JS = """() => Array.from(document.querySelectorAll('[data-testid="turn"]')
   return { paras: ps.length, empty: text.length === 0, html: t.outerHTML.slice(0, 200) }; })"""
 PARA_JS = """() => Array.from(document.querySelectorAll('[data-testid="turn"]')).map((t) => ({
   paras: Array.from(t.querySelectorAll('[data-testid="paragraph"]')).map((p) => {
-    const tm = p.querySelector('[data-testid="paragraph-time"]');
-    return { time: tm ? tm.getAttribute('data-start') : null, hasTime: !!tm };
+    const time = p.getAttribute('data-start');
+    return { time, hasTime: time !== null };
   }) }))"""
 OPTS_JS = """() => Array.from(document.querySelectorAll('[data-testid="run-option"]')).map((e) => ({
   status: e.getAttribute('data-status'), runId: e.getAttribute('data-run-id'), text: e.textContent.trim() }))"""
@@ -531,17 +536,48 @@ def stick_body(h: Harness, page: Any, path: Path, run_id: str) -> None:
     h.check("stick: PageUp in the focused transcript detaches follow", bool(paged),
             f"following {following(page)!r}, scrollTop {scroll_top(page)}")
 
-    page.mouse.wheel(0, -100)  # make sure the view is scrolled up when the run ends
-    time.sleep(0.3)
-    already = page_ended(page, run_id)
-    ended = wait_until(lambda: page_ended(page, run_id), 90, 0.5)
+
+
+def stick_end_body(h: Harness, page: Any, run_id: str) -> None:
+    scroller = '[data-testid="transcript-scroll"]'
+    jump = page.locator('[data-testid="jump-to-live"]')
+    ready = wait_until(lambda: seg_count(page) >= 8 and following(page) == "true" and not page_ended(page, run_id),
+                       60, 0.2)
+    h.check("stick end setup: >= 8 segments with following=true while the run is still live", bool(ready),
+            f"segments {seg_count(page)}, following {following(page)!r}, run_end seen {page_ended(page, run_id)}")
+    if not ready:
+        return
+    box = page.locator(scroller).bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.mouse.wheel(0, -100)  # scroll up while the run is still live
+    detached = wait_until(lambda: following(page) == "false", 2, 0.05)
+    live_at_scroll = not page_ended(page, run_id)
+    ended = wait_until(lambda: page_ended(page, run_id), 120, 0.5)
     jt = wait_until(lambda: jump_text(page) == "Jump to end", 3, 0.1)
     jv = jump.is_visible()
     h.check("stick: run_end while scrolled up keeps the jump button visible, reading 'Jump to end'",
-            bool(ended) and not already and bool(jt) and jv,
-            f"run_end seen {bool(ended)} (already before scrolling: {already}), jump visible {jv}, "
-            f"text {jump_text(page)!r}, following {following(page)!r}")
+            bool(detached) and live_at_scroll and bool(ended) and bool(jt) and jv,
+            f"scrolled up while live {bool(detached) and live_at_scroll} (run_end seen at scroll: {not live_at_scroll}), "
+            f"run_end seen {bool(ended)}, jump visible {jv}, text {jump_text(page)!r}, following {following(page)!r}")
     h.shot(page, "stick-3-ended-scrolled-up.png")
+
+
+def stick_end_group(h: Harness, browser: Any) -> None:
+    # A fresh replay (speed 2), so run_end comes after the reader has scrolled up.
+    feeds = h.new_feeds("stick-end")
+    srv = h.serve(h.port, feeds, "stick-end")
+    try:
+        before = h.feeds_now(feeds)
+        h.start_replay(h.demo_src, feeds, 2, 2, "stick-end")
+        _path, run_id = h.new_run(feeds, before, "stick-end")
+        ctx, page = h.new_page(browser)
+        try:
+            page.goto(h.url(h.port), wait_until="domcontentloaded", timeout=30000)
+            h.scenario("stick end", stick_end_body, h, page, run_id)
+        finally:
+            ctx.close()
+    finally:
+        Harness.stop(srv)
 
 
 def group_stick(h: Harness, browser: Any) -> None:
@@ -559,6 +595,7 @@ def group_stick(h: Harness, browser: Any) -> None:
             ctx.close()
     finally:
         Harness.stop(srv)
+    stick_end_group(h, browser)
 
 
 # ---- reveal: no empty turns, reduced motion, screen-reader announcements -------------------------

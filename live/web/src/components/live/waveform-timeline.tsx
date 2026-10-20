@@ -181,6 +181,7 @@ export function WaveformTimeline({
             type="button"
             data-timeline-index={seg.index}
             data-active={isActive ? "true" : undefined}
+            data-hovered={hoveredIndex === seg.index ? "true" : undefined}
             aria-current={isActive ? "true" : undefined}
             tabIndex={seg.index === stopIndex ? 0 : -1}
             aria-label={name ? `Segment ${seg.index + 1}, ${name}` : `Segment ${seg.index + 1}`}

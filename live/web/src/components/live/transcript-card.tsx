@@ -38,6 +38,8 @@ const FINISH_MS = 400;
 /** The reveal is behind when more than this many segments wait, or the oldest has waited this long (ms). */
 const FLUSH_SEGMENTS = 2;
 const FLUSH_MS = 2000;
+/** The screen reader keeps this many announced lines; the oldest are removed. */
+const SR_KEEP = 20;
 const CLI_COMMAND =
   "python -m noScribe --no-gui --model breeze-asr-25 --speaker-detection auto --timestamps --live-feed live/feeds/ INPUT OUTPUT.html";
 
@@ -51,6 +53,13 @@ type Reveal = "plain" | "waiting" | "reveal" | "caret";
 interface SpokenLine {
   key: number;
   text: string;
+}
+
+/** What the screen reader has heard for the current run. `seen` holds the feed seqs already announced or shown at open. */
+interface AnnouncerState {
+  runId: string | null;
+  seen: ReadonlySet<number>;
+  lines: SpokenLine[];
 }
 
 function distanceToEnd(el: HTMLElement): number {
@@ -93,15 +102,6 @@ function highestLiveIndex(segments: readonly Segment[]): number {
   let highest = -1;
   for (const segment of segments) {
     if (segment.live && segment.index > highest) highest = segment.index;
-  }
-  return highest;
-}
-
-/** The newest segment index of any kind, or -1. */
-function highestIndex(segments: readonly Segment[]): number {
-  let highest = -1;
-  for (const segment of segments) {
-    if (segment.index > highest) highest = segment.index;
   }
   return highest;
 }
@@ -336,22 +336,25 @@ export function TranscriptCard({
     }))
     .filter((entry) => entry.paragraphs.length > 0);
 
-  // What the screen reader announces: each segment once, after its reveal is complete (never partial text).
-  // Text already on screen when a run is first shown is not news, so announcements start after it.
-  const [announceFrom, setAnnounceFrom] = useState<{ runId: string | null; through: number }>({ runId: null, through: -1 });
-  if (announceFrom.runId !== runId) setAnnounceFrom({ runId, through: highestIndex(segments) });
-  // Derived, not stored: the lines only grow as segments complete, so React appends just the new ones.
-  const spokenLines = useMemo(() => {
-    if (announceFrom.runId !== runId) return NO_LINES;
-    const lines: SpokenLine[] = [];
-    for (const segment of segments) {
-      if (segment.index <= announceFrom.through) continue;
-      if (queueing && isQueued(segment, doneThrough)) break;
-      const text = toDisplay(segment.text.trim());
-      if (text) lines.push({ key: segment.index, text: segment.speaker ? `${speakerName(segment.speaker)}: ${text}` : text });
+  // What the screen reader announces: one line per segment, appended when the segment's data arrives. The feed text
+  // is already complete, so the typewriter is not involved. Segments already on screen when a run is first shown are
+  // not news. Each feed seq is announced once, existing lines are never edited, and only the newest SR_KEEP are kept.
+  const [announcer, setAnnouncer] = useState<AnnouncerState>({ runId: null, seen: new Set(), lines: NO_LINES });
+  if (announcer.runId !== runId) {
+    setAnnouncer({ runId, seen: new Set(segments.map((segment) => segment.seq)), lines: NO_LINES });
+  } else {
+    const fresh = segments.filter((segment) => !announcer.seen.has(segment.seq));
+    if (fresh.length > 0) {
+      const lines: SpokenLine[] = [];
+      for (const segment of fresh) {
+        const text = toDisplay(segment.text.trim());
+        if (text) lines.push({ key: segment.seq, text: segment.speaker ? `${speakerName(segment.speaker)}: ${text}` : text });
+      }
+      const seen = new Set(announcer.seen);
+      for (const segment of fresh) seen.add(segment.seq);
+      setAnnouncer({ runId, seen, lines: [...announcer.lines, ...lines].slice(-SR_KEEP) });
     }
-    return lines;
-  }, [announceFrom, runId, segments, queueing, doneThrough, toDisplay, speakerName]);
+  }
 
   useLayoutEffect(() => {
     activeRef.current = active;
@@ -559,7 +562,7 @@ export function TranscriptCard({
       </div>
 
       <div data-testid="sr-announcer" aria-live="polite" className="sr-only">
-        {spokenLines.map((line) => (
+        {announcer.lines.map((line) => (
           <p key={line.key}>{line.text}</p>
         ))}
       </div>
