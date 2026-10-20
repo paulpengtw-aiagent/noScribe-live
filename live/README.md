@@ -24,10 +24,13 @@ live/run.sh --rebuild    # also rebuilds the frontend in live/web
 ## Share the viewer through a tunnel
 
 1. Start the gated viewer: `LIVE_TOKEN=... PORT=8766 SKIP_WEB_BUILD=1 live/run.sh`.
-2. Run `live/stress/tunnel.sh 8766`. It keeps an SSH reverse tunnel up and prints the public URL.
+2. Run `live/stress/tunnel-bore.sh 8766`. It keeps a bore.pub TCP tunnel up on a fixed remote port, so the URL (`http://bore.pub:N`, also in `live/logs/tunnel-url.txt`) stays the same across reconnects. The port is remembered in `live/logs/bore-port`.
 3. Open `<URL>/?token=<token>` once; that sets a cookie.
 
-Cloudflare quick tunnels buffer SSE (Server-Sent Events), so this uses localhost.run (SSH, no account). Its URL can change on every reconnect; the current one is in `live/logs/tunnel-url.txt`.
+Needs the `bore` client: download the static musl build from https://github.com/ekzhang/bore/releases into `.tools/` (or set `BORE=...`).
+Cloudflare quick tunnels buffer SSE, and localhost.run rotates its URL, which is why bore is used.
+Caveat: bore is plain HTTP (no TLS), so the token and cookie travel unencrypted. Use it for public test audio only.
+Alternative: `live/stress/tunnel.sh` (localhost.run: HTTPS, but the URL changes on every reconnect).
 
 ## Transcribe alongside it
 
