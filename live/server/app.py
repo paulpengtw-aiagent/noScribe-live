@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
 from .auth import TokenGate
 from .feed import FeedTailer, RunRegistry, drain_queue
-from .peaks import compute_peaks
+from .peaks import AudioDecodeError, compute_peaks
 
 logger = logging.getLogger("server.app")
 
@@ -197,7 +197,10 @@ def create_app(feeds_dir: str | Path, static_dir: str | Path, poll: float = 0.05
             started = time.perf_counter()
             try:
                 duration, peaks = await asyncio.to_thread(compute_peaks, path, n)
-            except Exception as exc:  # ffmpeg missing, undecodable audio, ...
+            except AudioDecodeError as exc:  # the file exists but ffprobe or ffmpeg cannot read audio from it
+                logger.warning("peaks for run=%s: audio could not be decoded: %s", run_id, exc)
+                return JSONResponse({"error": "audio could not be decoded", "detail": str(exc)}, status_code=422)
+            except Exception as exc:  # a server failure, such as ffmpeg missing
                 logger.warning("peaks for run=%s failed: %s", run_id, exc)
                 return JSONResponse({"error": f"could not compute peaks: {exc}"}, status_code=500)
             logger.info("peaks run=%s n=%d computed in %.2fs", run_id, n, time.perf_counter() - started)

@@ -33,6 +33,7 @@ STARTUP_MAX_FILES = 30         # at startup only this many (most recently modifi
 READ_CHUNK = 1 << 20           # bytes read from one feed file per poll (bounds memory and loop time)
 MAX_LINE_BYTES = 1 << 20       # longer lines are dropped; real events are a few hundred bytes
 SUBSCRIBER_QUEUE_MAX = 10_000  # backlog allowed per subscriber before it is dropped
+OUTPUT_CHECK_S = 2.0           # the isfile check of output_file is reused this long (summaries are built often)
 
 
 def _num(value: Any) -> float | None:
@@ -121,6 +122,7 @@ class Run:
     started_t: float | None = None     # CLI wall-clock time of run_start (decides "latest")
     ended_t: float | None = None
     last_t: float | None = None        # CLI wall-clock time of the newest event
+    _output_check: tuple[str, float, bool] | None = field(default=None, repr=False, compare=False)  # (path, checked at, exists)
 
     def apply(self, ev: dict[str, Any]) -> None:
         """Fold one event into the summary fields."""
@@ -174,6 +176,24 @@ class Run:
             return "stale"
         return self.status
 
+    def output_name(self, now: float) -> str | None:
+        """Basename of output_file if that file exists, else None. The isfile check is reused for OUTPUT_CHECK_S."""
+        path = self.output_file
+        if not path:
+            return None
+        cached = self._output_check
+        if cached is None or cached[0] != path or not 0 <= now - cached[1] < OUTPUT_CHECK_S:
+            cached = (path, now, os.path.isfile(path))
+            self._output_check = cached
+        return _basename(path) if cached[2] else None
+
+    def inferred_end_t(self, status: str) -> float | None:
+        """When the run ended, as far as the viewer can tell: last_t for a stale run (its last event),
+        ended_t for an ended run, and None while it is running."""
+        if status == "running":
+            return None
+        return self.last_t if status == "stale" else self.ended_t
+
     def summary(self, now: float) -> dict[str, Any]:
         """JSON-ready summary, with the status from effective_status()."""
         status = self.effective_status(now)
@@ -182,11 +202,14 @@ class Run:
             "audio_name": _basename(self.audio_file) if self.audio_file else None,
             "audio_file": self.audio_file,
             "output_file": self.output_file,
+            "output_name": self.output_name(now),
             "model": self.model,
             "language": self.language,
             "detected_language": self.detected_language,
             "speaker_detection": self.speaker_detection,
             "status": status,
+            "live": status == "running",
+            "inferred_end_t": self.inferred_end_t(status),
             "error": self.error,
             "started_t": self.started_t,
             "ended_t": self.ended_t,
@@ -218,11 +241,19 @@ class RunRegistry:
 
     @property
     def latest_run_id(self) -> str | None:
-        """run_id of the run with the greatest run_start time, or None if no run has started."""
-        best: Run | None = None
+        """The run that "latest" follows: the newest-started run whose effective status is "running".
+        If none is running, the newest-started run. None if no run has started."""
+        now = time.time()
+        newest: Run | None = None
+        newest_live: Run | None = None
         for run in self._runs.values():
-            if run.started_t is not None and (best is None or run.started_t >= best.started_t):
-                best = run
+            if run.started_t is None:
+                continue
+            if newest is None or run.started_t >= newest.started_t:
+                newest = run
+            if run.effective_status(now) == "running" and (newest_live is None or run.started_t >= newest_live.started_t):
+                newest_live = run
+        best = newest_live if newest_live is not None else newest
         return best.run_id if best is not None else None
 
     def summaries(self, now: float | None = None) -> list[dict[str, Any]]:
