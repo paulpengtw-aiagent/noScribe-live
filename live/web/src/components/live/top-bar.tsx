@@ -87,7 +87,7 @@ export function TopBar({
                   <span className="flex w-full min-w-0 items-center gap-3">
                     <span className="min-w-0 flex-1 truncate">{runName(item)}</span>
                     <span className="shrink-0 text-ink-2">{RUN_STATUS_WORD[item.status]}</span>
-                    <span className="shrink-0 tabular-nums text-ink-3">{formatTimeOfDay(item.started_t)}</span>
+                    <span className="shrink-0 tabular-nums text-ink-3">{formatTimeOfDay(item.started_t, true)}</span>
                   </span>
                 </SelectItem>
               ))}

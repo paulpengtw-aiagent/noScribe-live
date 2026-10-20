@@ -71,11 +71,12 @@ export function formatPercent(fraction: number): string {
   return `${Math.round(Math.min(1, Math.max(0, fraction)) * 100)}%`;
 }
 
-/** Local 24-hour HH:MM for a unix-seconds timestamp. */
-export function formatTimeOfDay(unixSeconds: number | null | undefined): string {
+/** Local 24-hour HH:MM (or HH:MM:SS with `withSeconds`) for a unix-seconds timestamp. */
+export function formatTimeOfDay(unixSeconds: number | null | undefined, withSeconds = false): string {
   if (unixSeconds == null || !Number.isFinite(unixSeconds)) return DASH;
   const d = new Date(unixSeconds * 1000);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return withSeconds ? `${hm}:${String(d.getSeconds()).padStart(2, "0")}` : hm;
 }
 
 export function basename(path: string | null | undefined): string | null {
