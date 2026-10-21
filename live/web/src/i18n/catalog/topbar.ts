@@ -42,7 +42,7 @@ const zhTW: TopbarMessages = {
   switchTheme: { light: "切換為淺色主題", dark: "切換為深色主題" },
   processing: "處理中…",
   menuLabel: "主題與語言",
-  runStatus: { running: "進行中", finished: "已完成", error: "失敗", canceled: "已取消", stale: "已停止" },
+  runStatus: { running: "即時", finished: "已完成", error: "失敗", canceled: "已取消", stale: "已停止" },
   runDisconnected: "連線中斷",
   connConnected: "已連線",
   connConnecting: "連線中…",
@@ -50,10 +50,10 @@ const zhTW: TopbarMessages = {
   otherLive: "另一個轉錄正在進行 → 切換",
   clockOf: (transcribed: string, duration: string) => `${transcribed} / ${duration}`,
   latency: {
-    noSamples: "從 CLI 完成一段到它出現在這裡的時間。以本頁開啟期間收到的段落測量。",
+    noSamples: "從 CLI 完成一段到它出現在這裡的時間。以本頁開啟期間收到的各段測量。",
     stats: (last: string, median: string, split: string) =>
       `從 CLI 完成一段到它出現在這裡的時間。最近 ${last} · 中位數 ${median}${split}。`,
-    split: (tail: string, push: string) => `（尾端 ${tail} + 推送 ${push}）`,
+    split: (tail: string, push: string) => `（尾端 ${tail} + 推播 ${push}）`,
   },
 };
 

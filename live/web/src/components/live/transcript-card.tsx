@@ -21,6 +21,8 @@ import { useSpeakerName } from "@/lib/speaker-names";
 import { speakerColor, speakerKey } from "@/lib/speakers";
 import { useZhTw } from "@/lib/zh-tw";
 import { buildBlocks, type Paragraph, type SegmentItem } from "@/lib/transcript-blocks";
+import { useEasyView } from "@/hooks/use-easy-view";
+import { RevealEngine, type RevealView } from "@/lib/reveal-engine";
 import { cn } from "@/lib/utils";
 
 /** The view follows new text while the reader is within this many px of the bottom. */
@@ -29,16 +31,12 @@ const STICK_PX = 8;
 const HOLD_MS = 1000;
 /** Content this far past an edge (px) counts as "more above or below" and gets a soft fade. */
 const EDGE_PX = 2;
-/** A burst of live segments finishes revealing this long after its last arrival (ms). */
-const BURST_MS = 1200;
-/** Bounds for how long one live segment takes to reveal (ms). */
-const MIN_REVEAL_MS = 120;
-const MAX_REVEAL_MS = 700;
-/** A finished run drains its pending text within this long (ms). */
-const FINISH_MS = 400;
-/** The reveal is behind when more than this many segments wait, or the oldest has waited this long (ms). */
-const FLUSH_SEGMENTS = 2;
-const FLUSH_MS = 2000;
+/** A reveal this far behind the data (ms) is flushed: shown at once, not replayed. Only a stalled tab gets here. */
+const FLUSH_LAG_MS = 4000;
+/** Longest frame step (ms) the reveal integrates, so a throttled tab does not dump its backlog at once. */
+const MAX_FRAME_MS = 100;
+/** Frame step (ms) for the first frame of a loop. */
+const FIRST_FRAME_MS = 16;
 /** The screen reader keeps this many announced lines; the oldest are removed. */
 const SR_KEEP = 20;
 const CLI_COMMAND =
@@ -82,7 +80,7 @@ export interface TranscriptHandle {
 export interface TranscriptCardProps {
   run: RunState | null;
   speakers: string[];
-  /** Wall-clock ms; paces the reveal of queued live segments. */
+  /** Wall-clock ms. No longer used by the reveal (the reveal reads its own clock); kept so callers need no change. */
   now: number;
   hoveredIndex: number | null;
   onHover: (index: number | null) => void;
@@ -97,23 +95,60 @@ export interface TranscriptCardProps {
   ref?: Ref<TranscriptHandle>;
 }
 
-/** A live segment with text that has not finished revealing yet. Snapshot segments never queue. */
-function isQueued(segment: Segment, doneThrough: number): boolean {
-  return segment.live && segment.index > doneThrough && segment.text.trim() !== "";
+/** Test instrumentation, exposed as window.__nsliveReveal. Lag runs from the oldest segment not yet fully revealed. */
+interface RevealStats {
+  maxLagMs: number;
+  currentLagMs: number;
+  queued: number;
+  revealedSegments: number;
 }
 
-/** The newest live segment index, or -1. */
-function highestLiveIndex(segments: readonly Segment[]): number {
-  let highest = -1;
-  for (const segment of segments) {
-    if (segment.live && segment.index > highest) highest = segment.index;
+declare global {
+  interface Window {
+    __nsliveReveal?: RevealStats;
   }
-  return highest;
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
+const revealStats: RevealStats = { maxLagMs: 0, currentLagMs: 0, queued: 0, revealedSegments: 0 };
+if (typeof window !== "undefined") window.__nsliveReveal = revealStats;
+
+/** Frame-loop state for one card: the pending frame id (null when idle) and the previous frame's timestamp. */
+interface RevealLoop {
+  frame: number | null;
+  last: number | null;
 }
+
+function recordStats(engine: RevealEngine, now: number) {
+  const lag = engine.lagMs(now);
+  revealStats.currentLagMs = lag;
+  revealStats.maxLagMs = Math.max(revealStats.maxLagMs, lag);
+  revealStats.queued = engine.queued();
+  revealStats.revealedSegments = engine.revealedSegments;
+}
+
+/**
+ * One rAF loop drives the reveal for the card. It advances the queue, publishes the view at most once per frame,
+ * and stops once nothing is revealing.
+ */
+function pumpReveal(engine: RevealEngine, loop: RevealLoop, publish: (view: RevealView) => void) {
+  if (loop.frame !== null || !engine.busy()) return;
+  const step = (time: number) => {
+    const dt = loop.last === null ? FIRST_FRAME_MS : Math.min(MAX_FRAME_MS, time - loop.last);
+    loop.last = time;
+    if (engine.lagMs(Date.now()) > FLUSH_LAG_MS) engine.flush();
+    engine.advance(dt);
+    recordStats(engine, Date.now());
+    publish(engine.view());
+    if (engine.busy()) {
+      loop.frame = requestAnimationFrame(step);
+    } else {
+      loop.frame = null;
+      loop.last = null;
+    }
+  };
+  loop.frame = requestAnimationFrame(step);
+}
+
 
 /** One-shot highlight that fades out over 1.2 s. Under reduced motion it holds, then drops. */
 function flashSegment(el: HTMLElement, reduce: boolean) {
@@ -129,10 +164,8 @@ interface SegmentSpanProps {
   spaceBefore: boolean;
   thinBefore: boolean;
   reveal: Reveal;
-  /** Only for the segment revealing now: how long its reveal takes (ms). */
-  revealMs?: number;
-  /** Only for the segment revealing now: called once its text is fully shown. */
-  onRevealed?: (index: number) => void;
+  /** Only for the segment revealing now: graphemes of its text shown so far. Passed to that segment alone, so the others do not re-render per frame. */
+  shown?: number;
   /** Display text for a segment (Traditional Chinese conversion when loaded). */
   display: (text: string) => string;
   hovered: boolean;
@@ -147,8 +180,7 @@ const SegmentSpan = memo(function SegmentSpan({
   spaceBefore,
   thinBefore,
   reveal,
-  revealMs,
-  onRevealed,
+  shown,
   display,
   hovered,
   active,
@@ -186,13 +218,7 @@ const SegmentSpan = memo(function SegmentSpan({
             {reveal === "plain" ? (
               text
             ) : (
-              <StreamingTextInline
-                text={text}
-                caret
-                instant={reveal === "caret"}
-                durationMs={revealMs}
-                onRevealed={onRevealed ? () => onRevealed(segment.index) : undefined}
-              />
+              <StreamingTextInline text={text} shown={shown} caret idle={reveal === "caret"} />
             )}
           </>
         )}
@@ -274,7 +300,6 @@ function CommandBlock() {
 export function TranscriptCard({
   run,
   speakers,
-  now,
   hoveredIndex,
   onHover,
   activeIndex = null,
@@ -318,43 +343,41 @@ export function TranscriptCard({
   const hasBlocks = run !== null && segments.length > 0;
   const name = run ? (run.audioName ?? run.runId) : null;
 
-  // Live segments reveal one after another, in arrival order. `doneThrough` is the newest live segment that has
-  // finished revealing in this run. The live text on screen when the card mounts counts as done, so a remount
-  // does not replay it.
-  const [revealed, setRevealed] = useState(() => ({ runId, through: highestLiveIndex(segments) }));
-  const doneThrough = revealed.runId === runId ? revealed.through : -1;
-  // Reduced motion shows everything at once. Otherwise queued text reveals, including after the run ends.
-  const queueable = !reduce;
-  const pendingQueue = useMemo(
-    () => (queueable ? segments.filter((segment) => isQueued(segment, doneThrough)) : NO_SEGMENTS),
-    [queueable, segments, doneThrough],
+  // The reveal (see src/lib/reveal-engine.ts). Live segments type out one grapheme at a time, in arrival order; a
+  // segment is queued only when it arrives live after the run was opened. Reduced motion, Easy view and a frozen feed
+  // show text at once. `view` is the only React state the reveal changes, and it changes at most once per frame.
+  const [engine] = useState(() => new RevealEngine());
+  const [view, setView] = useState<RevealView>(() => engine.view());
+  const loop = useRef<RevealLoop>({ frame: null, last: null });
+  const { easy } = useEasyView();
+  const queueable = !reduce && !easy && !frozen;
+  useLayoutEffect(() => {
+    if (engine.runId !== runId) {
+      engine.reset(runId, segments);
+      revealStats.maxLagMs = 0;
+    } else {
+      engine.sync(segments);
+    }
+    if (!queueable) engine.flush();
+    recordStats(engine, Date.now());
+    setView(engine.view());
+    pumpReveal(engine, loop.current, setView);
+  }, [engine, runId, segments, queueable]);
+  useEffect(
+    () => () => {
+      if (loop.current.frame !== null) cancelAnimationFrame(loop.current.frame);
+      loop.current.frame = null;
+    },
+    [],
   );
-  const oldest = pendingQueue.length > 0 ? pendingQueue[0] : null;
-  // Behind by too much, or frozen: the pending text is shown at once, and the reveal state catches up.
-  const behind = oldest !== null && (frozen || pendingQueue.length > FLUSH_SEGMENTS || now - oldest.recvAt > FLUSH_MS);
-  // Adjusts the reveal state during render (React's pattern for state that follows props); the next render has nothing pending.
-  if (behind) setRevealed({ runId, through: highestLiveIndex(segments) });
-  const queueing = queueable && !behind;
-  const queue = queueing ? pendingQueue : NO_SEGMENTS;
-  const head = queue.length > 0 ? queue[0] : null;
-  const headIndex = head ? head.index : -1;
-  // A segment whose turn has not come yet: nothing is drawn for it.
-  const isWaiting = (segment: Segment) => queueing && segment.index !== headIndex && isQueued(segment, doneThrough);
-  // The caret sits on the segment revealing now, or on the last segment while the run is live and idle.
-  const caretIndex = frozen ? null : head ? head.index : active ? lastIndex : null;
-  // The queue's last segment is due BURST_MS after its arrival. A finished run drains the queue within FINISH_MS.
-  const revealMs = head
-    ? active
-      ? clamp((queue[queue.length - 1].recvAt + BURST_MS - now) / queue.length, MIN_REVEAL_MS, MAX_REVEAL_MS)
-      : clamp(FINISH_MS / queue.length, 16, MAX_REVEAL_MS)
-    : MAX_REVEAL_MS;
-  const markRevealed = (index: number) => setRevealed({ runId, through: index });
+  // The caret rests after the newest text of a live run while nothing reveals; it is off under reduced motion and Easy view.
+  const idleCaretIndex = active && view.head === null && queueable ? lastIndex : -1;
 
   // Turns whose text has not started yet are not drawn at all, so a speaker header never shows without words under it.
   const visibleBlocks = blocks
     .map((block) => ({
       block,
-      paragraphs: block.paragraphs.filter((paragraph) => paragraph.items.some((item) => !isWaiting(item.seg))),
+      paragraphs: block.paragraphs.filter((paragraph) => paragraph.items.some((item) => !view.waiting.has(item.seg.index))),
     }))
     .filter((entry) => entry.paragraphs.length > 0);
 
@@ -561,14 +584,14 @@ export function TranscriptCard({
                     </span>
                     <p className="max-w-[70ch] text-pretty text-[17px] leading-[1.7] text-foreground">
                       {paragraph.items.map(({ seg, overlap, spaceBefore, thinBefore }: SegmentItem) => {
-                        const isHead = seg.index === headIndex;
-                        const reveal: Reveal = isHead
-                          ? "reveal"
-                          : isWaiting(seg)
-                            ? "waiting"
-                            : seg.index === caretIndex && !reduce
-                              ? "caret"
-                              : "plain";
+                        const reveal: Reveal =
+                          seg.index === view.head
+                            ? "reveal"
+                            : view.waiting.has(seg.index)
+                              ? "waiting"
+                              : seg.index === idleCaretIndex
+                                ? "caret"
+                                : "plain";
                         return (
                           <SegmentSpan
                             key={seg.index}
@@ -577,8 +600,7 @@ export function TranscriptCard({
                             spaceBefore={spaceBefore}
                             thinBefore={thinBefore}
                             reveal={reveal}
-                            revealMs={isHead ? revealMs : undefined}
-                            onRevealed={isHead ? markRevealed : undefined}
+                            shown={reveal === "reveal" ? view.shown : undefined}
                             display={toDisplay}
                             hovered={hoveredIndex === seg.index}
                             active={activeIndex === seg.index}

@@ -6,9 +6,9 @@
   -webkit-text-fill-color: transparent;
   background: linear-gradient(
     90deg,
-    #a1a1a1 0%, #a1a1a1 30%,
-    rgba(161, 161, 161, 0.45) 45%, rgba(161, 161, 161, 0.45) 55%,
-    #a1a1a1 70%, #a1a1a1 100%
+    #8a96a8 0%, #8a96a8 30%,
+    rgba(138, 150, 168, 0.45) 45%, rgba(138, 150, 168, 0.45) 55%,
+    #8a96a8 70%, #8a96a8 100%
   );
   background-size: 300% 100%;
   -webkit-background-clip: text;
@@ -20,5 +20,5 @@
   82%, 100% { background-position: 0% 0; }
 }
 @media (prefers-color-scheme: dark) {
-  .shimmer { background: linear-gradient(90deg, #a1a1a1 0%, #a1a1a1 30%, rgba(161, 161, 161, 0.45) 45%, rgba(161, 161, 161, 0.45) 55%, #a1a1a1 70%, #a1a1a1 100%); background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; }
+  .shimmer { background: linear-gradient(90deg, #8a96a8 0%, #8a96a8 30%, rgba(138, 150, 168, 0.45) 45%, rgba(138, 150, 168, 0.45) 55%, #8a96a8 70%, #8a96a8 100%); background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; }
 }

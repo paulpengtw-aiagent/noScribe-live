@@ -18,9 +18,9 @@ export type ErrorsMessages = typeof en;
 
 const zhTW: ErrorsMessages = {
   genericError: "發生錯誤",
-  details: "詳細錯誤",
-  endStopped: "意外中止",
-  endStoppedDetail: "noScribe 在完成前停止了（行程已結束）。",
+  details: "錯誤詳情",
+  endStopped: "意外停止",
+  endStoppedDetail: "noScribe 在完成前停止了（程式已結束）。",
   endUnreadable: "無法讀取音訊檔（格式不支援或檔案損毀）",
   endFailed: "轉錄失敗",
   endCanceled: "已取消",

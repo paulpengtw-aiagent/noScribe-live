@@ -68,7 +68,7 @@ const en = {
 export type StageMessages = typeof en;
 
 const zhTW: StageMessages = {
-  runStatusLabel: "執行狀態",
+  runStatusLabel: "轉錄狀態",
   phase: {
     waiting: "等待轉錄",
     converting: "準備音訊",
@@ -85,7 +85,7 @@ const zhTW: StageMessages = {
   },
   diarizingSegmenting: "辨識講者 · 分段中",
   diarizingComparing: "辨識講者 · 比對聲音",
-  listeningForRun: "等待轉錄中…",
+  listeningForRun: "等待轉錄開始…",
   loadingRun: "載入中…",
   finishedIn: (time: string) => `完成，耗時 ${time}`,
   lastUpdate: (time: string) => `最後更新 ${time}`,
@@ -117,16 +117,16 @@ const zhTW: StageMessages = {
   hints: {
     model: "正在轉錄此音訊的語音模型。",
     device: "模型執行的裝置。CUDA 代表顯示卡。",
-    language: "模型在開頭語音中判定的語言，附信心度。",
-    elapsed: "自執行開始經過的時間。結束時停止計時。",
+    language: "模型在開頭的語音中判定的語言，附信心度。",
+    elapsed: "從開始轉錄起經過的時間。結束時停止計時。",
     segments: "目前已轉錄的段數。",
     rtf: "即時因子：處理時間 ÷ 音訊時間（含模型載入）。低於 1× 代表快於即時。",
     speakersFound: (names: string) => `音訊中找到的講者標籤：${names}。`,
     speakersNone: "辨識講者執行後會顯示講者標籤。",
-    latencyUnmeasured: "CLI 完成一段後，到此處顯示所花的時間。根據頁面開啟期間抵達的段落測得。",
+    latencyUnmeasured: "CLI 完成一段後，到此處顯示所花的時間。根據頁面開啟期間抵達的各段測得。",
     latencyMeasured: (last: string, median: string, split: string) =>
       `CLI 完成一段後，到此處顯示所花的時間。最近 ${last} · 中位數 ${median}${split}。`,
-    latencySplit: (tail: string, push: string) => `（尾端 ${tail} + 推送 ${push}）`,
+    latencySplit: (tail: string, push: string) => `（尾端 ${tail} + 推播 ${push}）`,
   },
 };
 

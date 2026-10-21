@@ -1,17 +1,22 @@
 // The speaker palette is the only hue in the UI. Colours are keyed by the order in which
 // speakers first appear; "//" marks overlapping speech and is stripped before the lookup.
 
-/** Dark theme palette, also used for the waveform bars on both themes. */
-export const SPEAKER_PALETTE = ["#8fb4ff", "#f0a6c8", "#9ad7b4", "#f2cf8a", "#c3a6ff", "#7fd3e6"] as const;
+/**
+ * Dark theme palette, also used for the waveform bars on both themes: Nord Aurora and Frost hues,
+ * each at least 3:1 against the dark card (#3b4252).
+ */
+export const SPEAKER_PALETTE = ["#88c0d0", "#ebcb8b", "#a3be8c", "#b48ead", "#81a1c1", "#d08770"] as const;
 
 /**
- * Light theme variant for text and legend dots. Yellow and mint fall below 1.6:1 against the light
- * card (#fafafa: #f2cf8a 1.43:1, #9ad7b4 1.58:1), so each is mixed 35% toward #1a1a1a, which
- * lifts them to 2.96:1 and 3.22:1. The other four are already at 1.63:1 or more and keep their values.
+ * Light theme variant for text and legend dots: each hue darkened toward the Nord ink until it is at
+ * least 3.2:1 against the light card (#eceff4) and the light background (#e5e9f0).
  */
-export const SPEAKER_PALETTE_LIGHT = ["#8fb4ff", "#f0a6c8", "#6d957e", "#a69063", "#c3a6ff", "#7fd3e6"] as const;
+export const SPEAKER_PALETTE_LIGHT = ["#5d8598", "#897f68", "#6f866f", "#927895", "#6883a1", "#aa7366"] as const;
 
-export const UNKNOWN_SPEAKER_COLOR = "#737373";
+/** Unknown speaker on the dark theme: 4:1 against the dark card. */
+export const UNKNOWN_SPEAKER_COLOR = "#9aa5b6";
+/** Unknown speaker on the light theme: 3.7:1 against the light card. */
+export const UNKNOWN_SPEAKER_COLOR_LIGHT = "#6b778c";
 
 const NUMBERED_LABEL = /^S\d+$/;
 
@@ -35,7 +40,7 @@ export function speakerColor(speakers: readonly string[], label: string): string
 /** Colour for text and legend dots: the light variant on the light theme. */
 export function speakerDotColor(speakers: readonly string[], label: string, theme: "dark" | "light"): string {
   const key = speakerKey(label);
-  if (!key) return UNKNOWN_SPEAKER_COLOR;
+  if (!key) return theme === "light" ? UNKNOWN_SPEAKER_COLOR_LIGHT : UNKNOWN_SPEAKER_COLOR;
   const index = speakers.indexOf(key);
   const slot = index < 0 ? speakers.length : index;
   const palette = theme === "light" ? SPEAKER_PALETTE_LIGHT : SPEAKER_PALETTE;

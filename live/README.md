@@ -110,6 +110,13 @@ faster-whisper yields segments per 30 s decoding window, so they arrive in burst
 - Chinese segment text is shown in Traditional (Taiwan) through `opencc-js` (cn→tw), converted for display only and loaded lazily; the feed and the saved HTML are unchanged.
 - From the ObsidianUI shadcn registry (MIT), installed with `pnpm dlx shadcn@latest add https://www.obsidianui.dev/r/alert.json https://www.obsidianui.dev/r/skeleton.json https://www.obsidianui.dev/r/sonner.json https://www.obsidianui.dev/r/command.json https://www.obsidianui.dev/r/popover.json https://www.obsidianui.dev/r/input.json` into `live/web/src/components/ui/`: `Alert`, `Skeleton`, `Sonner` (theme passed as a prop; next-themes not used), `Command` (with its `Dialog` dependency), `Popover` and `Input`.
 
+Licence verdicts (checked 2026-10-21; evidence, install URLs and candidates in [docs/ui-libraries-nordic.md](docs/ui-libraries-nordic.md)):
+
+- AICSS (free registry): MIT for free components and the CLI, "Free components and the CLI are MIT-licensed on GitHub and npm" ([licence](https://www.aicss.dev/license); [MIT text](https://raw.githubusercontent.com/kvnkld/aicss/main/LICENSE)). Verdict: USE, free items only; Pro is excluded.
+- ObsidianUI: MIT, "Components are MIT licensed" ([terms](https://www.obsidianui.dev/terms), section 05; [repo LICENSE](https://github.com/Atharvsinh-codez/ObsidianUI/blob/main/LICENSE)). Verdict: USE.
+- AffectUI: "Items marked as free are open source under the MIT license" ([terms](https://www.affectui.com/terms), section 4; [llms.txt](https://www.affectui.com/llms.txt), "40 items are free and open source (MIT)"). Verdict: USE, free-tagged items only; Pro is excluded ([Pro licence](https://www.affectui.com/license)).
+- uiarc: "Free: MIT" ([licence](https://uiarc.dev/license); [terms](https://uiarc.dev/terms), "The free library is MIT licensed"). Verdict: USE, free items only; Pro is excluded.
+
 ## Tests
 
 ```sh

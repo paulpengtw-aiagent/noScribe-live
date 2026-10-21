@@ -1,0 +1,84 @@
+/*
+ * Easy view (大字模式). Every rule is scoped to html[data-easy="true"], which useEasyView sets.
+ * Unlayered on purpose: Tailwind's utilities sit in @layer, and unlayered rules win over them without !important.
+ */
+
+/* Contrast: foreground and muted text at 7:1 or better against the card and raised surfaces, in both themes. */
+html[data-easy="true"][data-theme="dark"] {
+  --foreground: #ffffff;
+  --card-foreground: #ffffff;
+  --muted-foreground: #d6d6d6;
+  --ink-2: #d6d6d6;
+  --ink-3: #c2c2c2;
+}
+
+html[data-easy="true"][data-theme="light"] {
+  --foreground: #000000;
+  --card-foreground: #000000;
+  --muted-foreground: #3d3d3d;
+  --ink-2: #3d3d3d;
+  --ink-3: #3d3d3d;
+}
+
+/* Weight: body text 500 by default. */
+html[data-easy="true"] body {
+  font-weight: 500;
+}
+
+/* Transcript paragraphs: 23 px at line-height 1.7 (the timestamp keeps its own size). */
+html[data-easy="true"] [data-testid="paragraph"],
+html[data-easy="true"] [data-testid="paragraph"] :not([data-testid="paragraph-time"]) {
+  font-size: 23px;
+  line-height: 1.7;
+  font-weight: 500;
+}
+
+/* Card and header text: the Tailwind size classes used on the stage and timeline cards and in the header. */
+html[data-easy="true"] [data-testid="stage-card"] :is(.text-\[12px\], .text-\[13px\]),
+html[data-easy="true"] [data-testid="timeline-card"] :is(.text-\[12px\], .text-\[13px\]),
+html[data-easy="true"] header :is(.text-\[12px\], .text-\[13px\]) {
+  font-size: 17px;
+  line-height: 1.6;
+}
+
+html[data-easy="true"] [data-testid="stage-card"] .text-\[14px\],
+html[data-easy="true"] [data-testid="timeline-card"] .text-\[14px\],
+html[data-easy="true"] header .text-\[14px\] {
+  font-size: 20px;
+  line-height: 1.5;
+}
+
+/* Header toggles and the compact header menu (the menu is portaled, so it is matched by its popover slot). */
+html[data-easy="true"] [data-testid="easy-toggle"],
+html[data-easy="true"] [data-testid="locale-toggle"],
+html[data-easy="true"] [data-slot="popover-content"] .text-\[14px\] {
+  font-size: 17px;
+  line-height: 1.5;
+}
+
+/* The header's status chip keeps its icon glyph, so the dot beside it is hidden (the testid stays in the DOM). */
+html[data-easy="true"] [data-testid="run-state-dot"] {
+  display: none;
+}
+
+/* No decorative motion: animations and transitions stop. The orb is drawn still (stage-card passes frozen). */
+html[data-easy="true"] *,
+html[data-easy="true"] *::before,
+html[data-easy="true"] *::after {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* Hit targets: at least 48 px tall, and 48 px wide for buttons. Covers the picker trigger, the timeline hit layer
+   and the run-picker rows (cmdk items). */
+html[data-easy="true"] button,
+html[data-easy="true"] [role="button"],
+html[data-easy="true"] [data-testid="timeline-hit"],
+html[data-easy="true"] [data-testid="run-picker"],
+html[data-easy="true"] [cmdk-item] {
+  min-height: 3rem;
+}
+
+html[data-easy="true"] button {
+  min-width: 3rem;
+}

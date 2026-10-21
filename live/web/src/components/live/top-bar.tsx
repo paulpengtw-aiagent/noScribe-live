@@ -2,8 +2,10 @@ import { lazy, Suspense, useSyncExternalStore } from "react";
 import { Moon, Sun } from "lucide-react";
 import { Orb } from "@/components/aicss/Orb";
 import { HeaderMenu } from "@/components/live/header-menu";
+import { EasyStatus, EasyToggle, type EasyStatusKind } from "@/components/live/easy-toggle";
 import { LocaleToggle } from "@/components/live/locale-toggle";
 import { Button } from "@/components/ui/button";
+import { useEasyView } from "@/hooks/use-easy-view";
 import type { Connection } from "@/hooks/use-live-feed";
 import type { Theme } from "@/hooks/use-theme";
 import { useI18n } from "@/i18n";
@@ -69,6 +71,7 @@ export function TopBar({
   onToggleTheme,
 }: TopBarProps) {
   const { t } = useI18n();
+  const { easy } = useEasyView();
   const compact = useCompactHeader();
   const badge = runStateBadge(run);
   const live = badge?.status === "running";
@@ -95,6 +98,18 @@ export function TopBar({
         : badge?.status === "running"
           ? "green"
           : "neutral";
+  // Easy view names the run's state with an icon and a word (EasyStatus) instead of the run badge text.
+  const easyKind: EasyStatusKind | null = !badge
+    ? null
+    : feedDown
+      ? "reconnecting"
+      : badge.status === "running"
+        ? "live"
+        : badge.status === "finished"
+          ? "finished"
+          : badge.status === "error"
+            ? "failed"
+            : "stopped";
   const connText =
     link === "live"
       ? t.topbar.connConnected
@@ -159,7 +174,9 @@ export function TopBar({
                   data-tone={tone}
                   className={cn("size-1.5 shrink-0 rounded-full", TONE_DOT[tone], live && "animate-pulse")}
                 />
-                <span className="min-w-0 truncate max-[359px]:sr-only">{badgeText}</span>
+                <span className="min-w-0 truncate max-[359px]:sr-only">
+                  {easy && easyKind ? <EasyStatus kind={easyKind} /> : badgeText}
+                </span>
               </span>
             )}
           </div>
@@ -168,6 +185,7 @@ export function TopBar({
             <HeaderMenu theme={theme} onToggleTheme={onToggleTheme} />
           ) : (
             <>
+              <EasyToggle />
               <LocaleToggle />
 
               <Button

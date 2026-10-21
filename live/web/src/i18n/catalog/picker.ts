@@ -18,15 +18,15 @@ const en = {
 export type PickerMessages = typeof en;
 
 const zhTW: PickerMessages = {
-  followNewest: "跟隨最新執行",
+  followNewest: "跟隨最新的轉錄",
   followNewestShort: "跟隨最新",
-  filterRuns: "篩選執行",
+  filterRuns: "篩選轉錄紀錄",
   listLabel: "轉錄紀錄",
-  filterPlaceholder: "依檔案、執行 ID 或狀態篩選",
-  noRuns: "尚無執行紀錄。",
-  noMatch: (query: string) => `沒有符合「${query}」的執行。`,
+  filterPlaceholder: "依檔案、轉錄 ID 或狀態篩選",
+  noRuns: "尚無轉錄紀錄。",
+  noMatch: (query: string) => `沒有符合「${query}」的轉錄。`,
   noStartTime: "未記錄開始時間",
-  status: { live: "進行中", finished: "已完成", failed: "失敗", stopped: "已停止", canceled: "已取消" },
+  status: { live: "即時", finished: "已完成", failed: "失敗", stopped: "已停止", canceled: "已取消" },
   segments: (n: number) => `${n} 段`,
 };
 

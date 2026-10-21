@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
+import { AuroraBackground } from "@/components/live/aurora-background";
 import { StageCard } from "@/components/live/stage-card";
 import { TimelineCard } from "@/components/live/timeline-card";
 import type { TimelineSegment, WaveformTimelineProps } from "@/components/live/waveform-timeline";
@@ -280,6 +281,7 @@ export default function App() {
     <TooltipProvider delayDuration={150}>
       <SpeakerOrderContext.Provider value={speakers}>
         <div className="flex min-h-svh flex-col bg-background text-foreground">
+          <AuroraBackground live={active && !frozen} />
           <TopBar
             runs={state.runs}
             runParam={runParam}

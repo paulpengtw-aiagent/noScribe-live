@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Moon, Settings, Sun } from "lucide-react";
+import { EasyMenuItem } from "@/components/live/easy-toggle";
 import { LocaleMenuItem } from "@/components/live/locale-toggle";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -47,6 +48,7 @@ export function HeaderMenu({ theme, onToggleTheme }: HeaderMenuProps) {
             {theme === "dark" ? t.topbar.switchTheme.light : t.topbar.switchTheme.dark}
           </span>
         </button>
+        <EasyMenuItem onDone={done} />
         <LocaleMenuItem onDone={done} />
       </PopoverContent>
     </Popover>

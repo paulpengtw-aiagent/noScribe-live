@@ -1,9 +1,11 @@
 import { useId, useRef, useState } from "react";
-import { Check } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { Orb } from "@/components/aicss/Orb";
 import { ActivityOrb, type ActivityOrbProps, type OrbMode } from "@/components/live/activity-orb";
+import { EasyStatus, type EasyStatusKind } from "@/components/live/easy-toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatClock, useI18n, type Messages } from "@/i18n";
+import { useEasyView } from "@/hooks/use-easy-view";
 import { useElementSize } from "@/hooks/use-element-size";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { DASH, formatElapsed, formatMs, formatRtf } from "@/lib/format";
@@ -68,6 +70,12 @@ export function StageCard({
   const phone = useMediaQuery(PHONE_QUERY);
   const statsId = useId();
   const [statsOpen, setStatsOpen] = useState(false);
+  const { easy } = useEasyView();
+  const moreId = useId();
+  const [moreOpen, setMoreOpen] = useState(false);
+  // Easy view: the orb draws its still frame, the same as a frozen run.
+  const orbFrozen = frozen || easy;
+  const easyKind = easy ? easyStatusKind(phase, run, frozen) : null;
 
   // The bar and the number share one value: the bar is drawn at exactly the whole percentage shown.
   // A phase with no measured percentage (pct 0) shows no number at all, so the bar never reads "0%".
@@ -83,14 +91,15 @@ export function StageCard({
   // The same eight tiles in every phase, so the grid never gains or loses a row. A value not known yet reads as a dash.
   const stats: Stat[] = [
     { label: s.stats.model, value: run?.model ?? DASH, hint: s.hints.model },
-    { label: s.stats.device, value: deviceText(run) ?? DASH, hint: s.hints.device },
+    { label: s.stats.device, value: deviceText(run) ?? DASH, hint: s.hints.device, secondary: true },
     {
       label: s.stats.latency,
       value: latency.last !== null ? formatMs(latency.last) : DASH,
       hint: latencyHintText(s, latency),
+      secondary: true,
     },
-    { label: s.stats.rtf, value: rtf !== null ? formatRtf(rtf) : DASH, hint: s.hints.rtf },
-    { label: s.stats.language, value: languageText(run) ?? DASH, hint: s.hints.language },
+    { label: s.stats.rtf, value: rtf !== null ? formatRtf(rtf) : DASH, hint: s.hints.rtf, secondary: true },
+    { label: s.stats.language, value: languageText(run) ?? DASH, hint: s.hints.language, secondary: true },
     {
       label: s.stats.speakers,
       value: run && run.speakers.length > 0 ? String(run.speakers.length) : DASH,
@@ -126,10 +135,14 @@ export function StageCard({
             speakerColors={speakerColors}
             activeColor={activeColor}
             size={PHONE_SUMMARY_ORB_PX}
-            frozen={frozen}
+            frozen={orbFrozen}
             label={orbLabel}
           />
-          <span className="min-w-0 truncate font-medium text-foreground">{phaseName}</span>
+          {easyKind ? (
+            <EasyStatus kind={easyKind} className="text-foreground" />
+          ) : (
+            <span className="min-w-0 truncate font-medium text-foreground">{phaseName}</span>
+          )}
           <span className="min-w-0 truncate font-mono tabular-nums text-ink-3">{summary}</span>
           <button
             type="button"
@@ -151,7 +164,7 @@ export function StageCard({
           progress={progress}
           speakerColors={speakerColors}
           activeColor={activeColor}
-          frozen={frozen}
+          frozen={orbFrozen}
           label={orbLabel}
         />
       )}
@@ -159,7 +172,11 @@ export function StageCard({
       {/* The phase is named once: in the phone strip above, or in this row on wider screens. */}
       {phone ? null : (
         <div className={phaseRowClass}>
-          <PhaseRow run={run} phase={phase} elapsed={elapsed} s={s} loading={loading} />
+          {easyKind ? (
+            <EasyStatus kind={easyKind} className="text-[22px] text-foreground" />
+          ) : (
+            <PhaseRow run={run} phase={phase} elapsed={elapsed} s={s} loading={loading} />
+          )}
         </div>
       )}
 
@@ -186,9 +203,32 @@ export function StageCard({
 
       {/* A plain grid, never a horizontal scroller: the stat tiles are read-only and are not tab stops. */}
       <div id={statsId} className={cn("grid grid-cols-2 gap-1.5", phone && !statsOpen && "hidden")}>
-        {stats.map((stat) => (
+        {stats.filter((stat) => !(easy && stat.secondary)).map((stat) => (
           <StatTile key={stat.label} label={stat.label} value={stat.value} hint={stat.hint} />
         ))}
+        {easy ? (
+          <div className="col-span-2 flex flex-col gap-1.5">
+            <button
+              type="button"
+              data-testid="easy-more"
+              aria-expanded={moreOpen}
+              aria-controls={moreId}
+              onClick={() => setMoreOpen((open) => !open)}
+              className="flex w-full items-center justify-center gap-1.5 rounded-[12px] px-3 text-[17px] font-medium text-foreground shadow-ring hover:bg-raised"
+            >
+              {t.easy.moreInfo}
+              <ChevronDown
+                aria-hidden="true"
+                className={cn("size-4 shrink-0 transition-transform", moreOpen && "rotate-180")}
+              />
+            </button>
+            <div id={moreId} hidden={!moreOpen} className="grid grid-cols-2 gap-1.5">
+              {stats.filter((stat) => stat.secondary).map((stat) => (
+                <StatTile key={stat.label} label={stat.label} value={stat.value} hint={stat.hint} />
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
     </section>
   );
@@ -216,6 +256,8 @@ interface Stat {
   label: string;
   value: string;
   hint: string;
+  /** Easy view folds these behind the "More info" disclosure. */
+  secondary?: boolean;
 }
 
 /**
@@ -271,6 +313,20 @@ function latencyHintText(s: StageText, stats: LatencyStats): string {
   const split =
     stats.tail !== null && stats.push !== null ? s.hints.latencySplit(msText(stats.tail), msText(stats.push)) : "";
   return s.hints.latencyMeasured(msText(stats.last), msText(stats.median), split);
+}
+
+/**
+ * Easy view's status word for the phase (with its icon), or null when the phase keeps its own pill.
+ * A frozen run that has not ended means the connection is lost, so it reads Reconnecting.
+ */
+function easyStatusKind(phase: DisplayPhase, run: RunState | null, frozen: boolean): EasyStatusKind | null {
+  const ended = phase === "finished" || phase === "error" || phase === "canceled";
+  if (frozen && !ended) return "reconnecting";
+  if (phase === "transcribing") return "live";
+  if (phase === "finished") return "finished";
+  if (phase === "error") return stoppedRun(run) ? "stopped" : "failed";
+  if (phase === "canceled") return "stopped";
+  return null;
 }
 
 /** A run the viewer found stale with no end status: the process stopped without reporting why. */
