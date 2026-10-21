@@ -128,3 +128,53 @@ html[data-easy="true"] button:not(.timeline-block) {
   font-size: 20px;
   line-height: 1.5;
 }
+
+/* Phones (up to 640 px) in Easy view: tighter page, card and transcript-header spacing, so the first transcript paragraph
+   sits higher. The Download .odt button shares the title's row when both fit (flex-wrap); a long title keeps its own full
+   row and is not truncated. */
+@media (max-width: 640px) {
+  html[data-easy="true"] .live-page {
+    padding-top: 8px;
+  }
+
+  html[data-easy="true"] .live-grid {
+    gap: 8px;
+  }
+
+  html[data-easy="true"] [data-testid="stage-card"] {
+    gap: 4px;
+    padding: 10px;
+  }
+
+  html[data-easy="true"] [data-testid="stage-card"] .mt-2.h-5 {
+    margin-top: 4px;
+  }
+
+  html[data-easy="true"] [data-testid="easy-status-sentence"] {
+    line-height: 1.25;
+  }
+
+  html[data-easy="true"] header:has(> div > [data-testid="run-title"]) {
+    padding-top: 10px;
+    padding-bottom: 6px;
+  }
+
+  html[data-easy="true"] header:has(> div > [data-testid="run-title"]) > div {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 8px;
+  }
+
+  html[data-easy="true"] header:has(> div > [data-testid="run-title"]) > div > :not([data-testid="run-title"]) {
+    align-self: center;
+  }
+
+  html[data-easy="true"] [data-testid="speaker-header"] {
+    line-height: 24px;
+  }
+
+  html[data-easy="true"] [data-testid="paragraph"] {
+    margin-top: 4px;
+  }
+}
