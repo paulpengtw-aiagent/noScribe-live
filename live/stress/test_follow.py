@@ -314,13 +314,18 @@ def scenario_2(lab: Lab, page: Any, path_a: Path, run_a: str, run_b: str) -> Non
     lab.shot(page, "04-switched-to-a.png")
 
 
-def scenario_3(lab: Lab, page: Any, replay_a: subprocess.Popen) -> None:
+def scenario_3(lab: Lab, page: Any, replay_a: subprocess.Popen, path_a: Path) -> None:
+    # Kill A as soon as the full UI is up and Elapsed has ticked: no waiting for more events, so the replay
+    # must still be running at that point (checked against A's feed file).
     wait_full_ui(page, 30)
     e0 = elapsed(page)
-    time.sleep(2)
+    ticked = wait_until(lambda: e0 is not None and elapsed(page) not in (None, e0) and state(page) == "running",
+                        5, 0.1)
     e1 = elapsed(page)
-    lab.check("3 setup: Elapsed ticks while A runs", e0 is not None and e0 != e1 and state(page) == "running",
-              f"{e0!r} -> {e1!r} over 2 s, run-state {state(page)!r}")
+    still_live = "run_end" not in path_a.read_text(encoding="utf-8")
+    lab.check("3 setup: Elapsed ticks while A runs and A has no run_end yet (killed while live)",
+              bool(ticked) and still_live and state(page) == "running",
+              f"{e0!r} -> {e1!r}, run-state {state(page)!r}, run_end absent from A's feed={still_live}")
     os.kill(replay_a.pid, signal.SIGKILL)
     replay_a.wait(timeout=10)
     stale = wait_until(lambda: state(page) == "stale", 20, step=0.3)
@@ -344,7 +349,9 @@ def scenario_3(lab: Lab, page: Any, replay_a: subprocess.Popen) -> None:
 def run_checks(lab: Lab, browser: Any) -> None:
     # ---- scenario 1: follow newest, live runs preferred ------------------------------------------
     before = lab.feeds_now()
-    replay_a = lab.start_replay(0.2, 5, "A")
+    # Replay A is paced by gap / speed, capped at max-gap: speed 0.2 with cap 30 is never shorter than the old
+    # cap of 5, and it stays live through the pre-roll, B's run and scenario 2 so that scenario 3 can kill it.
+    replay_a = lab.start_replay(0.2, 30, "A")
     path_a, run_a = lab.new_run(before, "A")
     ctx, page = new_page(browser)
     page.goto(lab.url, wait_until="domcontentloaded", timeout=30000)
@@ -369,11 +376,13 @@ def run_checks(lab: Lab, browser: Any) -> None:
     t_end = time.monotonic()
     back = wait_until(lambda: shown_run(page) == run_a, 15)
     delay = time.monotonic() - t_end
-    wait_full_ui(page, 30)
+    # The run-state chip is hidden during the pre-roll of the switched-to run: read it only after the full UI.
+    full_a = wait_full_ui(page, 30)
+    running_a = bool(wait_until(lambda: state(page) == "running", 5)) if full_a else False
     lab.check("1 follow newest: page follows A again after B's run_end",
-              bool(ended_b) and bool(back) and state(page) == "running",
+              bool(ended_b) and bool(back) and full_a and running_a,
               f"B run_end in its feed={bool(ended_b)}, seen by page={ended(page, run_b)}; "
-              f"switched to A {delay:.1f} s after it (spec: ~5 s); run-state {run_info(page)}")
+              f"switched to A {delay:.1f} s after it (spec: ~5 s); full UI {full_a}, run-state {run_info(page)}")
     lab.shot(page, "02-follow-a-after-b.png")
     replay_b.wait(timeout=60)
 
@@ -383,7 +392,7 @@ def run_checks(lab: Lab, browser: Any) -> None:
     except Exception as exc:
         lab.check("2 scenario completed", False, f"crashed: {exc!r}")
     try:
-        scenario_3(lab, page, replay_a)
+        scenario_3(lab, page, replay_a, path_a)
     except Exception as exc:
         lab.check("3 scenario completed", False, f"crashed: {exc!r}")
     ctx.close()

@@ -62,7 +62,7 @@ export interface TopBarProps {
   onToggleTheme: () => void;
   /**
    * The pre-roll is on screen: the header keeps only the logo and the toggles. Hides the run picker, the
-   * other-live switch and the run-state chip.
+   * other-live switch and the run-state chip, but keeps their space so the toggles do not move.
    */
   minimal?: boolean;
 }
@@ -161,15 +161,18 @@ export function TopBar({
         </div>
 
         <div className={cn("flex min-w-0 flex-1 items-center gap-2 sm:flex-initial sm:gap-4", easyPhone && "flex-wrap justify-end")}>
-          {otherLive && !easyPhone && !minimal && (
+          {otherLive && !easyPhone && (
             <Button
               type="button"
               variant="ghost"
               size="sm"
               data-testid="other-live-run"
+              aria-hidden={minimal || undefined}
+              inert={minimal}
               onClick={() => onRunChange(otherLive.run_id)}
               className={cn(
                 "rounded-full bg-raised px-3 text-[13px] text-foreground shadow-ring hover:bg-raised sm:max-w-none sm:shrink-0 dark:bg-raised dark:hover:bg-raised",
+                minimal && "invisible",
                 easyPhone
                   ? "h-auto max-w-full shrink-0 whitespace-normal py-1.5 text-left"
                   : "h-8 min-w-0 max-w-[120px] shrink",
@@ -180,11 +183,12 @@ export function TopBar({
             </Button>
           )}
 
-          {!minimal && (
+          {/* Minimal (pre-roll) keeps the picker's space but hides it: invisible, aria-hidden and inert. */}
+          <div aria-hidden={minimal || undefined} inert={minimal} className={cn("flex min-w-0", minimal && "invisible")}>
             <Suspense fallback={null}>
               <RunPicker runs={runs} value={runParam} onChange={onRunChange} />
             </Suspense>
-          )}
+          </div>
 
           <div role="status" className="flex shrink-0 items-center gap-2 text-[13px] text-ink-2">
             <span
@@ -197,12 +201,15 @@ export function TopBar({
               )}
               <span className={cn(link === "live" ? "sr-only" : "max-sm:sr-only")}>{connText}</span>
             </span>
-            {badge && !minimal && (
+            {badge && (
               <span
                 data-testid="run-state"
                 data-state={badge.status}
+                aria-hidden={minimal || undefined}
+                inert={minimal}
                 className={cn(
                   "flex min-w-0 items-center gap-1.5 rounded-full bg-raised px-2.5 py-0.5 text-[12px] font-medium shadow-ring",
+                  minimal && "invisible",
                   easyPhone ? "shrink-0" : "shrink",
                   // Easy view on phones: the status pill is visually hidden (the Easy status sentence under the stage
                   // says the same). The node stays in the DOM and its text stays for screen readers.
@@ -228,8 +235,19 @@ export function TopBar({
           {/* Easy view is always one visible header button (the short label on phones); the gear menu holds the rest. */}
           <EasyToggle compact={compact} />
           {/* The pre-roll header keeps the one menu on desktop too; the phone header always has it. */}
-          {compact || minimal ? (
+          {compact ? (
             <HeaderMenu theme={theme} onToggleTheme={onToggleTheme} />
+          ) : minimal ? (
+            <>
+              {/* Desktop pre-roll: the locale switch keeps its width (hidden) and the menu takes the theme button's
+                  slot, so the Easy toggle stays where it is in the full header. */}
+              <div aria-hidden="true" inert className="invisible flex">
+                <LocaleToggle />
+              </div>
+              <div className="flex size-8 shrink-0 items-center">
+                <HeaderMenu theme={theme} onToggleTheme={onToggleTheme} />
+              </div>
+            </>
           ) : (
             <>
               <LocaleToggle />

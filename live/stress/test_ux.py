@@ -2,6 +2,11 @@
 """UX checks for noScribe Live: sticky follow, reveal and screen-reader output, connection states,
 paragraphs and linking, and the run picker. Servers, replays and browsers are started by this script.
 
+Time budget: each group is meant to finish in about 5 minutes or less (the gate's per-step timeout is
+420 s). Replays use speed 1 with --max-gap 30 where the checks need live time after the pre-roll (stick,
+stick end), so the pre-roll never eats the live part of a check. Waits that only bound a failure are
+kept generous; they cost nothing when the page behaves. Run a group alone with --only to time it.
+
 Run from the repo root with the system Python that has Playwright:
 
     /usr/bin/python3 -I live/stress/test_ux.py [--only stick,reveal,conn,para,picker] [--port 8770]
@@ -601,13 +606,13 @@ def stick_end_body(h: Harness, page: Any, run_id: str) -> None:
 
 
 def stick_end_group(h: Harness, browser: Any) -> None:
-    # A fresh replay (speed 0.5, max-gap 30): live through the pre-roll, the setup lag and the scroll-up, so run_end
-    # comes after the reader has scrolled up.
+    # A fresh replay (speed 1, max-gap 30). Only the end state matters here: the run must still be live when the
+    # reader scrolls up (after the pre-roll and 8 segments), and run_end then arrives while scrolled up.
     feeds = h.new_feeds("stick-end")
     srv = h.serve(h.port, feeds, "stick-end")
     try:
         before = h.feeds_now(feeds)
-        h.start_replay(h.demo_src, feeds, 0.5, 30, "stick-end")
+        h.start_replay(h.demo_src, feeds, 1, 30, "stick-end")
         _path, run_id = h.new_run(feeds, before, "stick-end")
         ctx, page = h.new_page(browser)
         try:
@@ -624,7 +629,8 @@ def group_stick(h: Harness, browser: Any) -> None:
     srv = h.serve(h.port, feeds, "stick")
     try:
         before = h.feeds_now(feeds)
-        h.start_replay(h.demo_src, feeds, 0.5, 30, "stick")
+        # Speed 1, max-gap 30: live through the pre-roll; the checks start only after wait_full_ui (in stick_body).
+        h.start_replay(h.demo_src, feeds, 1, 30, "stick")
         path, run_id = h.new_run(feeds, before, "stick")
         ctx, page = h.new_page(browser)
         try:
