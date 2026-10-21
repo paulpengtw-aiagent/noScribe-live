@@ -20,7 +20,7 @@ import { formatElapsed, isMostlyCjk } from "@/lib/format";
 import { isRunActive, type RunState, type Segment } from "@/lib/live-state";
 import { useSpeakerName } from "@/lib/speaker-names";
 import { speakerColor, speakerKey } from "@/lib/speakers";
-import { useZhTw } from "@/lib/zh-tw";
+import { hasCJK, requestConverter, useZhConverter, zhStats } from "@/lib/zh-tw";
 import { buildBlocks, type Paragraph, type SegmentItem } from "@/lib/transcript-blocks";
 import { useEasyView } from "@/hooks/use-easy-view";
 import { RevealEngine, type RevealView } from "@/lib/reveal-engine";
@@ -46,6 +46,8 @@ const CLI_COMMAND =
 
 const NO_SEGMENTS: Segment[] = [];
 const NO_LINES: SpokenLine[] = [];
+/** Held text keeps its layout (same element, same size) but is not painted, so nothing shifts when it appears. */
+const HIDDEN_STYLE = { visibility: "hidden" } as const;
 
 /** How one segment is drawn: plain text, waiting its turn (nothing shown), revealing now, or shown whole with the caret. */
 type Reveal = "plain" | "waiting" | "reveal" | "caret";
@@ -169,6 +171,8 @@ interface SegmentSpanProps {
   shown?: number;
   /** Display text for a segment (Traditional Chinese conversion when loaded). */
   display: (text: string) => string;
+  /** CJK text the converter has not produced yet, or a segment queued behind one: laid out but not painted. */
+  hidden: boolean;
   hovered: boolean;
   active: boolean;
   onHover: (index: number | null) => void;
@@ -183,6 +187,7 @@ const SegmentSpan = memo(function SegmentSpan({
   reveal,
   shown,
   display,
+  hidden,
   hovered,
   active,
   onHover,
@@ -202,6 +207,7 @@ const SegmentSpan = memo(function SegmentSpan({
         data-segment-index={segment.index}
         data-segment-seq={segment.seq}
         data-active={active ? "true" : undefined}
+        style={hidden ? HIDDEN_STYLE : undefined}
         lang={isMostlyCjk(text) ? "zh-Hant" : undefined}
         onMouseEnter={() => onHover(segment.index)}
         onMouseLeave={() => onHover(null)}
@@ -311,7 +317,7 @@ export function TranscriptCard({
   const { t } = useI18n();
   const reduce = useReducedMotion() ?? false;
   const speakerName = useSpeakerName();
-  const toDisplay = useZhTw();
+  const { display: toDisplay, ready: zhReady } = useZhConverter();
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   // Whether the view follows new text. A ref so observers and handlers read the latest value; the state mirrors it for the UI.
@@ -357,13 +363,27 @@ export function TranscriptCard({
       engine.reset(runId, segments);
       revealStats.maxLagMs = 0;
     } else {
-      engine.sync(segments);
+      // Live CJK text waits for the converter, and so does the live text behind it (sync keeps the arrival order).
+      engine.sync(segments, (segment) => zhReady || !hasCJK(segment.text));
     }
     if (!queueable) engine.flush();
     recordStats(engine, Date.now());
-    setView(engine.view());
+    const next = engine.view();
+    setView(next);
     pumpReveal(engine, loop.current, setView);
-  }, [engine, runId, segments, queueable]);
+    // Held segments are counted for the test hook. CJK text starts the converter now, without waiting for idle.
+    let held = 0;
+    let cjk = false;
+    if (!zhReady) {
+      for (const segment of segments) {
+        const isCjk = hasCJK(segment.text);
+        if (isCjk) cjk = true;
+        if (isCjk || next.held.has(segment.index)) held += 1;
+      }
+    }
+    zhStats.heldSegments = held;
+    if (cjk) requestConverter();
+  }, [engine, runId, segments, queueable, zhReady]);
   useEffect(
     () => () => {
       if (loop.current.frame !== null) cancelAnimationFrame(loop.current.frame);
@@ -395,13 +415,15 @@ export function TranscriptCard({
     const fresh = segments.filter((segment) => !announcer.seen.has(segment.seq));
     if (fresh.length > 0) {
       const lines: SpokenLine[] = [];
+      const seen = new Set(announcer.seen);
       for (const segment of fresh) {
+        // Only converted text is spoken. CJK waits for the converter, and the segments after it wait too, so the order holds.
+        if (!zhReady && hasCJK(segment.text)) break;
+        seen.add(segment.seq);
         const text = toDisplay(segment.text.trim());
         if (text) lines.push({ key: segment.seq, text: segment.speaker ? t.transcript.srLine(speakerName(segment.speaker), text) : text });
       }
-      const seen = new Set(announcer.seen);
-      for (const segment of fresh) seen.add(segment.seq);
-      setAnnouncer({ runId, seen, lines: [...announcer.lines, ...lines].slice(-SR_KEEP) });
+      if (seen.size > announcer.seen.size) setAnnouncer({ runId, seen, lines: [...announcer.lines, ...lines].slice(-SR_KEEP) });
     }
   }
 
@@ -597,8 +619,11 @@ export function TranscriptCard({
                     </span>
                     <p className="max-w-[70ch] text-pretty text-[17px] leading-[1.7] text-foreground">
                       {paragraph.items.map(({ seg, overlap, spaceBefore, thinBefore }: SegmentItem) => {
-                        const reveal: Reveal =
-                          seg.index === view.head
+                        // Held text is laid out but not painted: CJK before the converter is ready, and what queues behind it.
+                        const hidden = (!zhReady && hasCJK(seg.text)) || view.held.has(seg.index);
+                        const reveal: Reveal = hidden
+                          ? "plain"
+                          : seg.index === view.head
                             ? "reveal"
                             : view.waiting.has(seg.index)
                               ? "waiting"
@@ -615,6 +640,7 @@ export function TranscriptCard({
                             reveal={reveal}
                             shown={reveal === "reveal" ? view.shown : undefined}
                             display={toDisplay}
+                            hidden={hidden}
                             hovered={hoveredIndex === seg.index}
                             active={activeIndex === seg.index}
                             onHover={onHover}

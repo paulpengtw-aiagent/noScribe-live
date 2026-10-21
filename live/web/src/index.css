@@ -115,6 +115,9 @@
   --aurora-3: #b48ead;
   --aurora-4: #88c0d0;
   --aurora-opacity: 0.46;
+  /* Header glass: the light page at 80% over the aurora, with the 24 px blur the header always had (unchanged). */
+  --header-fill: color-mix(in oklab, var(--background) 80%, transparent);
+  --header-blur: blur(24px);
   --orb-fg: #486488;
   --orb-pill-bg: #eceff4;
   --orb-label: #434c5e;
@@ -143,17 +146,17 @@
   --secondary: #434c5e;
   --secondary-foreground: #eceff4;
   --muted: #3b4252;
-  --muted-foreground: #b4bfcf;
+  --muted-foreground: #cbd3de;
   --accent: #434c5e;
   --accent-foreground: #eceff4;
-  --destructive: #d89fa4;
+  --destructive: #eacbcd;
   --border: rgba(216, 222, 233, 0.1);
   --input: rgba(216, 222, 233, 0.14);
   --ring: #88c0d0;
   --hairline: rgba(216, 222, 233, 0.1);
   --raised: #434c5e;
   --ink-2: #d8dee9;
-  --ink-3: #b4bfcf;
+  --ink-3: #cbd3de;
   --ink-4: #4c566a;
   /* Status: Aurora green, yellow, a rose-red and a peach. Failed and stopped differ in hue and lightness.
      Each dot reaches 3:1 on the raised chip (#434C5E); each -ink reaches 4.5:1 on it. See TOKENS.md. */
@@ -162,27 +165,32 @@
   --status-failed: #e8808a;
   --status-stopped: #eba07f;
   --status-finished: #88c0d0;
-  --status-live-ink: #abc496;
-  --status-loading-ink: #ebcb8b;
-  --status-failed-ink: #f4aab0;
-  --status-stopped-ink: #f5b9a0;
-  --status-finished-ink: #a0d2de;
-  /* Frosted glass: a brighter translucent card over the darker page, Frost hairline, inner highlight, soft shadow. */
-  --glass-card: rgba(67, 76, 94, 0.62);
+  --status-live-ink: #c7d8b9;
+  --status-loading-ink: #eccf93;
+  --status-failed-ink: #f8c6ca;
+  --status-stopped-ink: #f7c8b4;
+  --status-finished-ink: #b0d9e3;
+  /* Frosted glass: a brighter translucent card over the darker page, Frost hairline, inner highlight, soft shadow.
+     Round 14: fill 0.62 to 0.90 so card text holds 4.5:1 under the aurora (docs/nordic/TOKENS.md). */
+  --glass-card: rgba(67, 76, 94, 0.9);
   --glass-sheen: linear-gradient(180deg, rgba(236, 239, 244, 0.07) 0%, rgba(236, 239, 244, 0) 50%);
   --glass-edge: rgba(136, 192, 208, 0.28);
   --glass-highlight: rgba(236, 239, 244, 0.08);
   --card-shadow: 0 10px 30px -12px rgba(8, 10, 16, 0.6);
   --live-glow: 0 0 24px rgba(136, 192, 208, 0.25);
-  --time-ink: #88c0d0;
+  --time-ink: #b4d8e2;
   --timeline-edge: transparent;
   /* Aurora: Aurora green, teal and purple with a touch of Frost, behind the glass. */
   --aurora-1: #8fbcbb;
   --aurora-2: #a3be8c;
   --aurora-3: #b48ead;
   --aurora-4: #88c0d0;
-  /* Capped so muted header text keeps 4.5:1 over one blob at full alpha (docs/nordic/TOKENS.md). */
-  --aurora-opacity: 0.25;
+  /* Round 14: doubled from the round-13 cap of 0.25. Muted header text keeps 4.5:1 because the header glass
+     (--header-fill) sits over it. Glass-card text is not covered by that budget (docs/nordic/TOKENS.md, Round 14). */
+  --aurora-opacity: 0.5;
+  /* Header glass: Polar Night at 60% over the aurora, blur 12 px and saturate 1.2 (TOKENS.md, Round 14). */
+  --header-fill: rgba(36, 41, 51, 0.6);
+  --header-blur: blur(12px) saturate(1.2);
   --orb-fg: #88c0d0;
   --orb-pill-bg: #3b4252;
   --orb-label: #b4bfcf;
@@ -251,6 +259,14 @@
     backdrop-filter: blur(16px) saturate(1.3);
     box-shadow: 0 0 0 1px var(--glass-edge), inset 0 1px 0 var(--glass-highlight), var(--card-shadow);
     animation: live-card-rise 400ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  /* Header glass: a translucent page-colour fill over the aurora. The header's border-b border-hairline is the
+     hairline bottom edge. Fill and blur come from the theme tokens (light: 80% page, 24 px; dark: Polar Night 60%). */
+  .header-glass {
+    background-color: var(--header-fill);
+    -webkit-backdrop-filter: var(--header-blur);
+    backdrop-filter: var(--header-blur);
   }
 
   /* A transcript segment: an inline box with a little breathing room that costs no layout width. */

@@ -27,12 +27,20 @@ export interface RevealView {
   shown: number;
   /** Indexes queued behind the head: their text is not drawn yet. */
   waiting: ReadonlySet<number>;
+  /** Indexes sync() held back (see sync): not queued and not drawn until a later sync releases them. */
+  held: ReadonlySet<number>;
 }
 
 interface Item {
   index: number;
   total: number;
   arrivedAt: number;
+}
+
+function sameIndexes(a: ReadonlySet<number>, b: ReadonlySet<number>): boolean {
+  if (a.size !== b.size) return false;
+  for (const index of a) if (!b.has(index)) return false;
+  return true;
 }
 
 export class RevealEngine {
@@ -49,6 +57,8 @@ export class RevealEngine {
   /** Fractional graphemes carried from one frame to the next, so the speed is steady at any frame rate. */
   private carry = 0;
   private cached: RevealView | null = null;
+  /** Indexes the last sync() held back. */
+  private held = new Set<number>();
 
   /** Starts a run. Its current segments count as already shown, so nothing in them is queued. */
   reset(runId: string | null, segments: readonly RevealSegment[]): void {
@@ -58,18 +68,33 @@ export class RevealEngine {
     this.queue = [];
     this.shown = 0;
     this.carry = 0;
+    this.held = new Set();
     this.cached = null;
   }
 
-  /** Queues the live segments not seen before, in the order given. Segments that are not live are marked seen and never queued. */
-  sync(segments: readonly RevealSegment[]): void {
+  /**
+   * Queues the live segments not seen before, in the order given. Segments that are not live are marked seen and never
+   * queued. `ready` says whether a segment may be shown yet. A segment it refuses waits, and so does every unseen segment
+   * after it, so the queue keeps arrival order; those indexes are listed in view().held. Pass the run's whole segment
+   * list: the held set is rebuilt from it on every call.
+   */
+  sync(segments: readonly RevealSegment[], ready: (segment: RevealSegment) => boolean = () => true): void {
+    const held = new Set<number>();
     for (const segment of segments) {
       if (this.seen.has(segment.index)) continue;
+      if (held.size > 0 || !ready(segment)) {
+        held.add(segment.index);
+        continue;
+      }
       this.seen.add(segment.index);
       if (!segment.live) continue;
       const total = graphemeCount(segment.text.trim());
       if (total === 0) continue;
       this.queue.push({ index: segment.index, total, arrivedAt: segment.recvAt });
+      this.cached = null;
+    }
+    if (!sameIndexes(held, this.held)) {
+      this.held = held;
       this.cached = null;
     }
   }
@@ -147,6 +172,7 @@ export class RevealEngine {
       head: this.queue.length > 0 ? this.queue[0].index : null,
       shown: this.shown,
       waiting,
+      held: this.held,
     };
     return this.cached;
   }

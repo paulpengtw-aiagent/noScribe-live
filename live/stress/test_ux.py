@@ -311,9 +311,11 @@ def open_picker(page: Any) -> None:
 class Harness:
     def __init__(self, args: argparse.Namespace) -> None:
         self.port = args.port
-        self.static = Path(args.static)
+        # Servers and replays run with cwd=LIVE_DIR (live/), so a relative --static or --work would resolve under
+        # live/ (live/live/web/dist is missing, the server then serves its 429-byte placeholder page). Make them absolute.
+        self.static = Path(args.static).resolve()
         self.py = args.python
-        self.work = Path(args.work)
+        self.work = Path(args.work).resolve()
         self.shots = self.work / "shots"
         self.logs = self.work / "logs" / f"ux-{STAMP}"
         self.src = self.work / "src"

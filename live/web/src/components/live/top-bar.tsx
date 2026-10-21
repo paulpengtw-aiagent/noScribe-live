@@ -135,7 +135,7 @@ export function TopBar({
   return (
     <header
       className={cn(
-        "sticky top-0 z-40 flex shrink-0 items-center border-b border-hairline bg-background/80 backdrop-blur-xl",
+        "sticky top-0 z-40 flex shrink-0 items-center border-b border-hairline header-glass",
         easyPhone ? "min-h-14 py-2" : "h-14",
       )}
     >
