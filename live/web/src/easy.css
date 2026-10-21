@@ -33,30 +33,25 @@ html[data-easy="true"] [data-testid="paragraph"] :not([data-testid="paragraph-ti
   font-weight: 500;
 }
 
-/* Card and header text: the Tailwind size classes used on the stage and timeline cards and in the header. */
-html[data-easy="true"] [data-testid="stage-card"] :is(.text-\[12px\], .text-\[13px\]),
-html[data-easy="true"] [data-testid="timeline-card"] :is(.text-\[12px\], .text-\[13px\]),
-html[data-easy="true"] header :is(.text-\[12px\], .text-\[13px\]) {
-  font-size: 17px;
-  line-height: 1.6;
-}
-
-html[data-easy="true"] [data-testid="stage-card"] .text-\[14px\],
-html[data-easy="true"] [data-testid="timeline-card"] .text-\[14px\],
-html[data-easy="true"] header .text-\[14px\] {
+/* Card, header, picker and transcript label text: every small Tailwind size class (the arbitrary px classes and the
+   xs/sm/base steps) is raised to 20 px in Easy view. Sizes already at 20 px or more (stat values) are left alone, and
+   the transcript paragraphs keep their own 23 px rule, which is more specific. */
+html[data-easy="true"]
+  :is(.text-\[11px\], .text-\[12px\], .text-\[13px\], .text-\[14px\], .text-\[15px\], .text-\[17px\], .text-\[18px\],
+      .text-xs, .text-sm, .text-base) {
   font-size: 20px;
   line-height: 1.5;
 }
 
-/* Transcript header meta line (output name and model) at the card label size. */
+/* Transcript header meta line (output name and model) at the label size. */
 html[data-easy="true"] [data-testid="run-title"] ~ div {
-  font-size: 17px;
-  line-height: 1.6;
+  font-size: 20px;
+  line-height: 1.5;
 }
 
 /* Transcript timestamps are labels too. */
 html[data-easy="true"] [data-testid="paragraph-time"] {
-  font-size: 17px;
+  font-size: 20px;
 }
 
 /* Phones: the stat tiles stack one per row, so the 20 px values never squeeze or overflow a 390 px screen. */
@@ -66,11 +61,10 @@ html[data-easy="true"] [data-testid="paragraph-time"] {
   }
 }
 
-/* Header toggles and the compact header menu (the menu is portaled, so it is matched by its popover slot). */
+/* Header toggles (the menu is portaled, so it is matched by its popover slot in the generic rule above). */
 html[data-easy="true"] [data-testid="easy-toggle"],
-html[data-easy="true"] [data-testid="locale-toggle"],
-html[data-easy="true"] [data-slot="popover-content"] .text-\[14px\] {
-  font-size: 17px;
+html[data-easy="true"] [data-testid="locale-toggle"] {
+  font-size: 20px;
   line-height: 1.5;
 }
 
@@ -89,7 +83,7 @@ html[data-easy="true"] *::after {
 
 /* Hit targets: at least 48 px tall, and 48 px wide for buttons. Covers the picker trigger, the timeline hit layer
    and the run-picker rows (cmdk items). */
-html[data-easy="true"] button,
+html[data-easy="true"] button:not(.timeline-block),
 html[data-easy="true"] [role="button"],
 html[data-easy="true"] [data-testid="timeline-hit"],
 html[data-easy="true"] [data-testid="run-picker"],
@@ -97,6 +91,9 @@ html[data-easy="true"] [cmdk-item] {
   min-height: 3rem;
 }
 
-html[data-easy="true"] button {
+/* The timeline blocks are decorative (pointer-events: none); the timeline hit layer is the target. */
+html[data-easy="true"] button:not(.timeline-block) {
   min-width: 3rem;
+  font-size: 20px;
+  line-height: 1.5;
 }
