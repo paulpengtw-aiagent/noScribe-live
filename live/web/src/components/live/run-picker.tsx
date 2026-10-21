@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, ListVideo } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useEasyView } from "@/hooks/use-easy-view";
 import { useNow } from "@/hooks/use-now";
 import { useI18n } from "@/i18n";
 import { DASH, formatDateTime, formatDay, formatDayHeading, formatElapsed } from "@/lib/format";
@@ -97,6 +98,7 @@ export interface RunPickerProps {
  */
 export function RunPicker({ runs, value, onChange }: RunPickerProps) {
   const { locale, t } = useI18n();
+  const { easy } = useEasyView();
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   // The clock ticks only while the list is open, for the elapsed time of live runs.
@@ -128,24 +130,35 @@ export function RunPicker({ runs, value, onChange }: RunPickerProps) {
           variant="outline"
           size="sm"
           data-testid="run-picker"
-          className="h-8 min-w-0 flex-1 shrink justify-between gap-2 rounded-full bg-background px-3.5 text-[13px] font-normal dark:bg-background sm:w-[300px] sm:flex-initial"
-        >
-          {chosen ? (
-            <span className="flex min-w-0 flex-1 items-center gap-2 text-left">
-              <span className="min-w-0 truncate">{runName(chosen)}</span>
-              <span className="hidden shrink-0 tabular-nums text-ink-3 sm:inline">
-                {formatDateTime(chosen.started_t)}
-              </span>
-            </span>
-          ) : value === FOLLOW_NEWEST ? (
-            <span className="min-w-0 flex-1 truncate text-left">
-              <span className="sm:hidden">{t.picker.followNewestShort}</span>
-              <span className="hidden sm:inline">{t.picker.followNewest}</span>
-            </span>
-          ) : (
-            <span className="min-w-0 flex-1 truncate text-left">{value}</span>
+          className={cn(
+            "h-8 min-w-0 justify-between gap-2 rounded-full bg-background px-3.5 text-[13px] font-normal dark:bg-background sm:w-[300px] sm:flex-initial",
+            easy ? "max-sm:flex-none max-sm:shrink-0 max-sm:gap-1.5" : "flex-1 shrink",
           )}
-          <ChevronDown className="size-3.5 shrink-0 opacity-60" aria-hidden="true" />
+        >
+          {easy ? (
+            <span className="flex shrink-0 items-center gap-1.5 sm:hidden">
+              <ListVideo aria-hidden="true" className="size-4 shrink-0" />
+              <span>{t.picker.pickLabel}</span>
+            </span>
+          ) : null}
+          <span className={easy ? "hidden min-w-0 flex-1 items-center sm:flex" : "flex min-w-0 flex-1 items-center"}>
+            {chosen ? (
+              <span className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                <span className="min-w-0 truncate">{runName(chosen)}</span>
+                <span className="hidden shrink-0 tabular-nums text-ink-3 sm:inline">
+                  {formatDateTime(chosen.started_t)}
+                </span>
+              </span>
+            ) : value === FOLLOW_NEWEST ? (
+              <span className="min-w-0 flex-1 truncate text-left">
+                <span className="sm:hidden">{t.picker.followNewestShort}</span>
+                <span className="hidden sm:inline">{t.picker.followNewest}</span>
+              </span>
+            ) : (
+              <span className="min-w-0 flex-1 truncate text-left">{value}</span>
+            )}
+          </span>
+          <ChevronDown className={cn("size-3.5 shrink-0 opacity-60", easy && "hidden sm:block")} aria-hidden="true" />
         </Button>
       </PopoverTrigger>
 

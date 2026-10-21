@@ -27,6 +27,8 @@ const en = {
   sentence: {
     transcribing: (pct: number) => `Transcribing · ${pct}% done`,
     transcribingPlain: "Transcribing",
+    /** Progress has reached 99.5% but the run's end has not arrived yet. */
+    finishing: "Finishing up…",
     diarizing: "Identifying speakers",
     loading: "Loading the model",
     listening: "Listening to the audio",
@@ -109,6 +111,7 @@ const zhTW: StageMessages = {
   sentence: {
     transcribing: (pct: number) => `正在轉錄 · 已完成 ${pct}%`,
     transcribingPlain: "正在轉錄",
+    finishing: "整理中…",
     diarizing: "正在辨識講者",
     loading: "正在載入模型",
     listening: "正在聆聽音訊",

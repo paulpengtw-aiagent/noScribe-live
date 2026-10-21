@@ -28,8 +28,8 @@ PARAGRAPH_SOFT_S = 30.0    # past this length, a paragraph breaks at the next se
 PARAGRAPH_HARD_S = 45.0    # past this length, a paragraph breaks at the next segment boundary
 
 FOOTER = {
-    "en": "Chinese shown in Traditional (Taiwan), converted from the transcript for display",
-    "zh-TW": "中文以繁體中文（台灣）顯示，由轉錄文字轉換而來，僅供閱讀",
+    "en": "Chinese shown in Traditional (Taiwan), converted from the transcript for display with OpenCC s2tw",
+    "zh-TW": "中文以繁體中文（台灣）顯示，由轉錄文字以 OpenCC s2tw 轉換而來，僅供閱讀",
 }
 
 # The same ranges as CJK_CHAR in web/src/lib/format.ts.
@@ -141,11 +141,14 @@ def _clean(text: str) -> str:
     return " ".join(text.split())
 
 
-def _needs_space(prev_text: str, next_text: str) -> bool:
-    """Port of needsSpaceBetween(): a space joins two non-CJK neighbours."""
-    if not prev_text or not next_text:
-        return False
-    return not _is_cjk(prev_text[-1]) and not _is_cjk(next_text[0])
+def _boundary_space(prev_text: str, next_text: str) -> str:
+    """The separator the page draws before a segment: a space between two non-CJK neighbours (needsSpaceBetween)
+    and between two CJK neighbours (the thin separator cjkMeets, drawn as a space). Mixed neighbours get none."""
+    a = prev_text.rstrip()[-1:]
+    b = next_text.lstrip()[:1]
+    if not a or not b:
+        return ""
+    return " " if _is_cjk(a) == _is_cjk(b) else ""
 
 
 def _utf16_len(text: str) -> int:
@@ -176,13 +179,6 @@ def speaker_name(label: str, speakers: list[str], lang: str) -> str:
     return f"講者 {number}" if lang == "zh-TW" else f"Speaker {number}"
 
 
-def timecode(seconds: float) -> str:
-    total = max(0, int(seconds))
-    h, rem = divmod(total, 3600)
-    m, s = divmod(rem, 60)
-    return f"{h:02d}:{m:02d}:{s:02d}"
-
-
 def clock(seconds: float) -> str:
     """m:ss, or h:mm:ss from one hour (the page's formatElapsed)."""
     total = max(0, int(seconds))
@@ -196,6 +192,14 @@ def stem_of(name: str) -> str:
     base = re.split(r"[\\/]", name)[-1]
     root, dot, _ext = base.rpartition(".")
     return root if dot and root else base
+
+
+def export_filename(audio_name: str, started_t: float | None) -> str:
+    """<audio stem>_YYYY-MM-DD_HHMM.odt, stamped with the run start in server local time; the stem alone when unknown."""
+    stem = stem_of(audio_name)
+    if started_t is None:
+        return f"{stem}.odt"
+    return f"{stem}_{time.strftime('%Y-%m-%d_%H%M', time.localtime(started_t))}.odt"
 
 
 def content_disposition(filename: str) -> str:
@@ -230,17 +234,15 @@ def _subtitle(started_t: float | None, duration: float | None, model: str | None
 
 
 def _paragraph_text(segments: list[Segment]) -> str:
+    """The paragraph as the page lays it out: each segment trimmed and converted, and joined to the segment before
+    it by _boundary_space (neighbours are compared on their raw text, empty segments included)."""
     out: list[str] = []
-    prev = ""
+    prev: Segment | None = None
     for seg in segments:
-        piece = _clean(seg.text)
-        if not piece:
-            continue
-        piece = to_traditional_tw(piece)
-        if prev and _needs_space(prev, piece):
-            out.append(" ")
-        out.append(piece)
-        prev = piece
+        if prev is not None:
+            out.append(_boundary_space(prev.text, seg.text))
+        out.append(_clean(to_traditional_tw(seg.text.strip())))
+        prev = seg
     return "".join(out)
 
 
@@ -272,7 +274,7 @@ def build_odt(
                 continue
             body.append(
                 '<text:p text:style-name="Body">'
-                f'<text:span text:style-name="Timestamp">{timecode(paragraph.start)}</text:span> {_xml_text(text)}'
+                f'<text:span text:style-name="Timestamp">{clock(paragraph.start)}</text:span> {_xml_text(text)}'
                 "</text:p>"
             )
     body.append(_paragraph("Footer", FOOTER[lang]))

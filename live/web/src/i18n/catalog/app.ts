@@ -26,6 +26,8 @@ const en = {
   runMissingAria: "Transcript",
   /** Transcript column while a picked run's snapshot is awaited (loading, never "not found"). */
   runLoading: "Loading transcript…",
+  /** Added to the run-loading placeholder after about 8 s without the snapshot. */
+  runLoadingSlow: "This is taking longer than usual…",
   /** Toaster container label and the toast close button label. */
   toastsAria: "Notifications",
   toastClose: "Close notification",
@@ -56,6 +58,7 @@ const zhTW: AppMessages = {
   runMissingFollow: "跟隨最新的逐字稿",
   runMissingAria: "逐字稿",
   runLoading: "正在載入逐字稿…",
+  runLoadingSlow: "載入時間比平常久…",
   toastsAria: "通知",
   toastClose: "關閉通知",
   failedRunToast: (name) => `${name} 轉錄失敗`,

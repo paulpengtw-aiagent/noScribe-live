@@ -19,7 +19,7 @@ from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 
 from .auth import TokenGate
-from .export_odt import ODT_MEDIA_TYPE, build_odt, content_disposition, resolve_lang, segments_from_events, stem_of
+from .export_odt import ODT_MEDIA_TYPE, build_odt, content_disposition, export_filename, resolve_lang, segments_from_events
 from .feed import FeedTailer, RunRegistry, drain_queue
 from .peaks import AudioDecodeError, compute_peaks
 
@@ -246,7 +246,7 @@ def create_app(feeds_dir: str | Path, static_dir: str | Path, poll: float = 0.05
             content=body,
             media_type=ODT_MEDIA_TYPE,
             headers={
-                "Content-Disposition": content_disposition(f"{stem_of(title)}.odt"),
+                "Content-Disposition": content_disposition(export_filename(title, run.started_t)),
                 "Cache-Control": "no-store",
             },
         )

@@ -7,6 +7,8 @@ const en = {
   filterRuns: "Filter runs",
   /** Accessible name of the run list (cmdk Command and CommandList). */
   listLabel: "Runs",
+  /** The labelled trigger in Easy view's phone header: an icon and this word, never the bare chevron. */
+  pickLabel: "Runs",
   filterPlaceholder: "Filter by file, run id or status",
   noRuns: "No runs yet.",
   noMatch: (query: string) => `No runs match "${query}".`,
@@ -22,6 +24,7 @@ const zhTW: PickerMessages = {
   followNewestShort: "跟隨最新",
   filterRuns: "篩選轉錄紀錄",
   listLabel: "轉錄紀錄",
+  pickLabel: "選擇轉錄",
   filterPlaceholder: "依檔案、轉錄 ID 或狀態篩選",
   noRuns: "尚無轉錄紀錄。",
   noMatch: (query: string) => `沒有符合「${query}」的轉錄。`,

@@ -20,7 +20,7 @@ from odf.opendocument import load
 from odf.text import P
 
 from server.app import create_app
-from server.export_odt import Segment, group_blocks, to_traditional_tw
+from server.export_odt import Segment, _paragraph_text, clock, export_filename, group_blocks, to_traditional_tw
 
 ODT = b"application/vnd.oasis.opendocument.text"
 TOKEN = "test-token-123"
@@ -92,7 +92,8 @@ def test_finished_run_is_odt_with_attachment_name(tmp_path):
     resp = TestClient(app).get("/api/runs/done-1/export.odt?lang=en")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "application/vnd.oasis.opendocument.text"
-    assert resp.headers["content-disposition"] == 'attachment; filename="demo-en-zh.odt"'
+    stamp = time.strftime("%Y-%m-%d_%H%M", time.localtime(registry.get("done-1").started_t))
+    assert resp.headers["content-disposition"] == f'attachment; filename="demo-en-zh_{stamp}.odt"'
     assert resp.content.startswith(b"PK")
 
 
@@ -103,7 +104,8 @@ def test_non_ascii_audio_name_gets_rfc5987_filename(tmp_path):
     assert resp.status_code == 200
     disposition = resp.headers["content-disposition"]
     assert disposition.startswith("attachment; filename=")
-    assert "filename*=UTF-8''%E6%8E%A1%E8%A8%AA%20demo.odt" in disposition
+    stamp = time.strftime("%Y-%m-%d_%H%M", time.localtime(registry.get("uni-1").started_t))
+    assert f"filename*=UTF-8''%E6%8E%A1%E8%A8%AA%20demo_{stamp}.odt" in disposition
     assert disposition.isascii()
 
 
@@ -189,7 +191,7 @@ def test_odfpy_reads_speakers_timestamps_and_traditional_text(tmp_path):
     assert texts[0] == "demo-en-zh.mp3"
     assert "Speaker 1" in texts and "Speaker 2" in texts
     assert "Duration 2:05" in texts[1] and "Model breeze-asr-25" in texts[1]
-    assert "00:00:00 Hello there." in joined
+    assert "0:00 Hello there." in joined
     # Simplified input comes out Traditional (Taiwan); the converted characters are present, the source ones are not.
     assert "這是一個測試。" in joined
     assert "軟件和頭髮。" in joined
@@ -249,6 +251,46 @@ def test_hard_limit_breaks_at_45_seconds_regardless():
 def test_conversion_applies_only_to_cjk_text():
     assert to_traditional_tw("这是") == "這是"
     assert to_traditional_tw("Plain English 123") == "Plain English 123"
+
+
+def test_export_filename_stamps_the_run_start_in_local_time():
+    started = time.mktime((2026, 10, 21, 18, 54, 0, 0, 0, -1))
+    assert export_filename("04-codeswitch-zh-en.mp3", started) == "04-codeswitch-zh-en_2026-10-21_1854.odt"
+    assert export_filename("/media/04-codeswitch-zh-en.mp3", None) == "04-codeswitch-zh-en.odt"
+
+
+def test_clock_is_m_ss_then_h_mm_ss_like_the_screen():
+    assert clock(0) == "0:00"
+    assert clock(5.9) == "0:05"
+    assert clock(65) == "1:05"
+    assert clock(3599) == "59:59"
+    assert clock(3600) == "1:00:00"
+    assert clock(3723.9) == "1:02:03"
+
+
+def test_segments_join_with_a_space_only_between_two_cjk_or_two_non_cjk_neighbours():
+    segs = [seg(0, 0, 1, text="这是"), seg(1, 1, 2, text="一个"), seg(2, 2, 3, text="test"), seg(3, 3, 4, text="好")]
+    assert _paragraph_text(segs) == "這是 一個test好"
+    assert _paragraph_text([seg(0, 0, 1, text="Hello"), seg(1, 1, 2, text="there.")]) == "Hello there."
+    # An empty segment between two neighbours breaks the join, as on the page (neighbours are compared raw).
+    assert _paragraph_text([seg(0, 0, 1, text="软件"), seg(1, 1, 2, text=""), seg(2, 2, 3, text="好")]) == "軟件好"
+
+
+def test_variant_characters_match_the_page_for_common_words():
+    # Expected values are the page's converter output (opencc-js cn to tw), computed with node.
+    page = {
+        "櫃台": "櫃臺", "柜台": "櫃檯", "台灣": "臺灣", "台湾": "臺灣", "后来": "後來", "里面": "裡面",
+        "干净": "乾淨", "头发": "頭髮", "软件": "軟件", "数据库": "數據庫", "网络": "網絡", "面条": "麵條",
+        "理发": "理髮", "后台": "後臺", "周末": "週末", "干燥": "乾燥", "复制粘贴": "複製粘貼",
+        "这是一个测试。": "這是一個測試。",
+    }
+    for simplified, expected in page.items():
+        assert to_traditional_tw(simplified) == expected, simplified
+
+
+def test_known_gap_single_variant_characters_follow_s2tw():
+    # opencc-js keeps 托 (and 栗, 樑, 硷 differ too); s2tw converts it. The gap is listed in live/README.md.
+    assert to_traditional_tw("托") == "託"
 
 
 # --- LibreOffice smoke test (skipped when soffice is not installed) -----------------------------------------------

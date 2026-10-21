@@ -2,6 +2,7 @@ import { useId, useRef, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { Orb } from "@/components/aicss/Orb";
 import { ActivityOrb, type ActivityOrbProps, type OrbMode } from "@/components/live/activity-orb";
+import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatClock, useI18n, type Messages } from "@/i18n";
 import { useEasyView } from "@/hooks/use-easy-view";
@@ -74,6 +75,8 @@ export function StageCard({
   const [moreOpen, setMoreOpen] = useState(false);
   // Easy view: the orb draws its still frame, the same as a frozen run.
   const orbFrozen = frozen || easy;
+  // The run is live while it has a run that has not ended and is not frozen: the progress fill carries its sheen.
+  const liveRun = run !== null && !frozen && phase !== "finished" && phase !== "error" && phase !== "canceled";
 
   // The bar and the number share one value: the bar is drawn at exactly the whole percentage shown.
   // A phase with no measured percentage (pct 0) shows no number at all, so the bar never reads "0%".
@@ -105,6 +108,10 @@ export function StageCard({
     { label: s.stats.elapsed, value: formatElapsed(elapsed), hint: s.hints.elapsed },
     { label: s.stats.segments, value: run ? String(run.segments.length) : DASH, hint: s.hints.segments },
   ];
+
+  // Easy view: wider screens show the primary tiles and fold the rest behind "Show details". Phones fold every tile.
+  const easyGrid: Stat[] = phone ? [] : stats.filter((stat) => !stat.secondary && !stat.hiddenInEasy);
+  const easyFolded: Stat[] = phone ? stats.filter((stat) => !stat.hiddenInEasy) : stats.filter((stat) => stat.secondary);
 
   // A frozen run stops its spinner: the pill's CSS animations are paused on their current frame.
   const phaseRowClass = cn(
@@ -179,12 +186,7 @@ export function StageCard({
       )}
 
       <div>
-        <div className="h-[2px] w-full overflow-hidden rounded-full bg-hairline">
-          <div
-            className="h-full rounded-full bg-foreground transition-[width] duration-500 ease-out"
-            style={{ width: `${pctValue}%` }}
-          />
-        </div>
+        <Progress value={pctValue} live={liveRun} className="h-[2px]! bg-hairline!" />
         {/* The progress line never repeats the phase name: the row above already names it. */}
         <div className="mt-2 flex h-5 items-baseline justify-between gap-3 text-[12px] tabular-nums">
           <span className={cn("min-w-0 truncate text-ink-3", timed && "font-mono")}>
@@ -201,7 +203,7 @@ export function StageCard({
 
       {/* A plain grid, never a horizontal scroller: the stat tiles are read-only and are not tab stops. */}
       <div id={statsId} className={cn("grid grid-cols-2 gap-1.5", phone && !easy && !statsOpen && "hidden")}>
-        {stats.filter((stat) => !(easy && (stat.secondary || stat.hiddenInEasy))).map((stat) => (
+        {(easy ? easyGrid : stats).map((stat) => (
           <StatTile key={stat.label} label={stat.label} value={stat.value} hint={stat.hint} />
         ))}
         {easy ? (
@@ -221,7 +223,7 @@ export function StageCard({
               />
             </button>
             <div id={moreId} hidden={!moreOpen} className="grid grid-cols-2 gap-1.5">
-              {stats.filter((stat) => stat.secondary).map((stat) => (
+              {easyFolded.map((stat) => (
                 <StatTile key={stat.label} label={stat.label} value={stat.value} hint={stat.hint} />
               ))}
             </div>
@@ -329,6 +331,8 @@ function easySentence(s: StageText, run: RunState | null, phase: DisplayPhase, f
   if (frozen && !ended) return s.sentence.reconnecting;
   switch (phase) {
     case "transcribing":
+      // Progress at 99.5% or more rounds to 100 here: the run is still finishing, so it does not read "100% done".
+      if (pct >= 100) return s.sentence.finishing;
       return pct > 0 ? s.sentence.transcribing(pct) : s.sentence.transcribingPlain;
     case "diarizing":
       return s.sentence.diarizing;

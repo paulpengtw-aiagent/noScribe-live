@@ -99,19 +99,32 @@ html[data-easy="true"] *::after {
   transition: none !important;
 }
 
-/* Hit targets: at least 48 px tall, and 48 px wide for buttons. Covers the picker trigger, the timeline hit layer
-   and the run-picker rows (cmdk items). */
+/* Timestamps: 7:1 or better against the card in both themes (the Frost --time-ink measured 4.3:1 dark, 4.6:1 light).
+   Dark: #dcf1fb is 7.4:1 on the raised tile #434c5e, the lightest surface under the timestamp, and more on the card.
+   Light: #284660 is 8.5:1 on the card #eceff4 and 8.1:1 on the raised tile #e5e9f0. */
+html[data-easy="true"][data-theme="dark"] [data-testid="paragraph-time"] {
+  color: #dcf1fb;
+}
+
+html[data-easy="true"][data-theme="light"] [data-testid="paragraph-time"] {
+  color: #284660;
+}
+
+/* Hit targets: every Easy control is at least 48 px tall and 48 px wide. Covers the buttons (the header toggles and
+   gear, the picker trigger, the stage card's disclosure, the jump button, the menu items), the Download .odt control,
+   the timeline hit layer and the run-picker rows (cmdk items). The timeline blocks are decorative (pointer-events: none). */
 html[data-easy="true"] button:not(.timeline-block),
 html[data-easy="true"] [role="button"],
 html[data-easy="true"] [data-testid="timeline-hit"],
 html[data-easy="true"] [data-testid="run-picker"],
+html[data-easy="true"] [data-testid="export-odt"],
 html[data-easy="true"] [cmdk-item] {
   min-height: 3rem;
+  min-width: 3rem;
 }
 
-/* The timeline blocks are decorative (pointer-events: none); the timeline hit layer is the target. */
+/* Buttons keep the 20 px label size. */
 html[data-easy="true"] button:not(.timeline-block) {
-  min-width: 3rem;
   font-size: 20px;
   line-height: 1.5;
 }

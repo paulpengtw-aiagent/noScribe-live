@@ -75,6 +75,8 @@ export function TopBar({
   const { t } = useI18n();
   const { easy } = useEasyView();
   const compact = useCompactHeader();
+  // Easy view on a phone-width header: the header may wrap to two rows instead of overflowing.
+  const easyPhone = easy && compact;
   const badge = runStateBadge(run);
   const live = badge?.status === "running";
   // Only "live" counts as connected. Any other state (including the legacy "stale") reads as reconnecting.
@@ -131,8 +133,18 @@ export function TopBar({
         : t.topbar.connReconnecting;
 
   return (
-    <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center border-b border-hairline bg-background/80 backdrop-blur-xl">
-      <div className="flex w-full min-w-0 items-center justify-between gap-3 px-4 min-[1100px]:px-6">
+    <header
+      className={cn(
+        "sticky top-0 z-40 flex shrink-0 items-center border-b border-hairline bg-background/80 backdrop-blur-xl",
+        easyPhone ? "min-h-14 py-2" : "h-14",
+      )}
+    >
+      <div
+        className={cn(
+          "flex w-full min-w-0 items-center justify-between px-4 min-[1100px]:px-6",
+          easyPhone ? "flex-wrap gap-x-3 gap-y-2" : "gap-3",
+        )}
+      >
         <div className="flex min-w-0 items-center gap-2.5">
           <span aria-hidden="true" data-testid="logo" className="flex shrink-0 max-sm:size-7 max-sm:items-center max-sm:justify-center">
             <Orb variant="G1" size={18} label={t.topbar.processing} />
@@ -142,7 +154,7 @@ export function TopBar({
           </span>
         </div>
 
-        <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-initial sm:gap-4">
+        <div className={cn("flex min-w-0 flex-1 items-center gap-2 sm:flex-initial sm:gap-4", easyPhone && "flex-wrap justify-end")}>
           {otherLive && (
             <Button
               type="button"
@@ -150,10 +162,15 @@ export function TopBar({
               size="sm"
               data-testid="other-live-run"
               onClick={() => onRunChange(otherLive.run_id)}
-              className="h-8 min-w-0 max-w-[120px] shrink rounded-full bg-raised px-3 text-[13px] text-foreground shadow-ring hover:bg-raised sm:max-w-none sm:shrink-0 dark:bg-raised dark:hover:bg-raised"
+              className={cn(
+                "rounded-full bg-raised px-3 text-[13px] text-foreground shadow-ring hover:bg-raised sm:max-w-none sm:shrink-0 dark:bg-raised dark:hover:bg-raised",
+                easyPhone
+                  ? "h-auto max-w-full shrink-0 whitespace-normal py-1.5 text-left"
+                  : "h-8 min-w-0 max-w-[120px] shrink",
+              )}
             >
               <span aria-hidden="true" className="size-1.5 shrink-0 animate-pulse rounded-full bg-foreground" />
-              <span className="truncate">{t.topbar.otherLive}</span>
+              <span className={easyPhone ? "whitespace-normal" : "truncate"}>{t.topbar.otherLive}</span>
             </Button>
           )}
 
@@ -177,7 +194,8 @@ export function TopBar({
                 data-testid="run-state"
                 data-state={badge.status}
                 className={cn(
-                  "flex min-w-0 shrink items-center gap-1.5 rounded-full bg-raised px-2.5 py-0.5 text-[12px] font-medium shadow-ring",
+                  "flex min-w-0 items-center gap-1.5 rounded-full bg-raised px-2.5 py-0.5 text-[12px] font-medium shadow-ring",
+                  easyPhone ? "shrink-0" : "shrink",
                   TONE_TEXT[tone],
                 )}
               >
@@ -190,7 +208,7 @@ export function TopBar({
                   {GLYPH[tone]}
                 </span>
                 <span className="min-w-0 truncate max-[359px]:sr-only">
-                  {easy && easyKind ? <EasyStatus kind={easyKind} /> : badgeText}
+                  {easy && easyKind ? <EasyStatus kind={easyKind} iconOnlyOnPhone /> : badgeText}
                 </span>
               </span>
             )}

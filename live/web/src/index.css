@@ -109,12 +109,12 @@
   --card-shadow: 0 8px 30px rgba(46, 52, 64, 0.08), 0 1px 2px rgba(46, 52, 64, 0.05);
   --live-glow: 0 0 24px rgba(94, 129, 172, 0.22);
   --time-ink: #4c6e94;
-  /* Aurora: Aurora green, teal and purple with a touch of Frost. Lower opacity on the light page. */
+  /* Aurora: Aurora green, teal and purple with a touch of Frost. Opacity is set against the header text budget (docs/nordic/TOKENS.md). */
   --aurora-1: #8fbcbb;
   --aurora-2: #a3be8c;
   --aurora-3: #b48ead;
   --aurora-4: #88c0d0;
-  --aurora-opacity: 0.26;
+  --aurora-opacity: 0.46;
   --orb-fg: #486488;
   --orb-pill-bg: #eceff4;
   --orb-label: #434c5e;
@@ -181,7 +181,8 @@
   --aurora-2: #a3be8c;
   --aurora-3: #b48ead;
   --aurora-4: #88c0d0;
-  --aurora-opacity: 0.4;
+  /* Capped so muted header text keeps 4.5:1 over one blob at full alpha (docs/nordic/TOKENS.md). */
+  --aurora-opacity: 0.25;
   --orb-fg: #88c0d0;
   --orb-pill-bg: #3b4252;
   --orb-label: #b4bfcf;
@@ -322,8 +323,8 @@
 
   .aurora-blob {
     position: absolute;
-    width: 62vmax;
-    height: 62vmax;
+    width: 80vmax;
+    height: 80vmax;
     border-radius: 50%;
     background: radial-gradient(
       closest-side,
@@ -337,26 +338,26 @@
   .aurora-blob[data-n="1"] {
     --blob-color: var(--aurora-1);
     --drift: 52s;
-    left: -14vmax;
-    top: -30vh;
+    left: -18vw;
+    top: -34vh;
   }
   .aurora-blob[data-n="2"] {
     --blob-color: var(--aurora-2);
     --drift: 58s;
-    left: 16vw;
-    top: -36vh;
+    left: 22vw;
+    top: -40vh;
   }
   .aurora-blob[data-n="3"] {
     --blob-color: var(--aurora-3);
     --drift: 44s;
-    left: 50vw;
-    top: -30vh;
+    left: 56vw;
+    top: -36vh;
   }
   .aurora-blob[data-n="4"] {
     --blob-color: var(--aurora-4);
     --drift: 48s;
-    left: 34vw;
-    top: -4vh;
+    left: 84vw;
+    top: -30vh;
   }
 
   /* While a run is live the aurora drifts faster and shimmers in opacity. Otherwise it is calmer. */
@@ -372,7 +373,8 @@
   }
 
   /* Progress fill: a Frost gradient sized to the visible part of the indicator (progress.tsx sets the size).
-     The sheen crosses on transform only. Off under reduced motion and Easy view. */
+     The sheen runs only while the bar is live (progress.tsx sets data-live); it crosses on transform only.
+     Reduced motion and Easy view hide it (unlayered rules below). */
   .progress-frost {
     background-image: linear-gradient(90deg, #8fbcbb, #88c0d0, #81a1c1);
     background-repeat: no-repeat;
@@ -383,9 +385,13 @@
     content: "";
     position: absolute;
     inset: 0;
-    background: linear-gradient(100deg, transparent 35%, rgba(255, 255, 255, 0.35) 50%, transparent 65%);
+    background: linear-gradient(100deg, transparent 35%, rgba(255, 255, 255, 0.3) 50%, transparent 65%);
     transform: translateX(-100%);
-    animation: progress-sheen 2.6s ease-in-out infinite;
+    display: none;
+  }
+  .progress-frost[data-live="true"]::after {
+    display: block;
+    animation: progress-sheen 2.5s ease-in-out infinite;
   }
 }
 

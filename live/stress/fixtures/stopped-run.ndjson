@@ -1,0 +1,64 @@
+{"v": 1, "type": "run_start", "t": 1792445089.9723423, "seq": 0, "run_id": "20261020-052449-demo-en-zh", "audio_file": "/workspace/noScribe-live/live/samples/demo-en-zh.mp3", "output_file": "/tmp/nslive-e2e/demo-en-zh.html", "model": "breeze-asr-25", "language": "Auto", "speaker_detection": "auto", "options": {"overlapping": true, "timestamps": true, "disfluencies": true, "pause": 1}, "pid": 3503184, "noscribe_version": "0.8"}
+{"v": 1, "type": "phase", "t": 1792445089.9726999, "seq": 1, "run_id": "20261020-052449-demo-en-zh", "phase": "converting"}
+{"v": 1, "type": "phase", "t": 1792445090.2221415, "seq": 2, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing"}
+{"v": 1, "type": "progress", "t": 1792445096.2200222, "seq": 3, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 0.0, "detail": "segmentation"}
+{"v": 1, "type": "progress", "t": 1792445096.6214492, "seq": 4, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 4.8, "detail": "segmentation"}
+{"v": 1, "type": "progress", "t": 1792445096.651129, "seq": 5, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 9.6, "detail": "segmentation"}
+{"v": 1, "type": "progress", "t": 1792445096.679488, "seq": 6, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 14.7, "detail": "segmentation"}
+{"v": 1, "type": "progress", "t": 1792445096.7083886, "seq": 7, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 19.5, "detail": "segmentation"}
+{"v": 1, "type": "progress", "t": 1792445096.7350883, "seq": 8, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 24.6, "detail": "segmentation"}
+{"v": 1, "type": "progress", "t": 1792445096.7683246, "seq": 9, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 29.4, "detail": "segmentation"}
+{"v": 1, "type": "progress", "t": 1792445096.7811718, "seq": 10, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 30.0, "detail": "segmentation"}
+{"v": 1, "type": "progress", "t": 1792445097.0025642, "seq": 11, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 30.0, "detail": "embeddings"}
+{"v": 1, "type": "progress", "t": 1792445097.462431, "seq": 12, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 33.5, "detail": "embeddings"}
+{"v": 1, "type": "progress", "t": 1792445098.0826082, "seq": 13, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 37.0, "detail": "embeddings"}
+{"v": 1, "type": "progress", "t": 1792445098.4984202, "seq": 14, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 40.5, "detail": "embeddings"}
+{"v": 1, "type": "progress", "t": 1792445098.9759986, "seq": 15, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 44.7, "detail": "embeddings"}
+{"v": 1, "type": "progress", "t": 1792445099.207046, "seq": 16, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 48.2, "detail": "embeddings"}
+{"v": 1, "type": "progress", "t": 1792445099.6277373, "seq": 17, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 51.7, "detail": "embeddings"}
+{"v": 1, "type": "progress", "t": 1792445100.0366242, "seq": 18, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 55.2, "detail": "embeddings"}
+{"v": 1, "type": "progress", "t": 1792445100.4985309, "seq": 19, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 59.4, "detail": "embeddings"}
+{"v": 1, "type": "progress", "t": 1792445100.908894, "seq": 20, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 62.9, "detail": "embeddings"}
+{"v": 1, "type": "progress", "t": 1792445101.362667, "seq": 21, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 66.4, "detail": "embeddings"}
+{"v": 1, "type": "progress", "t": 1792445101.819577, "seq": 22, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 69.9, "detail": "embeddings"}
+{"v": 1, "type": "progress", "t": 1792445102.2356856, "seq": 23, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 74.1, "detail": "embeddings"}
+{"v": 1, "type": "progress", "t": 1792445102.662014, "seq": 24, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 77.6, "detail": "embeddings"}
+{"v": 1, "type": "progress", "t": 1792445103.0965965, "seq": 25, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 81.1, "detail": "embeddings"}
+{"v": 1, "type": "progress", "t": 1792445103.5981255, "seq": 26, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 84.6, "detail": "embeddings"}
+{"v": 1, "type": "progress", "t": 1792445104.0559125, "seq": 27, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 88.8, "detail": "embeddings"}
+{"v": 1, "type": "progress", "t": 1792445104.4995394, "seq": 28, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 92.3, "detail": "embeddings"}
+{"v": 1, "type": "progress", "t": 1792445104.9902594, "seq": 29, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 95.8, "detail": "embeddings"}
+{"v": 1, "type": "progress", "t": 1792445105.1176257, "seq": 30, "run_id": "20261020-052449-demo-en-zh", "phase": "diarizing", "pct": 100.0, "detail": "embeddings"}
+{"v": 1, "type": "diarization", "t": 1792445105.5101979, "seq": 31, "run_id": "20261020-052449-demo-en-zh", "speakers": ["S00", "S01"], "turns": 69}
+{"v": 1, "type": "phase", "t": 1792445105.5106287, "seq": 32, "run_id": "20261020-052449-demo-en-zh", "phase": "transcribing"}
+{"v": 1, "type": "audio", "t": 1792445105.6050868, "seq": 33, "run_id": "20261020-052449-demo-en-zh", "duration": 202.4, "start_offset": 0.0}
+{"v": 1, "type": "model_ready", "t": 1792445124.8454113, "seq": 34, "run_id": "20261020-052449-demo-en-zh", "component": "whisper", "device": "cuda", "device_name": "NVIDIA GeForce RTX 5060 Ti", "compute_type": "default", "load_seconds": 18.81}
+{"v": 1, "type": "language", "t": 1792445126.1593978, "seq": 35, "run_id": "20261020-052449-demo-en-zh", "language": "zh", "probability": 0.97412109375}
+{"v": 1, "type": "segment", "t": 1792445128.518354, "seq": 36, "run_id": "20261020-052449-demo-en-zh", "index": 0, "start": 2.25, "end": 6.848, "speaker": "S00", "text": "This is a LibriVox recording. All LibriVox recordings are in the public domain."}
+{"v": 1, "type": "progress", "t": 1792445128.5187163, "seq": 37, "run_id": "20261020-052449-demo-en-zh", "phase": "transcribing", "pct": 3.4, "detail": null}
+{"v": 1, "type": "segment", "t": 1792445128.5207307, "seq": 38, "run_id": "20261020-052449-demo-en-zh", "index": 1, "start": 7.52, "end": 12.256, "speaker": "S00", "text": "For more information or to volunteer, please visit LibriVox dot org."}
+{"v": 1, "type": "progress", "t": 1792445128.5208564, "seq": 39, "run_id": "20261020-052449-demo-en-zh", "phase": "transcribing", "pct": 6.1, "detail": null}
+{"v": 1, "type": "segment", "t": 1792445128.5211048, "seq": 40, "run_id": "20261020-052449-demo-en-zh", "index": 2, "start": 14.08, "end": 17.696, "speaker": "S00", "text": "This recording is by Mark Smith of Simpsonville, South Carolina."}
+{"v": 1, "type": "progress", "t": 1792445128.5211737, "seq": 41, "run_id": "20261020-052449-demo-en-zh", "phase": "transcribing", "pct": 8.7, "detail": null}
+{"v": 1, "type": "segment", "t": 1792445128.5214148, "seq": 42, "run_id": "20261020-052449-demo-en-zh", "index": 3, "start": 20.448, "end": 32.512, "speaker": "S00", "text": "The address at the dedication of the National Cemetery at Gettysburg, November nineteenth, eighteen sixty three, also known as the Gettysburg Address by Abraham Lincoln."}
+{"v": 1, "type": "progress", "t": 1792445128.5214815, "seq": 43, "run_id": "20261020-052449-demo-en-zh", "phase": "transcribing", "pct": 16.1, "detail": null}
+{"v": 1, "type": "segment", "t": 1792445128.5217018, "seq": 44, "run_id": "20261020-052449-demo-en-zh", "index": 4, "start": 36.192, "end": 40.0, "speaker": "S00", "text": "Four score and seven years ago, our fathers brought forth a"}
+{"v": 1, "type": "progress", "t": 1792445128.5217667, "seq": 45, "run_id": "20261020-052449-demo-en-zh", "phase": "transcribing", "pct": 19.8, "detail": null}
+{"v": 1, "type": "segment", "t": 1792445128.5222952, "seq": 46, "run_id": "20261020-052449-demo-en-zh", "index": 5, "start": 41.12, "end": 44.064, "speaker": "S01", "text": "訓 吶喊自恤"}
+{"v": 1, "type": "progress", "t": 1792445128.5223737, "seq": 47, "run_id": "20261020-052449-demo-en-zh", "phase": "transcribing", "pct": 21.8, "detail": null}
+{"v": 1, "type": "segment", "t": 1792445131.697511, "seq": 48, "run_id": "20261020-052449-demo-en-zh", "index": 6, "start": 45.568, "end": 48.46, "speaker": "S01", "text": "我在年輕時候也曾經做過許多夢"}
+{"v": 1, "type": "progress", "t": 1792445131.6976101, "seq": 49, "run_id": "20261020-052449-demo-en-zh", "phase": "transcribing", "pct": 23.9, "detail": null}
+{"v": 1, "type": "segment", "t": 1792445131.6979632, "seq": 50, "run_id": "20261020-052449-demo-en-zh", "index": 7, "start": 48.46, "end": 50.52, "speaker": "S01", "text": "後來大半忘卻了"}
+{"v": 1, "type": "progress", "t": 1792445131.6980371, "seq": 51, "run_id": "20261020-052449-demo-en-zh", "phase": "transcribing", "pct": 25.0, "detail": null}
+{"v": 1, "type": "segment", "t": 1792445131.6989427, "seq": 52, "run_id": "20261020-052449-demo-en-zh", "index": 8, "start": 50.52, "end": 52.704, "speaker": "S01", "text": "但自己也並不以為可惜"}
+{"v": 1, "type": "progress", "t": 1792445131.6990197, "seq": 53, "run_id": "20261020-052449-demo-en-zh", "phase": "transcribing", "pct": 26.0, "detail": null}
+{"v": 1, "type": "segment", "t": 1792445131.699196, "seq": 54, "run_id": "20261020-052449-demo-en-zh", "index": 9, "start": 53.28, "end": 54.27, "speaker": "S01", "text": "所謂回憶著"}
+{"v": 1, "type": "segment", "t": 1792445131.699402, "seq": 55, "run_id": "20261020-052449-demo-en-zh", "index": 10, "start": 54.27, "end": 56.23, "speaker": "S01", "text": "雖說可以使人歡欣"}
+{"v": 1, "type": "progress", "t": 1792445131.699462, "seq": 56, "run_id": "20261020-052449-demo-en-zh", "phase": "transcribing", "pct": 27.8, "detail": null}
+{"v": 1, "type": "segment", "t": 1792445131.6996276, "seq": 57, "run_id": "20261020-052449-demo-en-zh", "index": 11, "start": 56.23, "end": 58.75, "speaker": "S01", "text": "有時也不免使人寂寞"}
+{"v": 1, "type": "progress", "t": 1792445131.6996844, "seq": 58, "run_id": "20261020-052449-demo-en-zh", "phase": "transcribing", "pct": 29.0, "detail": null}
+{"v": 1, "type": "segment", "t": 1792445131.6998622, "seq": 59, "run_id": "20261020-052449-demo-en-zh", "index": 12, "start": 58.75, "end": 63.52, "speaker": "S01", "text": "使精神的思慮還牽著已逝的寂寞的時光又有什麼意味呢"}
+{"v": 1, "type": "progress", "t": 1792445131.6999292, "seq": 60, "run_id": "20261020-052449-demo-en-zh", "phase": "transcribing", "pct": 31.4, "detail": null}
+{"v": 1, "type": "segment", "t": 1792445131.7000983, "seq": 61, "run_id": "20261020-052449-demo-en-zh", "index": 13, "start": 64.128, "end": 66.14, "speaker": "S01", "text": "而我偏苦于不能全忘卻"}
+{"v": 1, "type": "progress", "t": 1792445131.700155, "seq": 62, "run_id": "20261020-052449-demo-en-zh", "phase": "transcribing", "pct": 32.7, "detail": null}
+{"v": 1, "type": "segment", "t": 1792445131.7003174, "seq": 63, "run_id": "20261020-052449-demo-en-zh", "index": 14, "start": 66.52, "end": 68.08, "speaker": "S01", "text": "這不能全忘的一部分"}

@@ -75,7 +75,7 @@ const CLS_DIM = 12;
 const MAX_SPEAKERS = 8;
 const TINT_WEIGHTS = [0.35, 0.6, 0.85] as const;
 /** Ink dots on the dark theme take a Frost gradient across the orb; the light theme gets a deeper Frost run. */
-const FROST_DARK = ["#8fbcbb", "#88c0d0", "#81a1c1", "#5e81ac"] as const;
+const FROST_DARK = ["#8fbcbb", "#88c0d0", "#5e81ac"] as const;
 const FROST_LIGHT = ["#81a1c1", "#5e81ac", "#486488"] as const;
 
 const FALLBACK_INK: RGB = { r: 245, g: 245, b: 245 };
@@ -454,6 +454,15 @@ export class OrbRenderer {
       grad.addColorStop(0.66, rgbaCss(ink, 1));
       grad.addColorStop(1, rgbaCss(ink, 0));
       sctx.fillStyle = grad;
+      sctx.fillRect(0, 0, 128, 128);
+      // Soft aurora rim light: a thin Aurora-green band on the same rim. Drawn once into the cached sprite.
+      const rim = sctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+      rim.addColorStop(0, "rgba(163, 190, 140, 0)");
+      rim.addColorStop(0.6, "rgba(163, 190, 140, 0)");
+      rim.addColorStop(0.66, "rgba(163, 190, 140, 0.6)");
+      rim.addColorStop(0.76, "rgba(163, 190, 140, 0)");
+      rim.addColorStop(1, "rgba(163, 190, 140, 0)");
+      sctx.fillStyle = rim;
       sctx.fillRect(0, 0, 128, 128);
     }
     this.sprite = sprite;

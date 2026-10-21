@@ -13,7 +13,8 @@ export function EasyViewProvider({ children }: { children: ReactNode }) {
 
 /**
  * Easy view switch in the header, rendered on every width (data-testid stays unique). The phone header uses
- * `compact`: the same icon with a short label. aria-pressed carries the state; the label names the mode.
+ * `compact`: the same icon with a short label, and below 400 px the icon alone. aria-pressed carries the state,
+ * and the accessible name always names the mode (the label stays in the DOM for screen readers).
  */
 export function EasyToggle({ compact = false }: { compact?: boolean }) {
   const { t } = useI18n();
@@ -25,6 +26,7 @@ export function EasyToggle({ compact = false }: { compact?: boolean }) {
       size="sm"
       data-testid="easy-toggle"
       aria-pressed={easy}
+      aria-label={compact ? t.easy.toggle : undefined}
       onClick={() => setEasy(!easy)}
       className={cn(
         "h-9 shrink-0 gap-1.5 rounded-full font-medium shadow-ring hover:bg-raised dark:hover:bg-raised",
@@ -33,7 +35,7 @@ export function EasyToggle({ compact = false }: { compact?: boolean }) {
       )}
     >
       <Type aria-hidden="true" className="size-4" />
-      <span>{compact ? t.easy.toggleShort : t.easy.toggle}</span>
+      <span className={cn(compact && "max-[399px]:sr-only")}>{compact ? t.easy.toggleShort : t.easy.toggle}</span>
     </Button>
   );
 }
@@ -51,15 +53,26 @@ const GLYPH: Record<EasyStatusKind, string> = {
   reconnecting: "⟳",
 };
 
-/** A status word with its icon glyph. The glyph is decorative: the word carries the meaning for screen readers. */
-export function EasyStatus({ kind, className }: { kind: EasyStatusKind; className?: string }) {
+/**
+ * A status word with its icon glyph. The glyph is decorative: the word carries the meaning for screen readers.
+ * `iconOnlyOnPhone` hides the word below the sm breakpoint, so the phone header shows the glyph alone.
+ */
+export function EasyStatus({
+  kind,
+  className,
+  iconOnlyOnPhone = false,
+}: {
+  kind: EasyStatusKind;
+  className?: string;
+  iconOnlyOnPhone?: boolean;
+}) {
   const { t } = useI18n();
   return (
     <span className={cn("flex min-w-0 items-center gap-2 font-medium", className)}>
       <span aria-hidden="true" className="shrink-0">
         {GLYPH[kind]}
       </span>
-      <span className="min-w-0 truncate">{t.easy.status[kind]}</span>
+      <span className={cn("min-w-0 truncate", iconOnlyOnPhone && "max-sm:sr-only")}>{t.easy.status[kind]}</span>
     </span>
   );
 }
