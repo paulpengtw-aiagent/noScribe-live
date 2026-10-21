@@ -24,21 +24,35 @@ def _require(tool: str) -> None:
         raise RuntimeError(f"{tool} is not installed or not on PATH")
 
 
+class AudioDecodeError(RuntimeError):
+    """ffprobe or ffmpeg cannot read audio from an existing file (empty, corrupt, not audio).
+    The message is short and has no paths, so the viewer may show it."""
+
+
+def _reason(stderr: str, source: str) -> str:
+    """The last non-empty stderr line, with the input's absolute path replaced by its file name."""
+    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+    text = lines[-1].replace(source, Path(source).name) if lines else ""
+    return text[:200] or "no details from the decoder"
+
+
 def probe_duration(path: str | Path) -> float:
-    """Duration of the file in seconds, as reported by ffprobe."""
+    """Duration of the file in seconds, as reported by ffprobe. Raises AudioDecodeError if ffprobe cannot read it."""
     _require("ffprobe")
+    source = str(Path(path).resolve())
     proc = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(Path(path).resolve())],
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", source],
         capture_output=True,
         text=True,
+        errors="replace",
         timeout=60,
     )
     if proc.returncode != 0:
-        raise RuntimeError(f"ffprobe failed: {proc.stderr.strip() or proc.returncode}")
+        raise AudioDecodeError(_reason(proc.stderr, source))
     try:
         return float(proc.stdout.strip().splitlines()[0])
     except (IndexError, ValueError):
-        raise RuntimeError("ffprobe did not report a duration") from None
+        raise AudioDecodeError("no duration reported") from None
 
 
 def compute_peaks(path: str | Path, n: int) -> tuple[float, list[float]]:
@@ -84,8 +98,10 @@ def compute_peaks(path: str | Path, n: int) -> tuple[float, list[float]]:
             returncode = proc.wait()
         if returncode != 0:
             errlog.seek(0)
-            message = errlog.read().decode("utf-8", errors="replace").strip()
-            raise RuntimeError(f"ffmpeg failed: {message or returncode}")
+            message = errlog.read().decode("utf-8", errors="replace")
+            raise AudioDecodeError(_reason(message, source))
+        if index == 0:
+            raise AudioDecodeError("no audio samples could be decoded")
 
     rms = np.sqrt(np.divide(sums, counts, out=np.zeros(n), where=counts > 0))
     reference = float(np.percentile(rms, PERCENTILE))

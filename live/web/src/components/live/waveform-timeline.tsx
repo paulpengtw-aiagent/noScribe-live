@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from "react";
+import { useI18n } from "@/i18n";
 import { useSpeakerName } from "@/lib/speaker-names";
 import { cn } from "@/lib/utils";
 
@@ -18,6 +19,8 @@ export interface WaveformTimelineProps {
   frontier: number | null;
   speakerColor: (speaker: string) => string;
   hoveredIndex: number | null;
+  /** The segment the reader picked (clicked in the timeline or the text); shown with data-active. */
+  activeIndex?: number | null;
   onHover: (index: number | null) => void;
   onSelect: (index: number) => void;
   live: boolean;
@@ -35,6 +38,8 @@ const ALPHA_TRANSCRIBED = 0.24;
 const ALPHA_PENDING = 0.1;
 // Used only if --foreground cannot be read.
 const FALLBACK_INK = "#737373";
+// Narrowest a block is drawn, in percent of the track, so a very short segment stays visible.
+const MIN_BLOCK_PERCENT = 0.3;
 
 interface WaveformDraw {
   /** Timeline size in CSS pixels. */
@@ -99,15 +104,41 @@ export function WaveformTimeline({
   frontier,
   speakerColor,
   hoveredIndex,
+  activeIndex = null,
   onHover,
   onSelect,
   className,
 }: WaveformTimelineProps): JSX.Element {
+  const { t } = useI18n();
   const speakerName = useSpeakerName();
   const rootRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [ink, setInk] = useState(FALLBACK_INK);
+  // Roving tabindex: one block is in the tab order (the last one focused, else the active one, else the newest).
+  const [focusStop, setFocusStop] = useState<number | null>(null);
+  const newestIndex = segments.length > 0 ? segments[segments.length - 1].index : null;
+  // A remembered index whose block has gone (the segments were replaced) must not leave the timeline with no tab stop.
+  const isBlock = (index: number | null | undefined) => index != null && segments.some((seg) => seg.index === index);
+  const stopIndex = [focusStop, activeIndex].find(isBlock) ?? newestIndex;
+
+  // Arrow keys move focus between blocks, Home and End go to the first and last, so the timeline is one tab stop.
+  // Enter and Space select through the native button click.
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const { key } = event;
+    if (key !== "ArrowLeft" && key !== "ArrowRight" && key !== "Home" && key !== "End") return;
+    const root = rootRef.current;
+    if (!root) return;
+    const blocks = Array.from(root.querySelectorAll<HTMLButtonElement>("[data-timeline-index]"));
+    const at = blocks.indexOf(event.target as HTMLButtonElement);
+    if (at < 0) return;
+    event.preventDefault();
+    let next = at;
+    if (key === "Home") next = 0;
+    else if (key === "End") next = blocks.length - 1;
+    else next = Math.min(blocks.length - 1, Math.max(0, at + (key === "ArrowRight" ? 1 : -1)));
+    blocks[next]?.focus();
+  };
 
   // The canvas fills the root without padding, so the root's content box is the drawing area.
   useEffect(() => {
@@ -146,37 +177,82 @@ export function WaveformTimeline({
 
   const span = duration && duration > 0 ? duration : Math.max(1, frontier ?? 1);
   const pct = (seconds: number) => Math.min(100, Math.max(0, ((seconds - startOffset) / span) * 100));
+  // A block's left edge and width, in percent of the track. Drawing and hit testing both use this.
+  const blockBox = (seg: TimelineSegment) => {
+    const left = pct(seg.start);
+    return { left, width: Math.max(MIN_BLOCK_PERCENT, pct(seg.end) - left) };
+  };
+
+  // The block whose centre is nearest the pointer's x. The one hit layer covers the gaps between blocks too,
+  // so a tap anywhere on the track selects the block it is closest to.
+  const nearestIndex = (clientX: number, box: DOMRect): number | null => {
+    if (box.width <= 0) return null;
+    const x = ((clientX - box.left) / box.width) * 100;
+    let best: number | null = null;
+    let bestDistance = Infinity;
+    for (const seg of segments) {
+      const { left, width } = blockBox(seg);
+      const distance = Math.abs(left + width / 2 - x);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = seg.index;
+      }
+    }
+    return best;
+  };
+
   return (
-    <div ref={rootRef} className={cn("relative h-full w-full", className)}>
+    <div ref={rootRef} onKeyDown={onKeyDown} className={cn("relative h-full w-full", className)}>
       <canvas ref={canvasRef} aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full" />
-      <div className="absolute inset-x-0 top-1/2 h-px bg-hairline" />
+      <div className="pointer-events-none absolute inset-x-0 top-1/2 h-px bg-hairline" />
+      {/* Keyboard stops only: pointer input goes to the hit layer below, which picks the nearest block. */}
       {segments.map((seg) => {
-        const left = pct(seg.start);
-        const segWidth = Math.max(0.3, pct(seg.end) - left);
+        const { left, width } = blockBox(seg);
         const name = speakerName(seg.speaker);
+        const isActive = activeIndex === seg.index;
         return (
           <button
             key={seg.index}
             type="button"
-            aria-label={name ? `Segment ${seg.index + 1}, ${name}` : `Segment ${seg.index + 1}`}
-            onMouseEnter={() => onHover(seg.index)}
-            onMouseLeave={() => onHover(null)}
-            onFocus={() => onHover(seg.index)}
+            data-timeline-index={seg.index}
+            data-active={isActive ? "true" : undefined}
+            data-hovered={hoveredIndex === seg.index ? "true" : undefined}
+            aria-current={isActive ? "true" : undefined}
+            tabIndex={seg.index === stopIndex ? 0 : -1}
+            aria-label={name ? t.timeline.segment(seg.index + 1, name) : t.timeline.segmentPlain(seg.index + 1)}
+            onFocus={() => {
+              onHover(seg.index);
+              setFocusStop(seg.index);
+            }}
             onBlur={() => onHover(null)}
             onClick={() => onSelect(seg.index)}
-            className="absolute top-1/2 h-10 -translate-y-1/2 rounded-sm"
+            className="timeline-block pointer-events-none absolute top-1/2 h-10 -translate-y-1/2 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
             style={{
               left: `${left}%`,
-              width: `${segWidth}%`,
+              width: `${width}%`,
               backgroundColor: speakerColor(seg.speaker),
-              opacity: hoveredIndex === seg.index ? 1 : 0.55,
             }}
           />
         );
       })}
       {frontier !== null ? (
-        <div className="absolute inset-y-0 w-px bg-foreground" style={{ left: `${pct(frontier)}%` }} />
+        <div className="pointer-events-none absolute inset-y-0 w-px bg-foreground" style={{ left: `${pct(frontier)}%` }} />
       ) : null}
+      {/* One hit layer over the whole track, at least 24 px tall. Pointer hover and click select the nearest block. */}
+      <div
+        data-testid="timeline-hit"
+        aria-hidden="true"
+        className="absolute inset-0 min-h-[24px] cursor-pointer"
+        onPointerMove={(event) => {
+          const index = nearestIndex(event.clientX, event.currentTarget.getBoundingClientRect());
+          if (index !== hoveredIndex) onHover(index);
+        }}
+        onPointerLeave={() => onHover(null)}
+        onClick={(event) => {
+          const index = nearestIndex(event.clientX, event.currentTarget.getBoundingClientRect());
+          if (index !== null) onSelect(index);
+        }}
+      />
     </div>
   );
 }

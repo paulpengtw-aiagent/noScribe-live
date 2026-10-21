@@ -1,95 +1,187 @@
+import { lazy, Suspense, useSyncExternalStore } from "react";
 import { Moon, Sun } from "lucide-react";
 import { Orb } from "@/components/aicss/Orb";
+import { HeaderMenu } from "@/components/live/header-menu";
+import { LocaleToggle } from "@/components/live/locale-toggle";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { Connection } from "@/hooks/use-live-feed";
 import type { Theme } from "@/hooks/use-theme";
-import { formatTimeOfDay } from "@/lib/format";
-import { FOLLOW_NEWEST, RUN_STATUS_WORD, runName } from "@/lib/live-view";
+import { useI18n } from "@/i18n";
+import type { RunState } from "@/lib/live-state";
+import { runStateBadge } from "@/lib/live-view";
 import type { RunSummary } from "@/lib/live-types";
 import { cn } from "@/lib/utils";
 
-const CONNECTION_TEXT: Record<Connection, string> = {
-  connecting: "Connecting",
-  live: "Live",
-  reconnecting: "Reconnecting",
+// The run picker (popover + cmdk command palette) is its own chunk, fetched on first render.
+const RunPicker = lazy(() =>
+  import("@/components/live/run-picker").then((mod) => ({ default: mod.RunPicker })),
+);
+
+// Below Tailwind's sm breakpoint (40rem). There the theme and language switches fold into one menu.
+const COMPACT_QUERY = "(max-width: 39.99rem)";
+
+function subscribeCompact(onChange: () => void) {
+  if (typeof window.matchMedia !== "function") return () => {};
+  const query = window.matchMedia(COMPACT_QUERY);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+function useCompactHeader(): boolean {
+  return useSyncExternalStore(
+    subscribeCompact,
+    () => typeof window.matchMedia === "function" && window.matchMedia(COMPACT_QUERY).matches,
+    () => false,
+  );
+}
+
+/** Status dot colours, the same as the run picker's: failed red, stopped amber, live green, the rest neutral. */
+type Tone = "red" | "amber" | "green" | "neutral";
+
+const TONE_DOT: Record<Tone, string> = {
+  red: "bg-red-500",
+  amber: "bg-amber-500",
+  green: "bg-emerald-500",
+  neutral: "bg-foreground/60",
 };
 
 export interface TopBarProps {
   runs: RunSummary[];
   runParam: string;
   onRunChange: (runParam: string) => void;
+  /** The shown run, or null when none is shown. */
+  run: RunState | null;
+  /** A still-running run other than the shown one; offers a switch. Null when there is none. */
+  otherLive: RunSummary | null;
   connection: Connection;
   theme: Theme;
   onToggleTheme: () => void;
 }
 
-export function TopBar({ runs, runParam, onRunChange, connection, theme, onToggleTheme }: TopBarProps) {
-  const chosen = runs.find((run) => run.run_id === runParam);
-  const connectionText = CONNECTION_TEXT[connection];
-  // The trigger shows a shorter label on narrow screens so it never clips to "Follow newest r".
-  const triggerLabel =
-    runParam === FOLLOW_NEWEST ? (
-      <>
-        <span className="sm:hidden">Follow newest</span>
-        <span className="hidden sm:inline">Follow newest run</span>
-      </>
-    ) : chosen ? (
-      runName(chosen)
-    ) : (
-      runParam
-    );
+export function TopBar({
+  runs,
+  runParam,
+  onRunChange,
+  run,
+  otherLive,
+  connection,
+  theme,
+  onToggleTheme,
+}: TopBarProps) {
+  const { t } = useI18n();
+  const compact = useCompactHeader();
+  const badge = runStateBadge(run);
+  const live = badge?.status === "running";
+  // Only "live" counts as connected. Any other state (including the legacy "stale") reads as reconnecting.
+  const link = connection === "live" ? "live" : connection === "connecting" ? "connecting" : "reconnecting";
+  // A live run whose feed is not connected: the run badge carries the connection text, so the
+  // connection text is kept for screen readers only. data-state keeps the raw link state either way.
+  const feedDown = live && link !== "live";
+  const cutOff = feedDown && link === "reconnecting";
+  const badgeText = badge
+    ? feedDown
+      ? cutOff
+        ? t.topbar.runDisconnected
+        : t.topbar.connConnecting
+      : t.topbar.runStatus[badge.status]
+    : null;
+  // A live run whose feed is cut off reads amber (connection trouble), whatever the run's own status.
+  const tone: Tone = cutOff
+    ? "amber"
+    : badge?.status === "error"
+      ? "red"
+      : badge?.status === "stale"
+        ? "amber"
+        : badge?.status === "running"
+          ? "green"
+          : "neutral";
+  const connText =
+    link === "live"
+      ? t.topbar.connConnected
+      : link === "connecting"
+        ? t.topbar.connConnecting
+        : t.topbar.connReconnecting;
 
   return (
     <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center border-b border-hairline bg-background/80 backdrop-blur-xl">
-      <div className="flex w-full items-center justify-between gap-3 px-4 min-[1100px]:px-6">
+      <div className="flex w-full min-w-0 items-center justify-between gap-3 px-4 min-[1100px]:px-6">
         <div className="flex min-w-0 items-center gap-2.5">
-          <span aria-hidden="true" className="flex shrink-0">
-            <Orb variant="G1" size={18} />
+          <span aria-hidden="true" data-testid="logo" className="flex shrink-0 max-sm:size-7 max-sm:items-center max-sm:justify-center">
+            <Orb variant="G1" size={18} label={t.topbar.processing} />
           </span>
-          <span className="truncate text-[15px] font-medium tracking-[-0.01em]">noScribe Live</span>
+          <span className="min-w-0 truncate text-[15px] font-medium tracking-[-0.01em] max-sm:sr-only">
+            {t.topbar.appName}
+          </span>
         </div>
 
-        <div className="flex shrink-0 items-center gap-3 sm:gap-5">
-          <Select value={runParam} onValueChange={onRunChange}>
-            <SelectTrigger
-              aria-label="Choose a run"
-              className="h-8 w-[150px] rounded-full border-transparent bg-raised px-3.5 text-[13px] shadow-ring hover:bg-raised dark:bg-raised dark:hover:bg-raised sm:w-[260px]"
+        <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-initial sm:gap-4">
+          {otherLive && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              data-testid="other-live-run"
+              onClick={() => onRunChange(otherLive.run_id)}
+              className="h-8 min-w-0 max-w-[120px] shrink rounded-full bg-raised px-3 text-[13px] text-foreground shadow-ring hover:bg-raised sm:max-w-none sm:shrink-0 dark:bg-raised dark:hover:bg-raised"
             >
-              <SelectValue>{triggerLabel}</SelectValue>
-            </SelectTrigger>
-            <SelectContent position="popper" align="end" className="min-w-[260px] rounded-[14px]">
-              <SelectItem value={FOLLOW_NEWEST}>Follow newest run</SelectItem>
-              {runs.map((run) => (
-                <SelectItem key={run.run_id} value={run.run_id}>
-                  <span className="flex w-full min-w-0 items-center gap-3">
-                    <span className="min-w-0 flex-1 truncate">{runName(run)}</span>
-                    <span className="shrink-0 text-ink-2">{RUN_STATUS_WORD[run.status]}</span>
-                    <span className="shrink-0 tabular-nums text-ink-3">{formatTimeOfDay(run.started_t)}</span>
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+              <span aria-hidden="true" className="size-1.5 shrink-0 animate-pulse rounded-full bg-foreground" />
+              <span className="truncate">{t.topbar.otherLive}</span>
+            </Button>
+          )}
 
-          <div role="status" className="flex items-center gap-2 text-[13px] text-ink-2">
+          <Suspense fallback={null}>
+            <RunPicker runs={runs} value={runParam} onChange={onRunChange} />
+          </Suspense>
+
+          <div role="status" className="flex shrink-0 items-center gap-2 text-[13px] text-ink-2">
             <span
-              aria-hidden="true"
-              className={cn("size-1.5 rounded-full", connection === "live" ? "bg-foreground" : "animate-pulse bg-ink-3")}
-            />
-            <span className="sr-only sm:not-sr-only">{connectionText}</span>
+              data-testid="conn-state"
+              data-state={link}
+              className={cn("flex items-center gap-1.5", feedDown && "sr-only")}
+            >
+              {link !== "live" && !feedDown && (
+                <span aria-hidden="true" className="size-1.5 animate-pulse rounded-full bg-ink-3" />
+              )}
+              <span className={cn(link === "live" ? "sr-only" : "max-sm:sr-only")}>{connText}</span>
+            </span>
+            {badge && (
+              <span
+                data-testid="run-state"
+                data-state={badge.status}
+                className={cn(
+                  "flex min-w-0 shrink items-center gap-2 rounded-full bg-raised px-2.5 py-0.5 text-[12px] font-medium shadow-ring",
+                  cutOff ? "text-amber-700 dark:text-amber-400" : "text-foreground",
+                )}
+              >
+                <span
+                  aria-hidden="true"
+                  data-testid="run-state-dot"
+                  data-tone={tone}
+                  className={cn("size-1.5 shrink-0 rounded-full", TONE_DOT[tone], live && "animate-pulse")}
+                />
+                <span className="min-w-0 truncate max-[359px]:sr-only">{badgeText}</span>
+              </span>
+            )}
           </div>
 
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={onToggleTheme}
-            aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-            className="rounded-full shadow-ring hover:bg-raised dark:hover:bg-raised"
-          >
-            {theme === "dark" ? <Sun /> : <Moon />}
-          </Button>
+          {compact ? (
+            <HeaderMenu theme={theme} onToggleTheme={onToggleTheme} />
+          ) : (
+            <>
+              <LocaleToggle />
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={onToggleTheme}
+                aria-label={theme === "dark" ? t.topbar.switchTheme.light : t.topbar.switchTheme.dark}
+                className="shrink-0 rounded-full shadow-ring hover:bg-raised dark:hover:bg-raised"
+              >
+                {theme === "dark" ? <Sun /> : <Moon />}
+              </Button>
+            </>
+          )}
         </div>
       </div>
     </header>

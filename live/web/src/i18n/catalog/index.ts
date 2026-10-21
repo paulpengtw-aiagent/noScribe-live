@@ -1,0 +1,40 @@
+import type { Locale } from "../index";
+import { app, type AppMessages } from "./app";
+import { errors, type ErrorsMessages } from "./errors";
+import { picker, type PickerMessages } from "./picker";
+import { stage, type StageMessages } from "./stage";
+import { timeline, type TimelineMessages } from "./timeline";
+import { topbar, type TopbarMessages } from "./topbar";
+import { transcript, type TranscriptMessages } from "./transcript";
+
+/** Full message tree for one locale. Each area's zh-TW object is typed against its en shape. */
+export type Messages = {
+  app: AppMessages;
+  stage: StageMessages;
+  timeline: TimelineMessages;
+  transcript: TranscriptMessages;
+  topbar: TopbarMessages;
+  picker: PickerMessages;
+  errors: ErrorsMessages;
+};
+
+export const catalog: Record<Locale, Messages> = {
+  en: {
+    app: app.en,
+    stage: stage.en,
+    timeline: timeline.en,
+    transcript: transcript.en,
+    topbar: topbar.en,
+    picker: picker.en,
+    errors: errors.en,
+  },
+  "zh-TW": {
+    app: app["zh-TW"],
+    stage: stage["zh-TW"],
+    timeline: timeline["zh-TW"],
+    transcript: transcript["zh-TW"],
+    topbar: topbar["zh-TW"],
+    picker: picker["zh-TW"],
+    errors: errors["zh-TW"],
+  },
+};

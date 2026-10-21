@@ -17,6 +17,12 @@ export interface RunSummary {
   device: string | null;
   device_name: string | null;
   feed_file: string | null;
+  /** status === "running". Optional until the server sends it. */
+  live?: boolean;
+  /** Last event time for a stale run, ended_t for an ended run, null while running. */
+  inferred_end_t?: number | null;
+  /** Basename of the output HTML, only when that file exists. */
+  output_name?: string | null;
 }
 
 interface EventBase {

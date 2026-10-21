@@ -89,10 +89,11 @@ export function StreamingTextInline({
   }, [text, skip, charsPerTick]);
 
   const revealing = shown < text.length;
+  // Reduced motion: no caret at all, so nothing in the transcript moves or blinks.
   return (
     <span className={cn(className)}>
       {text.slice(0, shown)}
-      {caret ? (
+      {caret && !reduced ? (
         <span
           aria-hidden="true"
           className={cn(styles.caret, revealing ? styles.solid : styles.blink)}

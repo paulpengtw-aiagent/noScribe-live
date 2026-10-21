@@ -18,6 +18,19 @@ live/run.sh --rebuild    # also rebuilds the frontend in live/web
 - `PORT`: port to serve on (default `8765`).
 - `SKIP_WEB_BUILD=1`: never run pnpm or npm; serve whatever is in `live/web/dist`.
 - `NOSCRIBE_PY`: Python with noScribe installed. It only changes the command that `run.sh` prints.
+- `HOST`: bind address (default `127.0.0.1`). `HOST=0.0.0.0` listens on all interfaces.
+- `LIVE_TOKEN`: if set, every path needs this token. Open `http://HOST:8765/?token=VALUE` once; a cookie (7 days) then keeps the browser in, and `curl -H "Authorization: Bearer VALUE"` also works. Without it nothing is gated. `python -m server --token VALUE` does the same, but `LIVE_TOKEN` keeps the value out of `ps`.
+
+## Share the viewer through a tunnel
+
+1. Start the gated viewer: `LIVE_TOKEN=... PORT=8766 SKIP_WEB_BUILD=1 live/run.sh`.
+2. Run `live/stress/tunnel-bore.sh 8766`. It keeps a bore.pub TCP tunnel up on a fixed remote port, so the URL (`http://bore.pub:N`, also in `live/logs/tunnel-url.txt`) stays the same across reconnects. The port is remembered in `live/logs/bore-port`.
+3. Open `<URL>/?token=<token>` once; that sets a cookie.
+
+Needs the `bore` client: download the static musl build from https://github.com/ekzhang/bore/releases into `.tools/` (or set `BORE=...`).
+Cloudflare quick tunnels buffer SSE, and localhost.run rotates its URL, which is why bore is used.
+Caveat: bore is plain HTTP (no TLS), so the token and cookie travel unencrypted. Use it for public test audio only.
+Alternative: `live/stress/tunnel.sh` (localhost.run: HTTPS, but the URL changes on every reconnect).
 
 ## Transcribe alongside it
 
@@ -80,6 +93,10 @@ faster-whisper yields segments per 30 s decoding window, so they arrive in burst
 
 - `noScribe/live_feed.py`: opt-in NDJSON writer. The format is documented in [FEED.md](FEED.md).
 - `live/server`: FastAPI. It tails `live/feeds`. `GET /api/stream` is server-sent events with `hello` (server time and run list), `snapshot` (catch-up for a run) and `feed` (one event). It also serves `GET /api/runs` and `GET /api/runs/{id}/peaks`.
+- Proxies: `/api/stream` sends `Cache-Control: no-cache, no-transform`, `X-Accel-Buffering: no`, a 2 KB comment after `retry`, and `: ping` every 15 s. Do not put compression middleware in front of it.
+- Killed runs: a run with no `run_end` is "stale" once its CLI pid (from `run_start`) is gone and it has been quiet for 5 s. Without a pid, the 30-minute rule applies. A check every 2 s pushes status changes to open streams as `runs` messages.
+- Latest (`/api/stream?run=latest`) follows the newest run that is still live, or the newest run when none is. Summaries carry `live` (status is running), `inferred_end_t` (`last_t` for a stale run, `ended_t` for an ended one, null while running) and `output_name` (basename of `output_file` if that file exists, else null).
+- `GET /api/runs/{id}/peaks`: 404 for an unknown run, a run without audio, or a missing audio file; 422 `{"error": "audio could not be decoded", "detail": "..."}` when ffprobe or ffmpeg cannot read the file; 500 only for a server failure such as a missing ffmpeg.
 - `live/web`: React, Vite, TypeScript, Tailwind v4, shadcn/ui and motion.
 
 ## UI components and licensing
@@ -91,6 +108,7 @@ faster-whisper yields segments per 30 s decoding window, so they arrive in burst
 - No AICSS Pro components are used.
 - Built here: the canvas activity orb (`live/web/src/lib/orb-renderer.ts`), the timeline, the layout and the status chips.
 - Chinese segment text is shown in Traditional (Taiwan) through `opencc-js` (cn→tw), converted for display only and loaded lazily; the feed and the saved HTML are unchanged.
+- From the ObsidianUI shadcn registry (MIT), installed with `pnpm dlx shadcn@latest add https://www.obsidianui.dev/r/alert.json https://www.obsidianui.dev/r/skeleton.json https://www.obsidianui.dev/r/sonner.json https://www.obsidianui.dev/r/command.json https://www.obsidianui.dev/r/popover.json https://www.obsidianui.dev/r/input.json` into `live/web/src/components/ui/`: `Alert`, `Skeleton`, `Sonner` (theme passed as a prop; next-themes not used), `Command` (with its `Dialog` dependency), `Popover` and `Input`.
 
 ## Tests
 

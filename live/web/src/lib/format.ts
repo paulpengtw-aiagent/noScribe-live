@@ -71,11 +71,27 @@ export function formatPercent(fraction: number): string {
   return `${Math.round(Math.min(1, Math.max(0, fraction)) * 100)}%`;
 }
 
-/** Local 24-hour HH:MM for a unix-seconds timestamp. */
-export function formatTimeOfDay(unixSeconds: number | null | undefined): string {
+/** Local 24-hour HH:MM (or HH:MM:SS with `withSeconds`) for a unix-seconds timestamp. */
+export function formatTimeOfDay(unixSeconds: number | null | undefined, withSeconds = false): string {
   if (unixSeconds == null || !Number.isFinite(unixSeconds)) return DASH;
   const d = new Date(unixSeconds * 1000);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return withSeconds ? `${hm}:${String(d.getSeconds()).padStart(2, "0")}` : hm;
+}
+
+/** Local calendar day as YYYY-MM-DD, for grouping runs by day. */
+export function formatDay(unixSeconds: number): string {
+  const d = new Date(unixSeconds * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** Local date and time to the second, "YYYY-MM-DD HH:MM:SS", for a unix-seconds timestamp. */
+export function formatDateTime(unixSeconds: number | null | undefined): string {
+  if (unixSeconds == null || !Number.isFinite(unixSeconds)) return DASH;
+  const d = new Date(unixSeconds * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${formatDay(unixSeconds)} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 export function basename(path: string | null | undefined): string | null {
@@ -88,4 +104,14 @@ export function basename(path: string | null | undefined): string | null {
 export function shortDeviceName(name: string | null | undefined): string | null {
   if (!name) return null;
   return name.replace(/^NVIDIA\s+(GeForce\s+)?/i, "").trim() || null;
+}
+
+/** Local calendar day as a heading in the given locale, e.g. "Wed, Oct 21, 2026" or "2026年10月21日 週三". */
+export function formatDayHeading(unixSeconds: number, locale: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  }).format(new Date(unixSeconds * 1000));
 }

@@ -23,5 +23,17 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
+    // React and motion get their own cacheable chunks. Radix is left out on purpose: TooltipProvider in the
+    // entry needs it, and splitting it here would pull the run picker's popover into the first load.
+    rolldownOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return undefined
+          if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'vendor-react'
+          if (/[\\/]node_modules[\\/](motion|motion-dom|motion-utils|framer-motion)[\\/]/.test(id)) return 'vendor-motion'
+          return undefined
+        },
+      },
+    },
   },
 })
