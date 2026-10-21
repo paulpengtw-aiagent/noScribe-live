@@ -97,6 +97,8 @@ faster-whisper yields segments per 30 s decoding window, so they arrive in burst
 - Killed runs: a run with no `run_end` is "stale" once its CLI pid (from `run_start`) is gone and it has been quiet for 5 s. Without a pid, the 30-minute rule applies. A check every 2 s pushes status changes to open streams as `runs` messages.
 - Latest (`/api/stream?run=latest`) follows the newest run that is still live, or the newest run when none is. Summaries carry `live` (status is running), `inferred_end_t` (`last_t` for a stale run, `ended_t` for an ended one, null while running) and `output_name` (basename of `output_file` if that file exists, else null).
 - `GET /api/runs/{id}/peaks`: 404 for an unknown run, a run without audio, or a missing audio file; 422 `{"error": "audio could not be decoded", "detail": "..."}` when ffprobe or ffmpeg cannot read the file; 500 only for a server failure such as a missing ffmpeg.
+- `GET /api/runs/{id}/export.odt?lang=en|zh-TW`: the transcript as an OpenDocument text file (stdlib only, no LibreOffice). 404 for an unknown run, 409 JSON while it is still running. Paragraphs follow the page's rules.
+- Export text: Simplified Chinese is converted to Traditional (Taiwan) with OpenCC `s2tw` (`opencc-python-reimplemented`), the same mapping the page shows (opencc-js cn to tw). The document says so in its footer and meta.
 - `live/web`: React, Vite, TypeScript, Tailwind v4, shadcn/ui and motion.
 
 ## UI components and licensing

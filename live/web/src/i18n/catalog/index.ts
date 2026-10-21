@@ -1,6 +1,7 @@
 import type { Locale } from "../index";
 import { app, type AppMessages } from "./app";
 import { easy, type EasyMessages } from "./easy";
+import { exportArea, type ExportMessages } from "./export";
 import { errors, type ErrorsMessages } from "./errors";
 import { picker, type PickerMessages } from "./picker";
 import { stage, type StageMessages } from "./stage";
@@ -18,6 +19,7 @@ export type Messages = {
   picker: PickerMessages;
   errors: ErrorsMessages;
   easy: EasyMessages;
+  export: ExportMessages;
 };
 
 export const catalog: Record<Locale, Messages> = {
@@ -30,6 +32,7 @@ export const catalog: Record<Locale, Messages> = {
     picker: picker.en,
     errors: errors.en,
     easy: easy.en,
+    export: exportArea.en,
   },
   "zh-TW": {
     app: app["zh-TW"],
@@ -40,5 +43,6 @@ export const catalog: Record<Locale, Messages> = {
     picker: picker["zh-TW"],
     errors: errors["zh-TW"],
     easy: easy["zh-TW"],
+    export: exportArea["zh-TW"],
   },
 };

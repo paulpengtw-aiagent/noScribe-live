@@ -19,6 +19,7 @@ from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 
 from .auth import TokenGate
+from .export_odt import ODT_MEDIA_TYPE, build_odt, content_disposition, resolve_lang, segments_from_events, stem_of
 from .feed import FeedTailer, RunRegistry, drain_queue
 from .peaks import AudioDecodeError, compute_peaks
 
@@ -221,6 +222,34 @@ def create_app(feeds_dir: str | Path, static_dir: str | Path, poll: float = 0.05
         if run is None:
             return JSONResponse({"error": "unknown run"}, status_code=404)
         return JSONResponse(run.summary(time.time()))
+
+    @app.get("/api/runs/{run_id}/export.odt")
+    async def export_run_odt(run_id: str, request: Request, lang: str | None = Query(None)) -> Response:
+        """The transcript as an OpenDocument text file. 404 for an unknown run, 409 while it is still running."""
+        run = registry.get(run_id)
+        if run is None:
+            return JSONResponse({"error": "unknown run"}, status_code=404)
+        summary = run.summary(time.time())
+        if summary["live"]:
+            return JSONResponse({"error": "run is still running", "status": summary["status"]}, status_code=409)
+        title = summary["audio_name"] or run_id
+        body = build_odt(
+            title=title,
+            segments=segments_from_events(run.events),
+            lang=resolve_lang(lang, request.headers.get("accept-language", "")),
+            started_t=run.started_t,
+            duration=run.duration,
+            model=run.model,
+            speakers=run.speakers,
+        )
+        return Response(
+            content=body,
+            media_type=ODT_MEDIA_TYPE,
+            headers={
+                "Content-Disposition": content_disposition(f"{stem_of(title)}.odt"),
+                "Cache-Control": "no-store",
+            },
+        )
 
     @app.get("/api/stream")
     async def stream(request: Request, run: str = "latest") -> StreamingResponse:
