@@ -9,6 +9,9 @@ import { stage, type StageMessages } from "./stage";
 import { timeline, type TimelineMessages } from "./timeline";
 import { topbar, type TopbarMessages } from "./topbar";
 import { transcript, type TranscriptMessages } from "./transcript";
+import { llmContext, type LlmContextMessages } from "./llmContext";
+import { llmReview, type LlmReviewMessages } from "./llmReview";
+import { llmSettings, type LlmSettingsMessages } from "./llmSettings";
 
 /** Full message tree for one locale. Each area's zh-TW object is typed against its en shape. */
 export type Messages = {
@@ -22,6 +25,9 @@ export type Messages = {
   easy: EasyMessages;
   export: ExportMessages;
   preroll: PrerollMessages;
+  llmSettings: LlmSettingsMessages;
+  llmContext: LlmContextMessages;
+  llmReview: LlmReviewMessages;
 };
 
 export const catalog: Record<Locale, Messages> = {
@@ -36,6 +42,9 @@ export const catalog: Record<Locale, Messages> = {
     easy: easy.en,
     export: exportArea.en,
     preroll: preroll.en,
+    llmSettings: llmSettings.en,
+    llmContext: llmContext.en,
+    llmReview: llmReview.en,
   },
   "zh-TW": {
     app: app["zh-TW"],
@@ -48,5 +57,8 @@ export const catalog: Record<Locale, Messages> = {
     easy: easy["zh-TW"],
     export: exportArea["zh-TW"],
     preroll: preroll["zh-TW"],
+    llmSettings: llmSettings["zh-TW"],
+    llmContext: llmContext["zh-TW"],
+    llmReview: llmReview["zh-TW"],
   },
 };
