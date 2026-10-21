@@ -8,7 +8,7 @@ export interface AuroraBackgroundProps {
 /**
  * A fixed, decorative layer behind the header and the glass cards, full width and fading out toward the
  * bottom (index.css masks it). Four soft radial blobs in Aurora green, teal and purple with a touch of
- * Frost drift on transform only. The CSS makes it static under prefers-reduced-motion and
+ * Frost drift on transform only, and a soft band just under the header (.aurora-band). The CSS makes it static under prefers-reduced-motion and
  * html[data-easy="true"]. Pointer events pass through it.
  */
 export function AuroraBackground({ live = false }: AuroraBackgroundProps) {
@@ -41,6 +41,7 @@ export function AuroraBackground({ live = false }: AuroraBackgroundProps) {
       <span className="aurora-blob" data-n="2" />
       <span className="aurora-blob" data-n="3" />
       <span className="aurora-blob" data-n="4" />
+      <span className="aurora-band" />
     </div>
   );
 }

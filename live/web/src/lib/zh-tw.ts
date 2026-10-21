@@ -6,8 +6,9 @@ type Convert = (text: string) => string;
 // The converter comes from its own chunk (opencc-js/cn2t), so the main bundle does not carry the dictionary.
 // Loading and building it is one synchronous burst on the main thread (about 100 ms in the headless replay). Two
 // triggers start it: an idle preload when a transcript mounts, and an immediate request as soon as CJK text is seen
-// (requestConverter), which does not wait for idle. The notify that re-renders the transcript runs in a task of its
-// own, after the build. Until the converter is ready, CJK text is never painted: the transcript holds it back.
+// (requestConverter), which does not wait for idle. The flip notifies the subscribed transcripts at once, after the
+// build (useSyncExternalStore). Until the converter is ready, the transcript holds CJK text back; after ZH_FALLBACK_MS
+// (in transcript-card) it draws the raw text instead, and the converted text replaces it when the flip arrives.
 let convert: Convert | null = null;
 let loading = false;
 let scheduled = false;
@@ -25,10 +26,17 @@ export const zhStats: ZhStats = { ready: false, heldSegments: 0 };
 declare global {
   interface Window {
     __nsliveZh?: ZhStats;
+    /** Test only: holds the converter back this many ms after its import resolves. Unset or 0 means no delay. */
+    __NSLIVE_ZH_DELAY_MS?: number;
   }
 }
 
 if (typeof window !== "undefined") window.__nsliveZh = zhStats;
+
+function testDelayMs(): number {
+  const delay = typeof window !== "undefined" ? window.__NSLIVE_ZH_DELAY_MS : undefined;
+  return typeof delay === "number" && delay > 0 ? delay : 0;
+}
 
 // Safari has no requestIdleCallback, so a timer stands in. The timeout lets the load run even while a run keeps the page busy.
 const IDLE_TIMEOUT_MS = 1500;
@@ -50,10 +58,17 @@ function load(): void {
   performance.mark("zh-tw:import-start");
   import("opencc-js/cn2t")
     .then((mod) => {
-      convert = mod.Converter({ from: "cn", to: "tw" });
-      zhStats.ready = true;
-      performance.mark("zh-tw:converter-ready");
-      window.setTimeout(() => listeners.forEach((notify) => notify()), 0);
+      const ready = () => {
+        convert = mod.Converter({ from: "cn", to: "tw" });
+        zhStats.ready = true;
+        performance.mark("zh-tw:converter-ready");
+        // Synchronous: the flip is seen by every subscriber now. A subscriber that registers later reads `convert` in
+        // getSnapshot (useSyncExternalStore also re-checks the snapshot when it subscribes), so no flip is missed.
+        listeners.forEach((notify) => notify());
+      };
+      const delay = testDelayMs();
+      if (delay > 0) window.setTimeout(ready, delay);
+      else ready();
     })
     .catch(() => {
       // The CJK text stays held back; a waiting request retries the import.

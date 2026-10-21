@@ -91,13 +91,13 @@
      stopped a burnt orange, apart in lightness as well as hue. */
   --status-live: #4d683f;
   --status-loading: #8a6a00;
-  --status-failed: #8e3340;
-  --status-stopped: #a0481f;
+  --status-failed: #b8454f;
+  --status-stopped: #bc5a14;
   --status-finished: #486488;
   --status-live-ink: #4d683f;
   --status-loading-ink: #7a5c00;
-  --status-failed-ink: #8e3340;
-  --status-stopped-ink: #a0481f;
+  --status-failed-ink: #8e2a36;
+  --status-stopped-ink: #8f4a12;
   --status-finished-ink: #486488;
   /* Frosted glass: translucent Snow Storm card, Frost hairline, soft shadow, frost live glow. */
   /* Frosted glass: near-white Snow Storm card with a faint Frost sheen, Frost hairline, soft shadow. */
@@ -162,13 +162,13 @@
      Each dot reaches 3:1 on the raised chip (#434C5E); each -ink reaches 4.5:1 on it. See TOKENS.md. */
   --status-live: #a3be8c;
   --status-loading: #ebcb8b;
-  --status-failed: #e8808a;
-  --status-stopped: #eba07f;
+  --status-failed: #ff9aa6;
+  --status-stopped: #ffa860;
   --status-finished: #88c0d0;
   --status-live-ink: #c7d8b9;
   --status-loading-ink: #eccf93;
-  --status-failed-ink: #f8c6ca;
-  --status-stopped-ink: #f7c8b4;
+  --status-failed-ink: #ffcbd2;
+  --status-stopped-ink: #ffcb8e;
   --status-finished-ink: #b0d9e3;
   /* Frosted glass: a brighter translucent card over the darker page, Frost hairline, inner highlight, soft shadow.
      Round 14: fill 0.62 to 0.90 so card text holds 4.5:1 under the aurora (docs/nordic/TOKENS.md). */
@@ -335,6 +335,41 @@
     /* Fades out toward the bottom, so the layer has no hard edge. */
     -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 35%, transparent 100%);
     mask-image: linear-gradient(to bottom, #000 0%, #000 35%, transparent 100%);
+  }
+
+  /* A soft, slow colour band just under the header (the header is 56 px). Aurora greens, teal and purple, blurred and
+     masked at both edges. It drifts on transform only; reduced motion, Easy view and a hidden tab stop it. */
+  .aurora-band {
+    position: absolute;
+    left: -10%;
+    right: -10%;
+    top: 3.5rem;
+    height: 10rem;
+    background: linear-gradient(
+      90deg,
+      var(--aurora-1) 0%,
+      var(--aurora-4) 40%,
+      var(--aurora-2) 70%,
+      var(--aurora-3) 100%
+    );
+    filter: blur(34px);
+    opacity: 0.5;
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 35%, #000 60%, transparent 100%);
+    mask-image: linear-gradient(to bottom, transparent 0%, #000 35%, #000 60%, transparent 100%);
+    animation: aurora-band-drift 70s ease-in-out infinite alternate;
+  }
+
+  .aurora[data-paused="true"] .aurora-band {
+    animation-play-state: paused;
+  }
+
+  @keyframes aurora-band-drift {
+    from {
+      transform: translate3d(-3%, 0, 0);
+    }
+    to {
+      transform: translate3d(3%, 0, 0);
+    }
   }
 
   .aurora-blob {
@@ -551,7 +586,8 @@
   }
 
   .aurora-blob,
-  .aurora[data-live="true"] .aurora-blob {
+  .aurora[data-live="true"] .aurora-blob,
+  .aurora-band {
     animation: none;
   }
 

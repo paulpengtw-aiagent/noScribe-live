@@ -41,6 +41,10 @@ const MAX_FRAME_MS = 250;
 const FIRST_FRAME_MS = 16;
 /** The screen reader keeps this many announced lines; the oldest are removed. */
 const SR_KEEP = 20;
+/** Held CJK text is shown raw (unconverted) once the converter has been late this long (ms). It swaps when ready. */
+const ZH_FALLBACK_MS = 1500;
+/** Opacity cross-fade (ms) from the raw text to the converted text. Opacity only: the text does not move. */
+const ZH_FADE_MS = 150;
 const CLI_COMMAND =
   "python -m noScribe --no-gui --model breeze-asr-25 --speaker-detection auto --timestamps --live-feed live/feeds/ INPUT OUTPUT.html";
 
@@ -173,6 +177,10 @@ interface SegmentSpanProps {
   display: (text: string) => string;
   /** CJK text the converter has not produced yet, or a segment queued behind one: laid out but not painted. */
   hidden: boolean;
+  /** Drawn unconverted because the converter is late (fallback). It cross-fades when the converted text arrives. */
+  raw: boolean;
+  /** Motion allowed: not reduced motion and not Easy view. The cross-fade runs only then. */
+  motion: boolean;
   hovered: boolean;
   active: boolean;
   onHover: (index: number | null) => void;
@@ -188,12 +196,23 @@ const SegmentSpan = memo(function SegmentSpan({
   shown,
   display,
   hidden,
+  raw,
+  motion,
   hovered,
   active,
   onHover,
   onSelect,
 }: SegmentSpanProps) {
   const text = display(segment.text.trim());
+  const ref = useRef<HTMLSpanElement>(null);
+  const wasRaw = useRef(raw);
+  // Raw text becomes converted text: fade the span's opacity in. Opacity only, so the layout does not move.
+  useLayoutEffect(() => {
+    if (wasRaw.current && !raw && motion && ref.current) {
+      ref.current.animate([{ opacity: 0.4 }, { opacity: 1 }], { duration: ZH_FADE_MS, easing: "ease-out" });
+    }
+    wasRaw.current = raw;
+  }, [raw, motion]);
   return (
     <>
       {spaceBefore ? " " : null}
@@ -203,6 +222,7 @@ const SegmentSpan = memo(function SegmentSpan({
         </span>
       ) : null}
       <span
+        ref={ref}
         data-index={segment.index}
         data-segment-index={segment.index}
         data-segment-seq={segment.seq}
@@ -318,6 +338,9 @@ export function TranscriptCard({
   const reduce = useReducedMotion() ?? false;
   const speakerName = useSpeakerName();
   const { display: toDisplay, ready: zhReady } = useZhConverter();
+  // Held CJK is drawn raw once the converter has been late for ZH_FALLBACK_MS (zhFallback); zhGate is true when CJK may be drawn.
+  const [zhFallback, setZhFallback] = useState(false);
+  const zhGate = zhReady || zhFallback;
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   // Whether the view follows new text. A ref so observers and handlers read the latest value; the state mirrors it for the UI.
@@ -348,6 +371,14 @@ export function TranscriptCard({
   const blocks = useMemo(() => buildBlocks(segments), [segments]);
   const lastIndex = segments.length > 0 ? segments[segments.length - 1].index : -1;
   const hasBlocks = run !== null && segments.length > 0;
+  const hasCjkText = useMemo(() => segments.some((segment) => hasCJK(segment.text)), [segments]);
+  // The fallback clock runs while CJK text waits for the converter; it stops when the converter is ready.
+  const cjkHeld = !zhGate && hasCjkText;
+  useEffect(() => {
+    if (!cjkHeld) return;
+    const id = window.setTimeout(() => setZhFallback(true), ZH_FALLBACK_MS);
+    return () => window.clearTimeout(id);
+  }, [cjkHeld]);
   const name = run ? (run.audioName ?? run.runId) : null;
 
   // The reveal (see src/lib/reveal-engine.ts). Live segments type out one grapheme at a time, in arrival order; a
@@ -364,7 +395,7 @@ export function TranscriptCard({
       revealStats.maxLagMs = 0;
     } else {
       // Live CJK text waits for the converter, and so does the live text behind it (sync keeps the arrival order).
-      engine.sync(segments, (segment) => zhReady || !hasCJK(segment.text));
+      engine.sync(segments, (segment) => zhGate || !hasCJK(segment.text));
     }
     if (!queueable) engine.flush();
     recordStats(engine, Date.now());
@@ -383,7 +414,7 @@ export function TranscriptCard({
     }
     zhStats.heldSegments = held;
     if (cjk) requestConverter();
-  }, [engine, runId, segments, queueable, zhReady]);
+  }, [engine, runId, segments, queueable, zhGate, zhReady]);
   useEffect(
     () => () => {
       if (loop.current.frame !== null) cancelAnimationFrame(loop.current.frame);
@@ -417,8 +448,9 @@ export function TranscriptCard({
       const lines: SpokenLine[] = [];
       const seen = new Set(announcer.seen);
       for (const segment of fresh) {
-        // Only converted text is spoken. CJK waits for the converter, and the segments after it wait too, so the order holds.
-        if (!zhReady && hasCJK(segment.text)) break;
+        // Converted text is spoken. CJK waits for the converter (or the fallback: then the raw text is spoken once, and not
+        // again when it converts). The segments after a waiting CJK segment wait too, so the order holds.
+        if (!zhGate && hasCJK(segment.text)) break;
         seen.add(segment.seq);
         const text = toDisplay(segment.text.trim());
         if (text) lines.push({ key: segment.seq, text: segment.speaker ? t.transcript.srLine(speakerName(segment.speaker), text) : text });
@@ -620,7 +652,8 @@ export function TranscriptCard({
                     <p className="max-w-[70ch] text-pretty text-[17px] leading-[1.7] text-foreground">
                       {paragraph.items.map(({ seg, overlap, spaceBefore, thinBefore }: SegmentItem) => {
                         // Held text is laid out but not painted: CJK before the converter is ready, and what queues behind it.
-                        const hidden = (!zhReady && hasCJK(seg.text)) || view.held.has(seg.index);
+                        const hidden = (!zhGate && hasCJK(seg.text)) || view.held.has(seg.index);
+        const raw = zhFallback && !zhReady && hasCJK(seg.text);
                         const reveal: Reveal = hidden
                           ? "plain"
                           : seg.index === view.head
@@ -641,6 +674,8 @@ export function TranscriptCard({
                             shown={reveal === "reveal" ? view.shown : undefined}
                             display={toDisplay}
                             hidden={hidden}
+                            raw={raw}
+                            motion={!reduce && !easy}
                             hovered={hoveredIndex === seg.index}
                             active={activeIndex === seg.index}
                             onHover={onHover}

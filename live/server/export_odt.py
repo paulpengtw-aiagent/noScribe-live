@@ -28,8 +28,8 @@ PARAGRAPH_SOFT_S = 30.0    # past this length, a paragraph breaks at the next se
 PARAGRAPH_HARD_S = 45.0    # past this length, a paragraph breaks at the next segment boundary
 
 FOOTER = {
-    "en": "Chinese shown in Traditional (Taiwan), converted from the transcript for display with OpenCC s2tw",
-    "zh-TW": "中文以繁體中文（台灣）顯示，由轉錄文字以 OpenCC s2tw 轉換而來，僅供閱讀",
+    "en": "Chinese text is shown in Traditional Chinese (Taiwan).",
+    "zh-TW": "中文以臺灣正體字顯示。",
 }
 
 # The same ranges as CJK_CHAR in web/src/lib/format.ts.

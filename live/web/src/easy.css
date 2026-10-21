@@ -10,10 +10,11 @@ html[data-easy="true"][data-theme="dark"] {
   --muted-foreground: #f2f4f8;
   --ink-2: #f2f4f8;
   --ink-3: #eceff4;
-  /* Status words at 7:1 or better on the raised tiles (#434c5e) and the card (#3b4252). */
+  /* Status inks (TOKENS.md, Round 15): on the round-14 card composite (aurora at 0.3 in Easy view) Failed #ffcbd2 is
+     5.0:1 and Stopped #ffc88a 4.7:1. The pair is 36 ΔE apart (CIE76). */
   --status-live-ink: #e6ede0;
-  --status-failed-ink: #f7e8e9;
-  --status-stopped-ink: #f6e8e4;
+  --status-failed-ink: #ffcbd2;
+  --status-stopped-ink: #ffc88a;
   --status-finished-ink: #deedf2;
   --status-loading-ink: #f7eacf;
 }
@@ -24,10 +25,11 @@ html[data-easy="true"][data-theme="light"] {
   --muted-foreground: #3d3d3d;
   --ink-2: #3d3d3d;
   --ink-3: #3d3d3d;
-  /* Status words at 7:1 or better on the light card (#eceff4) and raised tiles (#e5e9f0). */
+  /* Status inks (TOKENS.md, Round 15): Failed #800f2f is 9.0:1 on the card, Stopped #6b3a00 8.2:1 on the card and
+     7.7:1 on the raised tile. The pair is 40 ΔE apart (CIE76). */
   --status-live-ink: #3b5031;
-  --status-failed-ink: #74383e;
-  --status-stopped-ink: #674132;
+  --status-failed-ink: #800f2f;
+  --status-stopped-ink: #6b3a00;
   --status-finished-ink: #374c67;
   --status-loading-ink: #5c470e;
 }
@@ -176,5 +178,25 @@ html[data-easy="true"] button:not(.timeline-block) {
 
   html[data-easy="true"] [data-testid="paragraph"] {
     margin-top: 4px;
+  }
+
+  /* The end-state strip under the transcript header (EndNotice, strip; a div with an h3 that sits right before the
+     transcript scroller). Tighter spacing in Easy phone so the first transcript paragraph starts higher. Text stays at
+     the 20 px easy size or more; only padding, gaps and line height change. */
+  html[data-easy="true"] div:has(> h3):has(+ [data-testid="transcript-scroll"]) {
+    gap: 4px;
+    padding: 0 16px 6px;
+  }
+
+  html[data-easy="true"] div:has(> h3):has(+ [data-testid="transcript-scroll"]) > h3 {
+    line-height: 1.2;
+  }
+
+  html[data-easy="true"] div:has(> h3):has(+ [data-testid="transcript-scroll"]) > p {
+    line-height: 1.3;
+  }
+
+  html[data-easy="true"] div:has(> h3):has(+ [data-testid="transcript-scroll"]) > div {
+    margin-top: 0;
   }
 }

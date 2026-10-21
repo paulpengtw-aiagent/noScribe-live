@@ -12,7 +12,7 @@ const en = {
   status: {
     live: "Live",
     loading: "Loading",
-    finished: "Finished",
+    finished: "Done",
     failed: "Failed",
     stopped: "Stopped",
     canceled: "Canceled",
@@ -27,7 +27,7 @@ const zhTW: EasyMessages = {
   toggleShort: "大字",
   moreInfo: "顯示詳細資訊",
   status: {
-    live: "轉錄中",
+    live: "即時",
     loading: "載入中",
     finished: "完成",
     failed: "失敗",

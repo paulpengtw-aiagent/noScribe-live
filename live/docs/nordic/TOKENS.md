@@ -153,3 +153,65 @@ Method: the stdlib model `/tmp/nordic_aurora/contrast.py` with the card fill as 
 - Adopted earlier: `top-bar.tsx` and `run-picker.tsx` use the status utilities (`bg-status-*` for dots, `text-status-*-ink` for text). `--color-status-loading` and `--color-status-loading-ink` are now mapped in the `@theme inline` block.
 - Motion: no animation touches height, width or top. The card entrance is the `.live-card` keyframe. The run-switch fade is `.run-fade` (opacity). The progress sheen and aurora drift are transform only.
 - Open question for the boss (round 14): the dark card fill is now 0.90 (the aurora shows through about 10% of a card) and eight dark text tokens were lightened to hold 4.5:1 under the aurora. Confirm that trade-off, or choose a lower fill with the larger text changes above. Removing the 7% sheen (the floor) is the other lever; not tested.
+
+## Round 15: status colours, aurora band, Easy phone header and end strip
+
+Method. Contrast is WCAG 2.x. ΔE is CIE76 (Lab, D65); CIEDE2000 was not computed. Deuteranopia is the Machado et al. 2009 matrix at severity 1.0, applied to linear sRGB; "deut ΔE" is the CIE76 distance between the two simulated colours. The card composite is the round-14 model (`/tmp/nordic_aurora/contrast.py`): card fill 0.90 over each aurora blob, worst of four. Scripts are in `/tmp/nordic_palette` (not kept in the repo).
+
+### Failed vs Stopped (red family vs orange family)
+
+Failed uses the Aurora red (#BF616A family), Stopped the Aurora orange (#D08770 family). Dots need 3:1 and inks 4.5:1.
+
+| Token | Theme | Old | New | Ratio on card | Ratio, round-14 composite |
+|---|---|---|---|---|---|
+| `--status-failed` (dot) | dark | `#E8808A` | `#FF9AA6` | 4.99 | 3.40 |
+| `--status-stopped` (dot) | dark | `#EBA07F` | `#FFA860` | 5.28 | 3.59 |
+| `--status-failed-ink` | dark | `#F8C6CA` | `#FFCBD2` | 7.06 (raised 6.05) | 4.80 |
+| `--status-stopped-ink` | dark | `#F7C8B4` | `#FFCB8E` | 6.80 (raised 5.83) | 4.63 |
+| `--status-failed` (dot) | light | `#8E3340` | `#B8454F` | 4.55 (raised 4.31) | n/a |
+| `--status-stopped` (dot) | light | `#A0481F` | `#BC5A14` | 3.95 (raised 3.74) | n/a |
+| `--status-failed-ink` | light | `#8E3340` | `#8E2A36` | 7.19 (raised 6.80) | n/a |
+| `--status-stopped-ink` | light | `#A0481F` | `#8F4A12` | 5.77 (raised 5.46) | n/a |
+| Easy `--status-failed-ink` | dark | `#F7E8E9` | `#FFCBD2` | 7.06 | 5.00 (layer 0.3) |
+| Easy `--status-stopped-ink` | dark | `#F6E8E4` | `#FFC88A` | 6.65 | 4.72 (layer 0.3) |
+| Easy `--status-failed-ink` | light | `#74383E` | `#800F2F` | 8.99 (raised 8.51) | n/a |
+| Easy `--status-stopped-ink` | light | `#674132` | `#6B3A00` | 8.17 (raised 7.73) | n/a |
+
+Failed vs Stopped, CIE76 ΔE and deuteranopia ΔE after simulation (aim ≥ 20):
+
+| Pair | Old ΔE | New ΔE | New deut ΔE |
+|---|---|---|---|
+| dark dots | 24.2 | 42.0 | 37.6 |
+| dark inks | 12.4 | 34.9 | 33.0 |
+| light dots | 29.1 | 36.7 | 31.1 |
+| light inks | 29.1 | 32.1 | 22.9 |
+| Easy dark inks | n/a | 35.7 | 34.1 |
+| Easy light inks | n/a | 40.0 | 22.6 |
+
+The old light pair was one colour set for dots and inks, so its ΔE is listed once. Colour is never the only cue: the glyph (✕ vs ■) and the word carry the state.
+
+The picker dots and the header glyph read these tokens through `bg-status-*` and `text-status-*-ink`, so `run-picker.tsx` and `top-bar.tsx` need no further colour change.
+
+### Aurora band and header scrim
+
+- Layer opacity is unchanged from round 14 (light 0.46, dark 0.5). The new `.aurora-band` is a 10 rem gradient band at 3.5 rem (the header's bottom edge), blurred 34 px and masked at both edges. It drifts on transform only over 70 s. Reduced motion, Easy view and a hidden tab stop it.
+- Effective peak alpha of the band is layer opacity × 0.5, which is 0.23 light and 0.25 dark. That is below a blob's centre (0.46 and 0.50), so the round-14 per-blob worst case is not lowered by the band alone. A band over a blob is not modelled; that is the open limit of this round.
+- A first attempt raised the dark layer to 0.64. Round-14 card text fell to 4.41 (muted and time), so the layer was put back.
+- Header text ratios, with the band at full layer strength (stronger than shipped): light `#2E3440` on the header composite `#DCE5ED` is 9.8:1; dark `#ECEFF4` on `#384753` is 8.3:1. Both are above 4.5:1.
+- Light card text on the composite (`#2E3440` on the 0.82 card over the aurora at 0.46) is 10.3:1. The dark card text is the round-14 table, unchanged (layer 0.5, fill 0.90; worst case muted 4.54, time 4.52).
+
+### Easy phone header (360, 390, 430 px)
+
+Easy text is 20 px. The header keeps 16 px side padding, so the content width is 328, 358 and 398 px. Easy controls are 48 px tall and wide (the picker, the toggle and the gear). Word widths below are estimates at 20 px.
+
+- Run status pill: 20 px padding, 14 px glyph, 8 px gap, then the word: 「即時」 or "Live" (40 px zh); 「載入中」 or "Loading" (60 px zh); 「完成」 or "Done" (40 px zh); 「失敗」 or "Failed" (40 px zh); 「意外停止」 or "Stopped" (80 px zh, about 122 px for the whole pill).
+- Easy toggle 「大字」 or "Easy": 82 px in both locales; gear 48 px. The run picker 「選擇轉錄」 or "Runs" is 130 px zh and 94 px en.
+- The right-hand group has 288 px at 360 px (after the logo and 12 px gap), 318 px at 390 px and 358 px at 430 px. It wraps (`flex-wrap`), so nothing clips or overflows.
+- At 360 px: line 1 is picker 130 + 8 + pill up to 122, which is 260 px; line 2 is toggle 82 + 8 + gear 48, which is 138 px. Two rows. At 390 px: the same two rows. At 430 px: line 1 holds the toggle (350 px); the gear wraps. Two rows.
+- Transient "Reconnecting" in zh (重新連線中, 100 px word; pill 142 px plus the connection dot) can push the status to a third row at 360 px. That state is not in the five-word list.
+
+### End-state strip, Easy phone (≤ 640 px)
+
+`transcript-card.tsx` is not edited. The strip is targeted by `div:has(> h3):has(+ [data-testid="transcript-scroll"])` in `easy.css`. Horizontal padding goes from 24 to 16 px, bottom padding from 16 to 6 px, the gap from 8 to 4 px, the title line-height to 1.2, the detail line-height to 1.3 and the error-details top margin to 0. Text stays at 20 px or more.
+
+Estimated saving at 390 × 844: about 36 to 44 px, so the first paragraph moves from the review's 442 to 470 px to roughly 400 to 434 px. **This is not measured** (no browser run this round), so the ≤ 400 px target is not confirmed. If it is still above 400, the next levers are the transcript header padding and the error-details margin.

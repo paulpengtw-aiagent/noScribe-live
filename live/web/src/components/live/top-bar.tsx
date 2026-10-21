@@ -207,8 +207,8 @@ export function TopBar({
                 >
                   {GLYPH[tone]}
                 </span>
-                <span className="min-w-0 truncate max-[359px]:sr-only">
-                  {easy && easyKind ? <EasyStatus kind={easyKind} iconOnlyOnPhone /> : badgeText}
+                <span className={cn("min-w-0 truncate", !easy && "max-[359px]:sr-only")}>
+                  {easy && easyKind ? <EasyStatus kind={easyKind} /> : badgeText}
                 </span>
               </span>
             )}

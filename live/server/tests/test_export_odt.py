@@ -196,19 +196,30 @@ def test_odfpy_reads_speakers_timestamps_and_traditional_text(tmp_path):
     assert "這是一個測試。" in joined
     assert "軟件和頭髮。" in joined
     assert "这是" not in joined and "软件" not in joined
-    assert "converted from the transcript" in joined
+    assert "Chinese text is shown in Traditional Chinese (Taiwan)." in joined
 
 
 def test_zh_document_uses_chinese_labels(tmp_path):
     texts = paragraphs_of(_write(tmp_path, "zh.odt", _download(tmp_path, lang="zh-TW")))
     assert "講者 1" in texts and "講者 2" in texts
     assert any("時長 2:05" in t for t in texts)
-    assert any("繁體中文" in t for t in texts)
+    assert "中文以臺灣正體字顯示。" in texts
 
 
-def test_manifest_and_meta_name_the_conversion(tmp_path):
-    meta = odt_parts(_download(tmp_path))["meta.xml"].decode("utf-8")
-    assert "converted from the transcript for display" in meta
+# The closing note: plain language, the same text as the body footer and as meta.xml dc:description.
+NOTE = {"en": "Chinese text is shown in Traditional Chinese (Taiwan).", "zh-TW": "中文以臺灣正體字顯示。"}
+
+
+@pytest.mark.parametrize("lang", ["en", "zh-TW"])
+def test_closing_note_is_plain_language_in_body_and_meta(tmp_path, lang):
+    body = _download(tmp_path, lang=lang)
+    parts = odt_parts(body)
+    assert NOTE[lang] in paragraphs_of(_write(tmp_path, "note.odt", body))
+    description = ET.fromstring(parts["meta.xml"]).find(".//{http://purl.org/dc/elements/1.1/}description")
+    assert description is not None and description.text == NOTE[lang]
+    for name in ("content.xml", "meta.xml"):
+        xml = parts[name].decode("utf-8")
+        assert "OpenCC" not in xml and "s2tw" not in xml
 
 
 # --- paragraph grouping mirrors web/src/lib/transcript-blocks.ts ----------------------------------------------------
