@@ -30,7 +30,7 @@ done
 live/run.sh
 ```
 
-The first start takes a few minutes. It creates `live/.venv`, installs the server's packages and builds the page. Later starts take seconds. Then open **http://localhost:8765**. Until a transcription starts, the page shows that it is waiting.
+The first start takes a few minutes. It creates `live/.venv`, installs the server's packages and builds the page. Later starts take seconds. After you update the code (`git pull`), the next start rebuilds the page by itself. Then open **http://localhost:8765**. Until a transcription starts, the page shows that it is waiting.
 
 ### 3. Transcribe with live output (terminal 2, from the repo folder)
 
@@ -83,7 +83,7 @@ Press Ctrl-C in each terminal. Past runs stay in the picker. To clear them, dele
 | The page keeps waiting while noScribe runs | The command must include `--live-feed live/feeds/` and run from the repo folder, because the viewer reads `live/feeds/`. |
 | noScribe says the model isn't found | Redo the model links in step 1. |
 | Port 8765 is already in use | Start on another port: `PORT=8770 live/run.sh`. |
-| A blank or outdated page after updating the code | `live/run.sh --rebuild` |
+| A blank or outdated page after updating the code | run.sh normally rebuilds the page by itself; to force it, run `live/run.sh --rebuild`. |
 | No waveform | Install `ffmpeg`. |
 | GPU memory still in use after you killed a run | A known noScribe issue: after `kill -9`, the speaker-identification worker can stay behind. Find it with `nvidia-smi` and stop that process. Prefer Ctrl-C. |
 
