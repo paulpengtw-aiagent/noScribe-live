@@ -6,8 +6,12 @@
 export const BASE_RATE = 50;
 /** Fastest reveal, in graphemes per second. */
 export const MAX_RATE = 2000;
-/** The reveal should have shown everything it holds within this many seconds. */
-export const HORIZON_S = 1.2;
+/** The reveal should have shown the queue's backlog within this many seconds of the oldest segment's arrival. */
+export const HORIZON_S = 1.0;
+/** Floor on the time left to the horizon (s). Caps the speed when the oldest segment is near its deadline. */
+export const MIN_LEFT_S = 0.15;
+/** Hard cap (ms): a segment still unrevealed this long after it arrived is shown in full at once. */
+export const HARD_CAP_MS = 1200;
 
 const segmenter: Intl.Segmenter | null =
   typeof Intl !== "undefined" && typeof Intl.Segmenter === "function"
@@ -44,15 +48,27 @@ export function graphemeCount(text: string): number {
 
 /** The leading `count` graphemes of text, as a string. Counts past the end give the whole text. */
 export function sliceGraphemes(text: string, count: number): string {
-  const offsets = graphemeOffsets(text);
-  const n = Math.max(0, Math.min(count, offsets.length - 1));
-  return text.slice(0, offsets[n]);
+  return splitGraphemes(text, count)[0];
 }
 
 /**
- * Graphemes per second needed to show `backlog` graphemes within HORIZON_S. Never below BASE_RATE, so a short
- * segment still types out at a readable pace; never above MAX_RATE.
+ * Splits text at a grapheme boundary: the leading `count` graphemes, and the rest. Counts past the end give the whole
+ * text and an empty rest; the two parts always join back to text.
  */
-export function requiredRate(backlog: number): number {
-  return Math.min(MAX_RATE, Math.max(BASE_RATE, backlog / HORIZON_S));
+export function splitGraphemes(text: string, count: number): [string, string] {
+  const offsets = graphemeOffsets(text);
+  const n = Math.max(0, Math.min(count, offsets.length - 1));
+  const at = offsets[n];
+  return [text.slice(0, at), text.slice(at)];
+}
+
+/**
+ * Graphemes per second for a queue holding `backlog` graphemes whose oldest segment is `ageS` seconds old. The rate
+ * is the backlog over the time left to the horizon, so the queue drains by HORIZON_S after that arrival. Never below
+ * BASE_RATE (a short segment still types at a readable pace), never above MAX_RATE. Recomputed every frame: as the
+ * backlog falls the time left falls with it, so the drain is linear and empties at the horizon, not exponentially.
+ */
+export function revealRate(backlog: number, ageS: number): number {
+  const left = Math.max(MIN_LEFT_S, HORIZON_S - Math.max(0, ageS));
+  return Math.min(MAX_RATE, Math.max(BASE_RATE, backlog / left));
 }

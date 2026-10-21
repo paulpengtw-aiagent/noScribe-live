@@ -1,23 +1,40 @@
-/* Soft caret at the reveal edge of a streaming segment: a small rounded Frost bar with a glow. */
+/*
+ * Soft caret at the reveal edge of a streaming segment: a small rounded Frost bar with a glow. The element itself has
+ * zero width, so it never changes where lines break; the bar is drawn by ::before, which overflows it.
+ */
 .caret {
+  position: relative;
   display: inline-block;
-  width: 2px;
+  width: 0;
   height: 1.1em;
-  margin-left: 2px;
-  border-radius: 2px;
-  background: #88c0d0;
-  box-shadow: 0 0 6px 1px rgb(136 192 208 / 0.5);
   vertical-align: text-bottom;
 }
 
+.caret::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+  border-radius: 2px;
+  background: #88c0d0;
+  box-shadow: 0 0 6px 1px rgb(136 192 208 / 0.5);
+}
+
 /* While text is revealing: a gentle pulse of the glow. */
-.pulse {
+.pulse::before {
   animation: caret-glow 1.4s ease-in-out infinite;
 }
 
 /* Resting caret after a live run's newest segment, while nothing is revealing: dimmer and still. */
-.idle {
+.idle::before {
   opacity: 0.6;
+}
+
+/* The unrevealed rest of a streaming segment: laid out so the lines are final, but neither drawn nor read. */
+.unrevealed {
+  visibility: hidden;
 }
 
 @keyframes caret-glow {
@@ -33,7 +50,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pulse {
+  .pulse::before {
     animation: none;
   }
 }

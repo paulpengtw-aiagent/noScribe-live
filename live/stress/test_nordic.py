@@ -31,6 +31,7 @@ import shutil
 import statistics
 import sys
 import re
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -51,7 +52,10 @@ TERMS = ("說話者", "運行", "文件", "信息", "默認", "加載", "屏幕"
 SAMPLE_JS = """() => {
   const segs = {};
   for (const el of document.querySelectorAll('[data-segment-seq]')) {
-    segs[el.getAttribute('data-segment-seq')] = el.textContent.trim();
+    let txt = ''; const walk = (n) => { for (const c of n.childNodes) {
+      if (c.nodeType === 3) txt += c.nodeValue; else if (c.nodeType === 1 && !c.hasAttribute('data-unrevealed')) walk(c); } };
+    walk(el);
+    segs[el.getAttribute('data-segment-seq')] = txt.trim();
   }
   const r = window.__nsliveReveal;
   return { segs, reveal: r ? { maxLagMs: r.maxLagMs, currentLagMs: r.currentLagMs,
@@ -68,8 +72,25 @@ PERF_JS = r"""
     new PerformanceObserver((l) => { for (const e of l.getEntries()) P.longtasks.push(e.duration); })
       .observe({ type: 'longtask', buffered: true });
   } catch (e) {}
+  P.sources = [];
+  const desc = (n) => {
+    if (n && !n.tagName && n.parentElement) {
+      const host = n.parentElement.closest('[data-index]');
+      return 'text@' + n.parentElement.tagName.toLowerCase() + (host ? '#' + host.getAttribute('data-index') : '') + ':' + JSON.stringify(String(n.textContent).slice(0, 14));
+    }
+    if (!n || !n.tagName) return 'text';
+    const cls = typeof n.className === 'string' ? n.className.split(' ').filter(Boolean).slice(0, 2).join('.') : '';
+    const tid = n.getAttribute('data-testid'); const idx = n.getAttribute('data-index');
+    return n.tagName.toLowerCase() + (tid ? '[' + tid + ']' : '') + (idx ? '#' + idx : '') + (cls ? '.' + cls : '');
+  };
   try {
-    new PerformanceObserver((l) => { for (const e of l.getEntries()) if (!e.hadRecentInput) P.shifts += e.value; })
+    new PerformanceObserver((l) => { for (const e of l.getEntries()) if (!e.hadRecentInput) {
+      P.shifts += e.value;
+      const sc = document.querySelector('[data-testid="transcript-scroll"]');
+      for (const s of (e.sources || [])) P.sources.push({ d: desc(s.node), dy: s.currentRect.top - s.previousRect.top,
+        dx: s.currentRect.left - s.previousRect.left, dh: s.currentRect.height - s.previousRect.height, v: e.value, t: e.startTime,
+        st: sc ? sc.scrollTop : -1, sh: sc ? sc.scrollHeight : -1, ch: sc ? sc.clientHeight : -1 });
+    } })
       .observe({ type: 'layout-shift', buffered: true });
   } catch (e) {}
   const tick = (t) => { P.frames.push(t); requestAnimationFrame(tick); };
@@ -77,8 +98,8 @@ PERF_JS = r"""
 })();
 """
 
-PERF_READ_JS = """() => { const P = window.__nsPerf || { longtasks: [], shifts: 0, frames: [] };
-  return { longtasks: P.longtasks.slice(), shifts: P.shifts, frames: P.frames.slice() }; }"""
+PERF_READ_JS = """() => { const P = window.__nsPerf || { longtasks: [], shifts: 0, frames: [], sources: [] };
+  return { longtasks: P.longtasks.slice(), shifts: P.shifts, frames: P.frames.slice(), sources: (P.sources || []).slice() }; }"""
 
 ANIM_JS = """() => { const run = document.getAnimations().filter((a) => a.playState === 'running');
   const names = run.slice(0, 4).map((a) => { const t = a.effect && a.effect.target;
@@ -228,7 +249,9 @@ def new_ctx(browser: Any, presets: str | None = None) -> tuple[Any, Any]:
 # ---- stream -----------------------------------------------------------------------------------------
 def stream_body(h: Any, page: Any, path: Path, run_id: str) -> None:
     reloaded = False
-    ready = ux.wait_until(lambda: ux.seg_count(page) >= 1, 8, 0.2)
+    # The demo's first segment lands 10.6 s into a replay at --speed 2 --max-gap 2, and 19.3 s at --speed 1 --max-gap 3
+    # (the stream group's settings). An 8 s wait reloaded a page that was already following the run live.
+    ready = ux.wait_until(lambda: ux.seg_count(page) >= 1, 30, 0.2)
     if not ready:  # the page did not pick up the new run on its own; load it now
         page.reload(wait_until="domcontentloaded")
         reloaded = True
@@ -313,6 +336,23 @@ def stream_body(h: Any, page: Any, path: Path, run_id: str) -> None:
           flush=True)
     print(f"INFO stream long tasks since page load: count {len(lts)}, max {max(lts) if lts else 0:.0f} ms, "
           f"total {sum(lts):.0f} ms", flush=True)
+    # Layout-shift sources, aggregated by element and direction (evidence for the CLS root cause).
+    srcs = perf.get("sources", [])
+    agg: dict[str, list[float]] = {}
+    for src in srcs:
+        dy = float(src.get("dy") or 0)
+        way = "down" if dy > 0.5 else ("up" if dy < -0.5 else "flat")
+        key = f"{src.get('d')} {way}"
+        acc = agg.setdefault(key, [0, 0.0, 0.0])
+        acc[0] += 1
+        acc[1] += float(src.get("v") or 0)
+        acc[2] += dy
+    top = sorted(agg.items(), key=lambda kv: -kv[1][1])[:8]
+    for src in srcs[:int(os.environ.get("NS_SRC_DUMP", "0"))]:
+        print(f"INFO src {src.get('d')} t={float(src.get('t') or 0):.0f} v={float(src.get('v') or 0):.4f} dx={float(src.get('dx') or 0):+.1f} "
+              f"dy={float(src.get('dy') or 0):+.1f} dh={float(src.get('dh') or 0):+.1f} st={src.get('st')} sh={src.get('sh')} ch={src.get('ch')}", flush=True)
+    print(f"INFO stream CLS sources ({len(srcs)} rects, CLS {shifts:.4f}): " +
+          "; ".join(f"{k} n={v[0]} sum={v[1]:.4f} mean_dy={v[2] / v[0]:+.1f}" for k, v in top), flush=True)
     h.check("stream: layout-shift (CLS) sum <= 0.1", shifts <= 0.1, f"CLS {shifts:.4f}")
     h.shot(page, "stream-end.png")
 

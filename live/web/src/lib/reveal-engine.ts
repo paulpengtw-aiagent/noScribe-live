@@ -1,11 +1,12 @@
 /**
  * The reveal queue for one run: live segments type out one grapheme at a time, strictly in arrival order.
  *
- * Pure and clock-free: the caller passes the frame step (ms) to advance(), and the arrival time (ms) each segment
- * carries. No React, no DOM, so it can be unit-tested with plain Node. See reveal-rate.ts for the speed rule.
+ * Pure and clock-free: the caller passes the frame step (ms) and the current time (ms) to advance(), and the arrival
+ * time (ms) each segment carries. No React, no DOM, so it can be unit-tested with plain Node. See reveal-rate.ts for
+ * the speed rule and the hard cap.
  */
 
-import { graphemeCount, requiredRate } from "./reveal-rate.ts";
+import { HARD_CAP_MS, graphemeCount, revealRate } from "./reveal-rate.ts";
 
 /** The segment fields the engine reads. Structural, so the engine does not depend on the live-state types. */
 export interface RevealSegment {
@@ -47,10 +48,6 @@ export class RevealEngine {
   private shown = 0;
   /** Fractional graphemes carried from one frame to the next, so the speed is steady at any frame rate. */
   private carry = 0;
-  /** Graphemes per second for the whole queue. Set when segments are queued (requiredRate of the full backlog), then
-   *  held while it drains. Recomputing it from the shrinking backlog every frame decays the drain exponentially, so a
-   *  400-grapheme segment took 3.5 s instead of HORIZON_S. */
-  private rate = 0;
   private cached: RevealView | null = null;
 
   /** Starts a run. Its current segments count as already shown, so nothing in them is queued. */
@@ -66,7 +63,6 @@ export class RevealEngine {
 
   /** Queues the live segments not seen before, in the order given. Segments that are not live are marked seen and never queued. */
   sync(segments: readonly RevealSegment[]): void {
-    let queued = false;
     for (const segment of segments) {
       if (this.seen.has(segment.index)) continue;
       this.seen.add(segment.index);
@@ -74,10 +70,8 @@ export class RevealEngine {
       const total = graphemeCount(segment.text.trim());
       if (total === 0) continue;
       this.queue.push({ index: segment.index, total, arrivedAt: segment.recvAt });
-      queued = true;
       this.cached = null;
     }
-    if (queued) this.rate = requiredRate(this.backlog());
   }
 
   /** Graphemes still to show across the whole queue: the head's shown part is not counted. */
@@ -89,11 +83,15 @@ export class RevealEngine {
 
   /** Shows everything queued at once. */
   flush(): void {
-    if (this.queue.length === 0) return;
-    this.revealedSegments += this.queue.length;
-    this.queue = [];
-    this.shown = 0;
+    while (this.queue.length > 0) this.finishHead();
     this.carry = 0;
+  }
+
+  /** Shows the head segment in full and drops it from the queue. */
+  private finishHead(): void {
+    this.queue.shift();
+    this.shown = 0;
+    this.revealedSegments += 1;
     this.cached = null;
   }
 
@@ -112,13 +110,20 @@ export class RevealEngine {
     return this.queue.length === 0 ? 0 : Math.max(0, now - this.queue[0].arrivedAt);
   }
 
-  /** Moves the reveal forward by `dtMs` of wall-clock time, at the rate needed to keep up with the backlog. */
-  advance(dtMs: number): void {
+  /**
+   * Moves the reveal forward by `dtMs` of wall-clock time. `nowMs` is the clock the arrival times are read against.
+   * Any segment that has waited HARD_CAP_MS since it arrived is shown in full first; the rest is revealed at the rate
+   * for the backlog and the age of the oldest segment (revealRate), recomputed each call.
+   */
+  advance(dtMs: number, nowMs: number): void {
+    // Queue order is arrival order, so the segments past the cap are a prefix of the queue.
+    while (this.queue.length > 0 && nowMs - this.queue[0].arrivedAt >= HARD_CAP_MS) this.finishHead();
     if (this.queue.length === 0) {
       this.carry = 0;
       return;
     }
-    this.carry += (this.rate * Math.max(0, dtMs)) / 1000;
+    const ageS = Math.max(0, nowMs - this.queue[0].arrivedAt) / 1000;
+    this.carry += (revealRate(this.backlog(), ageS) * Math.max(0, dtMs)) / 1000;
     let whole = Math.floor(this.carry);
     this.carry -= whole;
     if (whole === 0) return;
@@ -127,11 +132,7 @@ export class RevealEngine {
       const take = Math.min(whole, head.total - this.shown);
       this.shown += take;
       whole -= take;
-      if (this.shown >= head.total) {
-        this.queue.shift();
-        this.shown = 0;
-        this.revealedSegments += 1;
-      }
+      if (this.shown >= head.total) this.finishHead();
     }
     if (this.queue.length === 0) this.carry = 0;
     this.cached = null;

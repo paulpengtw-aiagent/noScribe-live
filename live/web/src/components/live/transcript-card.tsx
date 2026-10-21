@@ -13,6 +13,7 @@ import { ArrowDown, Check, Copy } from "lucide-react";
 import { useI18n } from "@/i18n";
 import { StreamingTextInline } from "@/components/aicss/streaming-text-inline";
 import { ErrorDetails } from "@/components/live/error-details";
+import { ExportButton } from "@/components/live/export-button";
 import { Button } from "@/components/ui/button";
 import { describeEnd, type EndDescription } from "@/lib/end-state";
 import { formatElapsed, isMostlyCjk } from "@/lib/format";
@@ -137,7 +138,7 @@ function pumpReveal(engine: RevealEngine, loop: RevealLoop, publish: (view: Reve
     const dt = loop.last === null ? FIRST_FRAME_MS : Math.min(MAX_FRAME_MS, time - loop.last);
     loop.last = time;
     if (engine.lagMs(Date.now()) > FLUSH_LAG_MS) engine.flush();
-    engine.advance(dt);
+    engine.advance(dt, Date.now());
     recordStats(engine, Date.now());
     publish(engine.view());
     if (engine.busy()) {
@@ -498,13 +499,16 @@ export function TranscriptCard({
     <section aria-label={t.transcript.transcriptLabel} className="live-card relative flex min-h-0 flex-1 flex-col overflow-hidden max-sm:h-[70vh] max-sm:flex-none">
       {run ? (
         <header className="shrink-0 px-6 pt-5 pb-4">
-          <h2
-            data-testid="run-title"
-            title={name ?? undefined}
-            className="truncate text-[22px] leading-tight font-medium tracking-[-0.02em]"
-          >
-            {name}
-          </h2>
+          <div className="flex min-w-0 items-center gap-3">
+            <h2
+              data-testid="run-title"
+              title={name ?? undefined}
+              className="min-w-0 truncate text-[22px] leading-tight font-medium tracking-[-0.02em]"
+            >
+              {name}
+            </h2>
+            <ExportButton run={run} />
+          </div>
           <div className="mt-1.5 flex min-w-0 items-center gap-2 text-[13px] leading-5 text-ink-2">
             {run.outputName ? (
               <span title={run.outputName} className="min-w-0 truncate">
