@@ -60,6 +60,11 @@ export interface TopBarProps {
   connection: Connection;
   theme: Theme;
   onToggleTheme: () => void;
+  /**
+   * The pre-roll is on screen: the header keeps only the logo and the toggles. Hides the run picker, the
+   * other-live switch and the run-state chip.
+   */
+  minimal?: boolean;
 }
 
 export function TopBar({
@@ -71,6 +76,7 @@ export function TopBar({
   connection,
   theme,
   onToggleTheme,
+  minimal = false,
 }: TopBarProps) {
   const { t } = useI18n();
   const { easy } = useEasyView();
@@ -155,7 +161,7 @@ export function TopBar({
         </div>
 
         <div className={cn("flex min-w-0 flex-1 items-center gap-2 sm:flex-initial sm:gap-4", easyPhone && "flex-wrap justify-end")}>
-          {otherLive && !easyPhone && (
+          {otherLive && !easyPhone && !minimal && (
             <Button
               type="button"
               variant="ghost"
@@ -174,9 +180,11 @@ export function TopBar({
             </Button>
           )}
 
-          <Suspense fallback={null}>
-            <RunPicker runs={runs} value={runParam} onChange={onRunChange} />
-          </Suspense>
+          {!minimal && (
+            <Suspense fallback={null}>
+              <RunPicker runs={runs} value={runParam} onChange={onRunChange} />
+            </Suspense>
+          )}
 
           <div role="status" className="flex shrink-0 items-center gap-2 text-[13px] text-ink-2">
             <span
@@ -189,7 +197,7 @@ export function TopBar({
               )}
               <span className={cn(link === "live" ? "sr-only" : "max-sm:sr-only")}>{connText}</span>
             </span>
-            {badge && (
+            {badge && !minimal && (
               <span
                 data-testid="run-state"
                 data-state={badge.status}

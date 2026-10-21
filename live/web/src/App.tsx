@@ -209,6 +209,8 @@ export default function App() {
   const reduce = useMediaQuery(REDUCED_MOTION_QUERY);
   // Until a live run has its four stats, the pre-roll composition shows instead of the full UI.
   const pre = usePrerollMode(run, easy, reduce, now);
+  // The pre-roll composition is on screen (the pre-roll or its morph): the header keeps only the logo and the toggles.
+  const prerollOnScreen = run !== null && pre.mode !== "full";
   const segments = run?.segments;
   const lastSegment = segments && segments.length > 0 ? segments[segments.length - 1] : undefined;
   const speakers = run?.speakers ?? NO_SPEAKERS;
@@ -289,9 +291,10 @@ export default function App() {
             connection={connection}
             theme={theme}
             onToggleTheme={toggleTheme}
+            minimal={prerollOnScreen}
           />
           <ConnBanner connection={connection} retry={retry} lastUpdateT={lastUpdateT} />
-          {run && pre.mode !== "full" ? (
+          {run && prerollOnScreen ? (
             <Suspense fallback={null}>
               <Preroll run={run} morphing={pre.mode === "morph"} easy={easy} reduce={reduce} />
             </Suspense>

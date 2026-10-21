@@ -32,7 +32,7 @@ const zhTW: typeof en = {
   status: {
     waiting: "等待轉錄開始",
     converting: "準備音訊",
-    diarizing: "辨識說話者",
+    diarizing: "辨識講者",
     loading: "載入模型",
     listening: "聆聽中",
     transcribing: "轉錄中",
@@ -44,9 +44,9 @@ const zhTW: typeof en = {
   lines: {
     audio: (name: string) => `音訊  ${name}`,
     convert: "正在轉換音訊…",
-    segmentation: "說話者偵測  分段",
+    segmentation: "講者偵測  分段",
     embeddings: "聲音比對",
-    speakers: (count: number) => `找到說話者  ${count}`,
+    speakers: (count: number) => `找到講者  ${count}`,
     model: (model: string) => `載入模型  ${model}…`,
     device: "裝置",
     language: (code: string) => `語言  ${code}`,

@@ -181,6 +181,7 @@ export default function PrerollView({ run, morphing, easy, reduce }: PrerollView
           speakerColors={[]}
           size={orbSize}
           frozen={reduce}
+          prominent
         />
       </motion.div>
       <div
