@@ -10,10 +10,10 @@ Paths below are relative to the repo root unless noted.
 
 ```sh
 live/run.sh              # serves http://localhost:8765
-live/run.sh --rebuild    # also rebuilds the frontend in live/web
+live/run.sh --rebuild    # forces a rebuild of the frontend in live/web
 ```
 
-`run.sh` creates `live/.venv` (with `uv` for Python 3.11, otherwise `python3 -m venv`), installs `live/requirements.txt` when it changes, and builds `live/web` with pnpm (npm if pnpm is missing) when `live/web/dist` is missing or `--rebuild` is given. Without a build, the server shows a placeholder page. Environment variables:
+`run.sh` creates `live/.venv` (with `uv` for Python 3.11, otherwise `python3 -m venv`), installs `live/requirements.txt` when it changes, and builds `live/web` with pnpm (npm if pnpm is missing) when `live/web/dist` is missing or its sources changed since the last build. So after `git pull` the next start rebuilds the page by itself. The check compares file contents: the fingerprint of the sources is stamped into `live/web/dist/.build-stamp` after each successful build, so a bare `touch` does not trigger a rebuild. `--rebuild` forces a rebuild; `SKIP_WEB_BUILD=1` skips the check. npm runs with `--no-package-lock`, so it never writes `live/web/package-lock.json`; an old stray one from earlier npm runs can be deleted. Without a build, the server shows a placeholder page. Environment variables:
 
 - `PORT`: port to serve on (default `8765`).
 - `SKIP_WEB_BUILD=1`: never run pnpm or npm; serve whatever is in `live/web/dist`.
