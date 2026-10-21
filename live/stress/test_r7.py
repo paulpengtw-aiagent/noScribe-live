@@ -85,23 +85,26 @@ LOGO_JS = r"""() => { const e = document.querySelector('[data-testid="logo"]'); 
   e.querySelectorAll('[aria-label],[title],[alt]').forEach((n) => parts.push(
     n.getAttribute('aria-label'), n.getAttribute('title'), n.getAttribute('alt')));
   return parts.filter(Boolean).join(' | '); }"""
+# The orb is hidden from screen readers (aria-hidden="true", no aria-label); the failed state is read from run-state text.
 ORB_JS = r"""() => { const o = document.querySelector('[data-testid="activity-orb"]');
-  return o ? o.getAttribute('aria-label') : null; }"""
+  return o ? o.getAttribute('aria-hidden') : null; }"""
 FOCUS_JS = r"""() => { const a = document.activeElement; return a ? a.getAttribute('data-testid') : null; }"""
 RING_JS = r"""() => { const e = document.querySelector('[data-testid="transcript-scroll"]'); if (!e) return null;
   const cs = getComputedStyle(e);
   return { shadow: cs.boxShadow, outlineOffset: cs.outlineOffset, outlineStyle: cs.outlineStyle }; }"""
 STAT_COUNT_JS = r"""() => document.querySelectorAll('[data-testid="stat-card"]').length"""
 BODY_JS = r"""() => document.body.innerText"""
-# Runs before the app: sums layout-shift scores that were not caused by user input.
+# Runs before the app: records every layout-shift entry (page-clock start time, value, hadRecentInput). The
+# session-window CLS is computed from these in Python (session_max, copied from test_nordic.py).
 CLS_JS = r"""
-(() => { window.__nsCLS = 0;
+(() => { window.__nsShifts = [];
   try { new PerformanceObserver((list) => { for (const e of list.getEntries()) {
-          if (!e.hadRecentInput) window.__nsCLS += e.value; } })
+          window.__nsShifts.push({ t: e.startTime, v: e.value, input: e.hadRecentInput }); } })
         .observe({ type: 'layout-shift', buffered: true });
   } catch (err) { window.__nsCLSErr = String(err); }
 })();
 """
+SHIFTS_JS = r"""() => window.__nsShifts || []"""
 
 
 # ---- fixtures ----------------------------------------------------------------------------------------
@@ -272,6 +275,24 @@ def open_run(page: Any, h: ux.Harness, port: int, rid: str) -> None:
 
 def tone_of(page: Any) -> str | None:
     return page.evaluate(ux.ATTR_JS, ['[data-testid="run-state-dot"]', "data-tone"])
+
+
+# Session-window CLS (the definition Chrome and web-vitals use): non-input shifts grouped into windows that end
+# after a 1 s gap or after 5 s; the score is the largest window sum. Copied from test_nordic.py (cls_report).
+CLS_GAP_MS = 1000.0
+CLS_WINDOW_MS = 5000.0
+
+
+def session_max(shifts: list[tuple[float, float]]) -> float:
+    best = cur = 0.0
+    start = prev = None
+    for t, v in sorted(shifts):
+        if start is None or t - prev > CLS_GAP_MS or t - start > CLS_WINDOW_MS:
+            start, cur = t, 0.0
+        cur += v
+        prev = t
+        best = max(best, cur)
+    return best
 
 
 # ---- groups ------------------------------------------------------------------------------------------
@@ -495,9 +516,11 @@ def group_failed(h: ux.Harness, browser: Any, port: int) -> None:
     ctx, page = i18n.open_ctx(browser, "en-US")
     try:
         open_run(page, h, port, ids["failed"])
-        label = page.evaluate(ORB_JS)
-        h.check("failed run: orb aria-label says Failed (or 失敗)", bool(label) and bool(re.search(r"Failed|失敗", label, re.I)),
-                f"aria-label {label!r}")
+        orb = page.evaluate(ORB_JS)
+        state = page.evaluate(INNER_JS, '[data-testid="run-state"]') or ""
+        h.check('failed run: activity orb aria-hidden="true", and run-state text says Failed (or 失敗)',
+                orb == "true" and bool(re.search(r"Failed|失敗", state, re.I)),
+                f"orb aria-hidden {orb!r}, run-state innerText {state!r}")
         h.check("failed run: run-state-dot data-tone red", tone_of(page) == "red", f"data-tone {tone_of(page)!r}")
         body = page.evaluate(BODY_JS) or ""
         n_err = body.count(ERR_TEXT)
@@ -562,13 +585,19 @@ def group_cls(h: ux.Harness, browser: Any, port: int) -> None:
             if ux.feed_info(path)["ended"]:
                 break
             time.sleep(0.25)
-        cls = page.evaluate("() => window.__nsCLS || 0")
+        shifts = page.evaluate(SHIFTS_JS) or []
+        raw = [s for s in shifts if not s.get("input")]
+        cls_max = session_max([(float(s["t"]), float(s["v"])) for s in raw])
+        raw_sum = sum(float(s["v"]) for s in raw)
         bad = [c for c in counts if c != 8]
         note = absent_note(page, ['[data-testid="stat-card"]'])
         h.check("cls: stat-card count is 8 at every 250 ms sample of a speed-2 replay",
                 bool(counts) and not bad,
                 f"{len(counts)} samples, values {sorted(set(counts))}{note}")
-        h.check("cls: layout-shift sum during the replay <= 0.05", cls <= 0.05, f"layout-shift sum {cls:.4f}")
+        print(f"INFO cls: session-window max {cls_max:.4f}, raw sum {raw_sum:.4f} over {len(raw)} non-input "
+              f"shifts ({len(shifts) - len(raw)} input-caused excluded)", flush=True)
+        h.check("cls: layout-shift CLS (session-window max, Chrome definition) <= 0.1", cls_max <= 0.1,
+                f"session-window max {cls_max:.4f}, raw sum {raw_sum:.4f} over {len(raw)} non-input shifts")
         h.shot(page, "r7-cls.png")
     finally:
         ctx.close()
