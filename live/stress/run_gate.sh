@@ -10,8 +10,10 @@
 # Per step:
 #   - timeout 420 s by default (--timeout changes the default); TIMEOUT_<STEP> in the environment
 #     overrides one step (step name upper-cased, '-' becomes '_', e.g. TIMEOUT_AXE_MATRIX=900).
-#     On timeout: kill -TERM -<pgid>, wait 5 s, kill -KILL -<pgid>. The group is also KILLed after
-#     a normal exit, so nothing a test left running blocks the next step's ports.
+#     On timeout: TERM the step's process group and every process tagged with GATE_TAG, wait 5 s,
+#     KILL the same set. The same KILL runs after a normal exit, so nothing a test left running (also
+#     processes that setsid or double-forked out of the group) blocks the next step's ports.
+#     The watchdog never calls ps; it polls kill -0 against a SECONDS deadline.
 #   - memory gate: while /sys/fs/cgroup/memory.current > MEM_MAX (bytes; default 18 GiB), poll every
 #     15 s for at most 3 min, then SKIP the step.
 # Output: OUT/<step>.log (stdout and stderr of the step), and one line per step in OUT/gate.log:
@@ -25,6 +27,7 @@
 #   TIMEOUT_AXE_MATRIX=900 live/stress/run_gate.sh --only axe-matrix,bundle
 
 set -uo pipefail
+set +m   # no job control: background steps stay in this group until setsid(1) moves them (see run_step)
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd -- "$SCRIPT_DIR/../.." && pwd)
@@ -38,9 +41,10 @@ DEFAULT_TIMEOUT=420
 MEM_MAX=${MEM_MAX:-19327352832}   # 18 GiB
 MEM_POLL=15
 MEM_WAIT_MAX=180
-STEPS=(ux-stick ux-reveal ux-conn ux-para ux-picker follow jump cjk r7 showreel nordic i18n reconnect
+STEPS=(ux-stick ux-reveal ux-conn ux-para ux-picker follow jump cjk r7 showreel dialog nordic i18n reconnect
        orb-pin axe-matrix axe-preroll bundle)
 CUR_PGID=""
+CUR_TAG=""
 CMD=()
 
 usage() { sed -n '2,25p' "${BASH_SOURCE[0]}"; }
@@ -68,7 +72,7 @@ mkdir -p "$OUT"
 log_line() { printf '%s %s rc=%s %s\n' "$(date '+%F %T')" "$1" "$2" "$3" >>"$OUT/gate.log"; }
 
 on_abort() {
-  [[ -n $CUR_PGID ]] && kill -KILL -- "-$CUR_PGID" 2>/dev/null
+  [[ -n ${CUR_PGID:-} ]] && kill_step KILL "$CUR_PGID" "${CUR_TAG:-}"
   log_line "gate" "-" "ABORTED by signal, current step group killed"
   exit 130
 }
@@ -142,6 +146,7 @@ build_cmd() {  # sets CMD to the argv of step $1
     cjk)        CMD=("${PY_CMD[@]}" "$t/test_cjk_load.py" --port 8900 --static "$DIST" --work "$work") ;;
     r7)         CMD=("${PY_CMD[@]}" "$t/test_r7.py" --static "$DIST" --work "$work") ;;
     showreel)   CMD=("${PY_CMD[@]}" "$t/test_showreel.py" --static "$DIST" --work "$work") ;;
+    dialog)     CMD=("${PY_CMD[@]}" "$t/test_dialog.py" --port 8950 --static "$DIST" --work "$work") ;;
     nordic)     CMD=("${PY_CMD[@]}" "$t/test_nordic.py" --port 8895 --work "$OUT/nordic" --static "$DIST") ;;
     i18n)       CMD=("${PY_CMD[@]}" "$t/test_i18n.py" --static "$DIST" --work "$work") ;;
     reconnect)  CMD=("${PY_CMD[@]}" "$t/test_reconnect.py" --static "$DIST" --work "$work") ;;
@@ -167,37 +172,61 @@ mem_gate() {  # returns 0 to run the step, 1 to skip it; sets MEM_NOTE on skip
   done
 }
 
-alive() {  # a zombie counts as finished (kill -0 succeeds on zombies)
-  local st
-  st=$(ps -o stat= -p "$1" 2>/dev/null | tr -d ' ')
-  [[ -n $st && $st != Z* ]]
+# The watchdog never calls ps. A stalled ps (it reads /proc/PID/stat, which can block under memory pressure)
+# wedged the old watch loop before its deadline check, so no TIMEOUT was ever written. Every /proc read
+# below is bounded by timeout(1).
+step_tagged_pids() {  # $1 tag: pids whose environment has GATE_TAG=<tag>. Descendants keep the environment
+  local tag=$1 d p     # even after setsid or a double fork moved them out of the step's process group.
+  for d in /proc/[0-9]*; do
+    p=${d#/proc/}
+    (( p == $$ )) && continue
+    timeout 2 grep -qaF "GATE_TAG=$tag" "$d/environ" 2>/dev/null && printf '%s\n' "$p"
+  done
+  return 0
+}
+
+kill_step() {  # $1 signal, $2 pid of the step (its pgid and sid, see run_step), $3 tag: group and tagged processes
+  local sig=$1 pgid=$2 tag=$3 p
+  kill "-$sig" -- "-$pgid" 2>/dev/null
+  for p in $(step_tagged_pids "$tag"); do kill "-$sig" "$p" 2>/dev/null; done
+  return 0
 }
 
 run_step() {  # $1 step, $2 limit in seconds; runs CMD; sets STEP_RC and STEP_TIMED_OUT
-  local step=$1 limit=$2 pid pgid start
+  local step=$1 limit=$2 pid tag deadline i
   STEP_TIMED_OUT=0
-  setsid "${CMD[@]}" >"$OUT/$step.log" 2>&1 </dev/null &
+  tag="$$-$step-$RANDOM$RANDOM"
+  # Without job control (set +m at the top) the step starts in the runner's group. setsid(1) then calls
+  # setsid() and execs the step in place, so $! is the step and its pgid == sid == $!.
+  GATE_TAG=$tag setsid "${CMD[@]}" >"$OUT/$step.log" 2>&1 </dev/null &
   pid=$!
-  pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')
-  [[ $pgid =~ ^[0-9]+$ ]] || pgid=$pid
-  CUR_PGID=$pgid
-  start=$(date +%s)
-  while alive "$pid"; do
-    if (( $(date +%s) - start >= limit )); then
+  CUR_PGID=$pid
+  CUR_TAG=$tag
+  deadline=$((SECONDS + limit))   # SECONDS is a monotonic counter; the deadline cannot be skipped
+  while kill -0 "$pid" 2>/dev/null; do
+    if (( SECONDS >= deadline )); then
       STEP_TIMED_OUT=1
-      echo "[gate] ${limit}s timeout: SIGTERM to process group $pgid" >>"$OUT/$step.log"
-      kill -TERM -- "-$pgid" 2>/dev/null
-      sleep 5
-      echo "[gate] SIGKILL to process group $pgid" >>"$OUT/$step.log"
-      kill -KILL -- "-$pgid" 2>/dev/null
+      echo "[gate] ${limit}s timeout: SIGTERM to process group $pid and tagged processes" >>"$OUT/$step.log"
+      kill_step TERM "$pid" "$tag"
+      i=0
+      while (( i < 10 )) && kill -0 "$pid" 2>/dev/null; do sleep 0.5; i=$((i + 1)); done   # 5 s grace
+      echo "[gate] SIGKILL to process group $pid and tagged processes" >>"$OUT/$step.log"
+      kill_step KILL "$pid" "$tag"
       break
     fi
     sleep 1
   done
-  wait "$pid" 2>/dev/null
-  STEP_RC=$?
-  kill -KILL -- "-$pgid" 2>/dev/null   # whatever the step left behind (servers, replays, chromium)
+  # Bash reaps the finished child itself, so kill -0 fails once the step is gone. wait is only called for a
+  # reaped pid; a pid that survives KILL (uninterruptible sleep) is reported as 124 instead of blocking.
+  if kill -0 "$pid" 2>/dev/null; then
+    STEP_RC=124
+  else
+    wait "$pid" 2>/dev/null
+    STEP_RC=$?
+  fi
+  kill_step KILL "$pid" "$tag"   # leftovers: servers, replays, chromium that left the group or the session
   CUR_PGID=""
+  CUR_TAG=""
   if (( STEP_TIMED_OUT )); then STEP_RC=124; fi
 }
 
@@ -234,7 +263,7 @@ for step in "${STEPS[@]}"; do
   run_step "$step" "$limit"
   rc=$STEP_RC
   if (( STEP_TIMED_OUT )); then
-    line=TIMEOUT
+    line="[gate] TIMEOUT after ${limit}s"
   else
     line=$(last_line "$OUT/$step.log")
     if [[ $step == axe-matrix ]]; then

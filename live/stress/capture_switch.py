@@ -36,7 +36,76 @@ VENV_PY = "/workspace/noScribe-live/live/.venv/bin/python"  # used read-only: on
 FEED = "/workspace/noScribe-live/live/feeds/20261022-003524-demo-en-zh.ndjson"  # read-only source feed
 WORK_ROOT = Path("/tmp/nslive-r4v")
 OFFSETS = [-0.5, 0.15, 0.3, 0.5, 0.8, 1.2, 2.0]
+FLIGHT_MS = 900  # the orb flight in use-preroll-mode.ts
 ENV = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")  # keep bytecode out of the read-only venv
+TOL_PX = 2.0
+
+# One record per animation frame: the pre-roll orb's rect and position, the stage orb's rect, the probe timing,
+# and the last terminal row's typed/total length (all read in the page, so the rects are the ones the user sees).
+TRACE_JS = r"""(() => {
+  window.__orbTrace = [];
+  const rect = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; };
+  const step = () => {
+    const el = document.querySelector('[data-orb-slot="preroll"]');
+    const st = document.querySelector('[data-orb-slot="stage"]');
+    const rows = document.querySelectorAll('[data-testid="preroll-line"]');
+    const last = rows.length ? rows[rows.length - 1] : null;
+    const p = window.__nslivePreroll || {};
+    window.__orbTrace.push({
+      t: Date.now(), exit: p.exitedAt ?? null, ready: p.readyAt ?? null, settled: p.settled ?? null,
+      pos: el ? getComputedStyle(el).position : null, r: rect(el), s: rect(st),
+      op: el ? getComputedStyle(el).opacity : null,
+      line: last ? last.getAttribute('data-line') : null,
+      typed: last ? [Number(last.getAttribute('data-typed')), Number(last.getAttribute('data-chars'))] : null,
+    });
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+})();"""
+
+
+def drift(a: list[float], b: list[float]) -> float:
+    return max(abs(x - y) for x, y in zip(a, b))
+
+
+def measure_flight(trace: list, exit_: dict | None) -> dict:
+    """Start and end of the orb flight, from the per-frame trace, against the pre-roll rect and the stage slot rect."""
+    if not exit_ or not trace:
+        return {"error": "no switch in the frame trace"}
+    exit_ms = exit_["epoch_ms"]
+    before = [f for f in trace if f.get("exit") is None and f.get("r")]
+    after = [f for f in trace if f.get("exit") is not None and f.get("r")]
+    if not before or not after:
+        return {"error": "no frames around the switch"}
+    pre_rect = before[-1]["r"]
+    first = after[0]  # first frame after the morph started
+    # The flight's clock starts at its first frame: exitedAt is a 250 ms tick and can lag the morph by up to that.
+    ends = [f for f in after if f["t"] >= first["t"] + FLIGHT_MS and f.get("pos") == "fixed"]
+    end = ends[0] if ends else after[-1]
+    flight_frames = [f for f in after if f.get("pos") == "fixed"]
+    res = {
+        "pre_rect": pre_rect,
+        "start_rect": first["r"],
+        "start_pos": first.get("pos"),
+        "start_drift_px": round(drift(first["r"], pre_rect), 2),
+        "start_ok": drift(first["r"], pre_rect) <= TOL_PX,
+        "end_rect": end["r"],
+        "stage_rect": end["s"],
+        "end_drift_px": round(drift(end["r"], end["s"]), 2) if end.get("s") else None,
+        "end_ok": bool(end.get("s")) and drift(end["r"], end["s"]) <= TOL_PX,
+        "end_ms_after_first_frame": end["t"] - first["t"],
+        "first_frame_ms_after_exit": first["t"] - exit_ms,
+        "flight_frames": len(flight_frames),
+        "ready_ms_before_exit": (exit_ms - first["ready"]) if first.get("ready") else None,
+        "settled_at_exit": first.get("settled"),
+        "last_line": first.get("line"),
+        "last_line_typed_at_exit": first.get("typed"),
+        "last_line_full": (first.get("typed") or [None, None])[0] == (first.get("typed") or [None, None])[1],
+        "orb_opacity_at_end": end.get("op"),
+    }
+    return res
+
+
 
 PROBE_JS = """() => {
   const probe = window.__nslivePreroll || null;
@@ -97,6 +166,7 @@ def capture(a: argparse.Namespace) -> dict:
     replay_log = None
     video_src: Path | None = None
     enter = exit_ = diar = None
+    trace: list = []
     polls = 0
     t0 = 0.0
     try:
@@ -121,6 +191,7 @@ def capture(a: argparse.Namespace) -> dict:
                     "try { localStorage.setItem('noscribe-live-theme', 'dark');"
                     f" localStorage.setItem('noscribe-live-locale', {json.dumps(app_locale)}); }} catch (e) {{}}"
                 )
+                ctx.add_init_script(TRACE_JS)
                 t_a = time.time()
                 page = ctx.new_page()
                 t_b = time.time()
@@ -163,6 +234,7 @@ def capture(a: argparse.Namespace) -> dict:
                     if now > deadline:
                         break
                     time.sleep(0.03)
+                trace = page.evaluate("() => window.__orbTrace || []")
                 ctx.close()  # flushes the video
                 video_src = Path(page.video.path())
             finally:
@@ -185,6 +257,9 @@ def capture(a: argparse.Namespace) -> dict:
     rec["diar_wall_minus_t0"] = round(diar["wall"] - t0, 3) if diar else None
     rec["diar_lines"] = diar["lines"] if diar else None
     rec["exit"] = exit_
+    rec["flight"] = measure_flight(trace, exit_)
+    rec["trace_frames"] = len(trace)
+    (work / "trace.json").write_text(json.dumps(trace), encoding="utf-8")
     if video_src is None:
         rec["error"] = "no video produced"
         return rec

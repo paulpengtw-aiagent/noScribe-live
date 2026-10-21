@@ -5,7 +5,7 @@ import { AuroraBackground } from "@/components/live/aurora-background";
 import { StageCard } from "@/components/live/stage-card";
 import { CliLogDisclosure } from "@/components/live/cli-log";
 import { RunCompleteDialog } from "@/components/live/run-complete-dialog";
-import { FLIGHT_MS, usePrerollMode } from "@/components/live/preroll/use-preroll-mode";
+import { FLIGHT_MS, HANDOFF_MS, usePrerollMode } from "@/components/live/preroll/use-preroll-mode";
 import { TimelineCard } from "@/components/live/timeline-card";
 import type { TimelineSegment, WaveformTimelineProps } from "@/components/live/waveform-timeline";
 import type { OrbMode } from "@/components/live/activity-orb";
@@ -210,8 +210,10 @@ export default function App() {
   const phase = displayPhase(run);
   const { easy } = useEasyView();
   const reduce = useMediaQuery(REDUCED_MOTION_QUERY);
+  // The run whose pre-roll terminal has finished typing (set by the pre-roll; the switch waits for it, capped).
+  const [typedRun, setTypedRun] = useState<RunState | null>(null);
   // Until a live run has its four stats, the pre-roll composition shows instead of the full UI.
-  const pre = usePrerollMode(run, easy, reduce, now);
+  const pre = usePrerollMode(run, easy, reduce, now, typedRun !== null && typedRun === run);
   // The pre-roll composition is on screen (the pre-roll or its morph): the header keeps only the logo and the toggles.
   const prerollOnScreen = run !== null && pre.mode !== "full";
   // The full UI is mounted in its final layout from the start. While the pre-roll is shown it stays hidden
@@ -307,7 +309,7 @@ export default function App() {
               className={pre.mode === "morph" ? "pointer-events-none absolute inset-x-0 top-0 z-10" : "absolute inset-x-0 top-0 z-10"}
             >
               <Suspense fallback={null}>
-                <Preroll run={run} morphing={pre.mode === "morph"} easy={easy} reduce={reduce} />
+                <Preroll run={run} morphing={pre.mode === "morph"} easy={easy} reduce={reduce} onTypingIdle={setTypedRun} />
               </Suspense>
             </div>
           ) : null}
@@ -321,7 +323,7 @@ export default function App() {
             animate={{ opacity: fullHidden ? 0 : 1 }}
             transition={
               pre.mode === "morph"
-                ? { duration: reduce ? 0.2 : 0.25, delay: reduce ? 0 : FLIGHT_MS / 1000 }
+                ? { duration: reduce ? 0.2 : HANDOFF_MS / 1000, delay: reduce ? 0 : FLIGHT_MS / 1000 }
                 : { duration: 0.2 }
             }
           >

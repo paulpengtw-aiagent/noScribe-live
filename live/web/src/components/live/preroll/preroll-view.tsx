@@ -27,7 +27,7 @@ import {
 } from "@/lib/preroll-log";
 import type { PrerollMessages } from "@/i18n/catalog/preroll";
 import { cn } from "@/lib/utils";
-import { FLIGHT_MS, TERMINAL_FADE_MS } from "@/components/live/preroll/use-preroll-mode";
+import { FLIGHT_MS, HANDOFF_MS, TERMINAL_FADE_MS } from "@/components/live/preroll/use-preroll-mode";
 
 /** The terminal types about 70 characters a second, one character per tick. */
 const TICK_MS = 14;
@@ -256,6 +256,8 @@ export interface PrerollViewProps {
   morphing: boolean;
   easy: boolean;
   reduce: boolean;
+  /** Reports the run whose lines have all finished typing (null while a line still types). The switch waits for it. */
+  onTypingIdle?: (run: RunState | null) => void;
 }
 
 /**
@@ -264,7 +266,7 @@ export interface PrerollViewProps {
  * the rest of the terminal fades out, then the final stat lines fly into their stat cards. Reduced motion and the
  * easy view skip the flight and crossfade.
  */
-export default function PrerollView({ run, morphing, easy, reduce }: PrerollViewProps): JSX.Element {
+export default function PrerollView({ run, morphing, easy, reduce, onTypingIdle }: PrerollViewProps): JSX.Element {
   const { t } = useI18n();
   const s = t.preroll;
   const phone = useMediaQuery(PHONE_QUERY);
@@ -275,6 +277,12 @@ export default function PrerollView({ run, morphing, easy, reduce }: PrerollView
   const elapsed = elapsedSeconds(run, now);
   const rows = useTerminalRows(run, s);
   const typed = useTyping(rows, reduce || easy);
+  // Idle: no line is queued or mid-typing (a progress line shows at once). The switch waits for this, capped in the hook.
+  const typingIdle =
+    reduce || easy || rows.every((row) => row.instant || (typed[row.id] !== undefined && typed[row.id] >= row.text.length));
+  useEffect(() => {
+    onTypingIdle?.(typingIdle ? run : null);
+  }, [typingIdle, run, onTypingIdle]);
   const cap = phone ? VISIBLE_PHONE : VISIBLE_DESKTOP;
   const visible = rows.slice(-cap);
   const orbSize = phone ? Math.round(w * 0.7) : Math.round(Math.min(w, h) * 0.55);
@@ -329,7 +337,8 @@ export default function PrerollView({ run, morphing, easy, reduce }: PrerollView
       className="flex min-h-[70svh] flex-col items-center justify-center gap-6 px-4 py-8"
     >
       {/* A box of the orb's exact size: the layout keeps it while the orb itself is in flight. */}
-      <div className="flex shrink-0 items-center justify-center" style={{ width: orbSize, height: orbSize, flex: "none", contain: "layout size" }}>
+      {/* contain: size, not layout: layout containment would make this box the containing block of the fixed flight layer. */}
+      <div className="flex shrink-0 items-center justify-center" style={{ width: orbSize, height: orbSize, flex: "none", contain: "size" }}>
         <motion.div
           ref={orbRef}
           data-orb-slot="preroll"
@@ -342,10 +351,15 @@ export default function PrerollView({ run, morphing, easy, reduce }: PrerollView
                   x: flight.orb.to.left - flight.orb.from.left,
                   y: flight.orb.to.top - flight.orb.from.top,
                   scale: flight.orb.to.width / flight.orb.from.width,
+                  opacity: 0,
                 }
-              : { x: 0, y: 0, scale: 1 }
+              : { x: 0, y: 0, scale: 1, opacity: 1 }
           }
-          transition={{ duration: FLIGHT_MS / 1000, ease: EASE }}
+          transition={{
+            default: { duration: FLIGHT_MS / 1000, ease: EASE },
+            // Fully visible until it lands on the stage card, then it fades out as the real orb fades in there.
+            opacity: { duration: HANDOFF_MS / 1000, delay: FLIGHT_MS / 1000, ease: "linear" },
+          }}
         >
           <ActivityOrb
             mode={ORB_MODE[phase]}
@@ -379,6 +393,8 @@ export default function PrerollView({ run, morphing, easy, reduce }: PrerollView
               key={row.id}
               data-testid="preroll-line"
               data-line={row.id}
+              data-chars={row.text.length}
+              data-typed={shown.length}
               className="flex min-w-0 items-baseline gap-2 break-words"
             >
               {row.log ? (

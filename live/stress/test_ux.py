@@ -308,6 +308,14 @@ def click_block(page: Any, idx: int) -> None:
     page.mouse.click(x, y)
 
 
+def click_jump(page: Any, jump: Any) -> None:
+    """Clicks the jump-to-live button. It fades in (0.2 s) when follow detaches, and a slow replay can keep the
+    pre-roll overlay up for a while, so wait for the full UI and for the button to be visible, then click with 15 s."""
+    wait_full_ui(page, 30)
+    jump.wait_for(state="visible", timeout=15000)
+    jump.click(timeout=15000)
+
+
 def open_picker(page: Any) -> None:
     if not page.locator('[data-testid="run-option"]').first.is_visible():
         # 15 s: a slow (0.5x) replay can keep the page in the pre-roll; the picker is inert until the full UI is up.
@@ -553,13 +561,14 @@ def stick_body(h: Harness, page: Any, path: Path, run_id: str) -> None:
             f"scrollTop {top0} -> {top1}, segments {n0} -> {n1}")
     h.shot(page, "stick-1-detached.png")
 
-    jump.click(timeout=5000)
+    click_jump(page, jump)
     back = wait_until(lambda: following(page) == "true" and at_bottom(page), 3, 0.1)
     m = metrics(page)
     h.check("stick: jump to live resumes following and reaches the bottom", bool(back),
             f"following {m.get('following')!r}, scrollTop+clientHeight {m.get('top', 0) + m.get('client', 0)}, "
             f"scrollHeight-10 {m.get('height', 0) - 10}")
 
+    wait_full_ui(page, 30)
     click_block(page, 2)
     detached = wait_until(lambda: following(page) == "false", 2, 0.05)
     in_view = wait_until(lambda: page.evaluate(IN_VIEW_JS, 2), 2, 0.1)
@@ -571,7 +580,7 @@ def stick_body(h: Harness, page: Any, path: Path, run_id: str) -> None:
             f"data-active segment {seg_active!r}, timeline {tl_active!r}")
     h.shot(page, "stick-2-timeline.png")
 
-    jump.click(timeout=5000)
+    click_jump(page, jump)
     wait_until(lambda: following(page) == "true", 3, 0.1)
     page.locator(scroller).focus(timeout=5000)
     page.keyboard.press("PageUp")
