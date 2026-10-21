@@ -52,7 +52,7 @@ On this machine's RTX 5060 Ti, a 3-minute bilingual clip took about 50 seconds, 
 
 - **Follow or pick a run.** By default the page follows the newest transcription. The run picker in the header lists earlier runs by day, with their status (live, finished, failed, stopped), length and segment count, and a filter box. A picked run's address (`?run=…`) can be bookmarked or shared.
 - **Read back while it streams.** Scroll up and the page stops following; **Jump to live** brings you back. Click a block on the timeline to jump to that part of the transcript.
-- **Download the transcript.** When a run finishes, a **Download .odt** button appears (also on finished runs picked from the history). The file has the speakers, timestamps and the text as shown on the page, and opens in LibreOffice or Word.
+- **Download the transcript.** When a run finishes, a **Download .odt** button appears (also on finished runs picked from the history). The file has the speakers, timestamps and the text as shown on the page, and opens in LibreOffice (checked) and other OpenDocument editors.
 - **Easy view (大字模式).** The Easy / 大字 toggle in the header switches to large text, high contrast, big buttons and no animation, with a plain status sentence on top. It's meant for older viewers and is remembered like the theme and language.
 - **Language and theme.** Use the EN/中 toggle and the light/dark switch in the header; on a phone they are in the header menu. The look follows the Nord palette: Polar Night in dark, Snow Storm in light. Chinese transcript text is shown in Traditional characters (Taiwan).
 - Opening or reloading the page mid-run catches up on everything so far. If the connection drops, the transcript stays on screen and the page reconnects by itself.
