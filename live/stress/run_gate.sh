@@ -6,7 +6,7 @@
 #   live/stress/run_gate.sh [--out DIR] [--only step1,step2] [--dist DIR] [--timeout SECS]
 #
 # Steps, in order: ux-stick ux-reveal ux-conn ux-para ux-picker follow jump cjk r7 showreel nordic
-#   i18n reconnect axe-matrix axe-preroll bundle
+#   i18n reconnect orb-pin axe-matrix axe-preroll bundle
 # Per step:
 #   - timeout 420 s by default (--timeout changes the default); TIMEOUT_<STEP> in the environment
 #     overrides one step (step name upper-cased, '-' becomes '_', e.g. TIMEOUT_AXE_MATRIX=900).
@@ -39,7 +39,7 @@ MEM_MAX=${MEM_MAX:-19327352832}   # 18 GiB
 MEM_POLL=15
 MEM_WAIT_MAX=180
 STEPS=(ux-stick ux-reveal ux-conn ux-para ux-picker follow jump cjk r7 showreel nordic i18n reconnect
-       axe-matrix axe-preroll bundle)
+       orb-pin axe-matrix axe-preroll bundle)
 CUR_PGID=""
 CMD=()
 
@@ -114,17 +114,21 @@ import json, sys
 path = sys.argv[1]
 try:
     with open(path, encoding="utf-8") as fh:
-        axe = json.load(fh).get("axe") or {}
+        summary = json.load(fh)
 except Exception as exc:
     print(f"SUMMARY axe-matrix: no readable summary.json ({exc.__class__.__name__})")
     sys.exit(1)
+axe = summary.get("axe") or {}
+expected = summary.get("axe_expected") or []  # every config label that measure_ux.py --matrix must have measured
 ok_entries = [e for e in axe.values() if "error" not in e]
 errors = len(axe) - len(ok_entries)
+missing = [label for label in expected if label not in axe]
 def rules(impact):
     return sum((e.get("rules_by_impact") or {}).get(impact, 0) for e in ok_entries)
 serious, critical = rules("serious"), rules("critical")
-print(f"SUMMARY axe-matrix: configs={len(axe)} serious={serious} critical={critical} errors={errors}")
-sys.exit(0 if axe and not errors and not serious and not critical else 1)
+print(f"SUMMARY axe-matrix: configs={len(axe)} expected={len(expected)} serious={serious} critical={critical} "
+      f"errors={errors} missing={len(missing)}" + (f" first-missing={missing[0]}" if missing else ""))
+sys.exit(0 if expected and axe and not missing and not errors and not serious and not critical else 1)
 PYEOF
 )
 
@@ -141,6 +145,7 @@ build_cmd() {  # sets CMD to the argv of step $1
     nordic)     CMD=("${PY_CMD[@]}" "$t/test_nordic.py" --port 8895 --work "$OUT/nordic" --static "$DIST") ;;
     i18n)       CMD=("${PY_CMD[@]}" "$t/test_i18n.py" --static "$DIST" --work "$work") ;;
     reconnect)  CMD=("${PY_CMD[@]}" "$t/test_reconnect.py" --static "$DIST" --work "$work") ;;
+    orb-pin)    CMD=("${PY_CMD[@]}" "$t/test_orb_pin.py" --static "$DIST" --work "$work") ;;
     axe-matrix) CMD=("${PY_CMD[@]}" "$t/measure_ux.py" --matrix --static "$DIST" --out "$OUT/axe" --port 8810 --work "$work") ;;
     axe-preroll) CMD=("${PY_CMD[@]}" "$t/axe_preroll.py" --static "$DIST" --port 8940 --work "$work") ;;
     bundle)     CMD=("${PY_CMD[@]}" -c "$BUNDLE_PY" "$DIST") ;;
@@ -206,8 +211,17 @@ RESULTS=()
 ANY_FAIL=0
 for step in "${STEPS[@]}"; do
   selected "$step" || continue
+  if [[ $step == orb-pin && ! -f "$SCRIPT_DIR/test_orb_pin.py" ]]; then
+    log_line "$step" "-" "SKIP test_orb_pin.py not in $SCRIPT_DIR yet"
+    echo "== $(date '+%T') $step SKIP: $SCRIPT_DIR/test_orb_pin.py is missing"
+    RESULTS+=("$step|SKIP|-|0|test_orb_pin.py missing")
+    continue
+  fi
   limit_var="TIMEOUT_$(tr 'a-z-' 'A-Z_' <<<"$step")"
-  limit=${!limit_var:-$DEFAULT_TIMEOUT}
+  base_limit=$DEFAULT_TIMEOUT
+  # axe-matrix runs 32 configs (palette x theme x locale x easy x width): at least 900 s unless overridden.
+  if [[ $step == axe-matrix ]] && (( base_limit < 900 )); then base_limit=900; fi
+  limit=${!limit_var:-$base_limit}
   build_cmd "$step"
   if ! mem_gate; then
     log_line "$step" "-" "SKIP memory gate: $MEM_NOTE"

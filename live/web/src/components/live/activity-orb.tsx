@@ -76,7 +76,7 @@ export function ActivityOrb({
       data-testid="activity-orb"
       data-frozen={frozen ? "true" : undefined}
       className={cn("block shrink-0", className)}
-      style={{ width: size, height: size }}
+      style={{ width: size, height: size, flex: "none", contain: "layout size" }}
     />
   );
 }

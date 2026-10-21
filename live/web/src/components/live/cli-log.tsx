@@ -82,6 +82,9 @@ export function CliLogDisclosure({
     () => readStored(CLI_LOG_TRANSCRIPT_KEY) === "1",
   );
   const bodyId = useId();
+  const listId = useId();
+  // Phones cap the list to six lines until the reader expands it. Desktop always shows the full bounded height.
+  const [expanded, setExpanded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   // While the reader is at the bottom, each new line scrolls into view. Scrolling up stops that until they return.
   const following = useRef(true);
@@ -95,7 +98,7 @@ export function CliLogDisclosure({
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el && following.current) el.scrollTop = el.scrollHeight;
-  }, [open, shown]);
+  }, [open, shown, expanded]);
 
   if (logs.length === 0) return null;
 
@@ -183,15 +186,28 @@ export function CliLogDisclosure({
                 {t.topbar.cliLogHidden(hiddenCount)}
               </span>
             ) : null}
+            <button
+              type="button"
+              aria-expanded={expanded}
+              aria-controls={listId}
+              data-testid="cli-log-expand"
+              onClick={() => setExpanded((value) => !value)}
+              className={cn("inline-flex min-h-8 items-center rounded-full text-ink-2 sm:hidden", easy && "min-h-12")}
+            >
+              {expanded ? t.app.cliLogCollapse : t.app.cliLogExpand}
+            </button>
           </div>
           <div
+            id={listId}
             ref={scrollRef}
             onScroll={onScroll}
             role="region"
             aria-label={t.topbar.cliLog}
             tabIndex={0}
             className={cn(
-              "max-h-[160px] overflow-y-auto px-3 pb-2 font-mono sm:max-h-[220px]",
+              "overflow-y-auto px-3 pb-2 font-mono sm:max-h-[220px]",
+              // Border-box heights: six lines plus the 8 px bottom padding (152 px at 24 px lines, 200 px at 32 px).
+              expanded ? "max-h-[220px]" : easy ? "max-h-[200px]" : "max-h-[152px]",
               easy ? "text-xl leading-8" : "text-[13px] leading-6",
             )}
           >

@@ -1,7 +1,6 @@
 import { lazy, Suspense, useSyncExternalStore } from "react";
-import { Moon, Sun } from "lucide-react";
 import { Orb } from "@/components/aicss/Orb";
-import { HeaderMenu } from "@/components/live/header-menu";
+import { HeaderMenu, ThemeMenu } from "@/components/live/header-menu";
 import { EasyStatus, EasyToggle, type EasyStatusKind } from "@/components/live/easy-toggle";
 import { LocaleToggle } from "@/components/live/locale-toggle";
 import { Button } from "@/components/ui/button";
@@ -252,16 +251,8 @@ export function TopBar({
             <>
               <LocaleToggle />
 
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={onToggleTheme}
-                aria-label={theme === "dark" ? t.topbar.switchTheme.light : t.topbar.switchTheme.dark}
-                className="shrink-0 rounded-full shadow-ring hover:bg-raised dark:hover:bg-raised"
-              >
-                {theme === "dark" ? <Sun /> : <Moon />}
-              </Button>
+              {/* The theme button opens a menu: the palette (Nordic, Crimson) and the light or dark choice. */}
+              <ThemeMenu theme={theme} onToggleTheme={onToggleTheme} />
             </>
           )}
         </div>

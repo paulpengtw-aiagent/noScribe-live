@@ -4,7 +4,8 @@ import { toast } from "sonner";
 import { AuroraBackground } from "@/components/live/aurora-background";
 import { StageCard } from "@/components/live/stage-card";
 import { CliLogDisclosure } from "@/components/live/cli-log";
-import { usePrerollMode } from "@/components/live/preroll/use-preroll-mode";
+import { RunCompleteDialog } from "@/components/live/run-complete-dialog";
+import { FLIGHT_MS, usePrerollMode } from "@/components/live/preroll/use-preroll-mode";
 import { TimelineCard } from "@/components/live/timeline-card";
 import type { TimelineSegment, WaveformTimelineProps } from "@/components/live/waveform-timeline";
 import type { OrbMode } from "@/components/live/activity-orb";
@@ -21,7 +22,7 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import { useEasyView } from "@/hooks/use-easy-view";
 import { useNow } from "@/hooks/use-now";
 import { useRunPeaks } from "@/hooks/use-run-peaks";
-import { useTheme } from "@/hooks/use-theme";
+import { usePalette, useTheme } from "@/hooks/use-theme";
 import { useI18n, type Messages } from "@/i18n";
 import { DASH } from "@/lib/format";
 import type { RunStatus } from "@/lib/live-types";
@@ -123,6 +124,7 @@ export default function App() {
   const { state, connection, retry, lastUpdateT } = useLiveFeed(runParam);
   const { t, locale } = useI18n();
   const { theme, toggle: toggleTheme } = useTheme();
+  const { palette } = usePalette();
   const wide = useMediaQuery(WIDE_QUERY);
 
   // A run that has no start event is a stale or unknown id: show the waiting state.
@@ -239,8 +241,8 @@ export default function App() {
     () => envelopeFor(peaks, duration, startOffset, lastSegment),
     [peaks, duration, startOffset, lastSegment],
   );
-  const colorOf = useCallback((speaker: string) => speakerColor(speakers, speaker), [speakers]);
-  const speakerColors = useMemo(() => speakers.map(colorOf), [speakers, colorOf]);
+  const colorOf = useCallback((speaker: string) => speakerColor(speakers, speaker), [speakers, palette, theme]);
+  const speakerColors = useMemo(() => speakers.map(colorOf), [speakers, colorOf, palette, theme]);
   const activeColor = lastSegment ? colorOf(lastSegment.speaker) : undefined;
   const pulseKey = run?.liveCount ?? 0;
 
@@ -315,8 +317,13 @@ export default function App() {
             inert={fullHidden}
             style={{ visibility: fullHidden ? "hidden" : "visible" }}
             initial={false}
-            animate={{ opacity: fullHidden ? 0 : 1, y: fullHidden ? 12 : 0 }}
-            transition={{ duration: reduce ? 0.3 : 0.6, ease: [0.22, 1, 0.36, 1] }}
+            // The rest of the full UI fades in once the orb's flight has landed (reduced motion: a short crossfade).
+            animate={{ opacity: fullHidden ? 0 : 1 }}
+            transition={
+              pre.mode === "morph"
+                ? { duration: reduce ? 0.2 : 0.25, delay: reduce ? 0 : FLIGHT_MS / 1000 }
+                : { duration: 0.2 }
+            }
           >
             {!state.helloed ? (
               <LoadingSkeleton />
@@ -407,6 +414,7 @@ export default function App() {
         </div>
         </MotionConfig>
       </SpeakerOrderContext.Provider>
+      <RunCompleteDialog run={run} />
       <Toaster
         theme={theme}
         position="top-right"

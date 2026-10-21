@@ -200,3 +200,49 @@ html[data-easy="true"] button:not(.timeline-block) {
     margin-top: 0;
   }
 }
+
+/* Run-complete dialog (run-complete-dialog.tsx): 20 px text, a 24 px title and 48 px buttons. */
+html[data-easy="true"] [data-testid="run-complete-dialog"],
+html[data-easy="true"] [data-testid="run-complete-dialog"] * {
+  font-size: 20px;
+  line-height: 1.5;
+}
+
+html[data-easy="true"] [data-testid="run-complete-dialog"] [data-slot="alert-dialog-title"] {
+  font-size: 24px;
+}
+
+html[data-easy="true"] [data-testid="run-complete-dialog"] button {
+  min-height: 48px;
+  padding-inline: 20px;
+}
+
+/*
+ * Crimson palette, Easy view. The Nordic rules above key off data-theme only, so these add data-palette
+ * (specificity 0,3,1) and win over them. Every text token is at least 7:1 on the Crimson card and raised tile.
+ */
+html[data-easy="true"][data-palette="crimson"][data-theme="dark"] {
+  --foreground: #ffffff;
+  --card-foreground: #ffffff;
+  --muted-foreground: #f2eee4;
+  --ink-2: #f2eee4;
+  --ink-3: #ede9e0;
+  --status-live-ink: #bdebd2;
+  --status-loading-ink: #fbefc8;
+  --status-failed-ink: #ffc2bc;
+  --status-stopped-ink: #ffd3a0;
+  --status-finished-ink: #cfe7f5;
+}
+
+html[data-easy="true"][data-palette="crimson"][data-theme="light"] {
+  --foreground: #000000;
+  --card-foreground: #000000;
+  --muted-foreground: #2d2926;
+  --ink-2: #2d2926;
+  --ink-3: #3a3733;
+  --status-live-ink: #164d36;
+  --status-loading-ink: #5a4310;
+  --status-failed-ink: #8e1b15;
+  --status-stopped-ink: #6e3404;
+  --status-finished-ink: #002b4f;
+}

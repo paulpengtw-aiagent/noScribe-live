@@ -82,6 +82,9 @@ const TINT_WEIGHTS = [0.35, 0.6, 0.85] as const;
 /** Ink dots on the dark theme take a Frost gradient across the orb; the light theme gets a deeper Frost run. */
 const FROST_DARK = ["#8fbcbb", "#88c0d0", "#5e81ac"] as const;
 const FROST_LIGHT = ["#81a1c1", "#5e81ac", "#486488"] as const;
+/** Crimson palette: the ink gradient runs coral to gold to blue on the dark theme, red to gold to navy on the light. */
+const CRIMSON_FROST_DARK = ["#f08a8f", "#f5e1a4", "#7fb8e6"] as const;
+const CRIMSON_FROST_LIGHT = ["#93272c", "#7a5a1e", "#003865"] as const;
 
 const FALLBACK_INK: RGB = { r: 245, g: 245, b: 245 };
 const FALLBACK_INK3: RGB = { r: 115, g: 115, b: 115 };
@@ -434,9 +437,10 @@ export class OrbRenderer {
   private frostInk(size: number): string | CanvasGradient {
     const { ink } = this;
     const dark = ink.r + ink.g + ink.b > 382;
-    const key = `${size}|${dark}`;
+    const crimson = document.documentElement.dataset.palette === "crimson";
+    const key = `${size}|${dark}|${crimson}`;
     if (this.inkFill && key === this.inkFillKey) return this.inkFill;
-    const stops = dark ? FROST_DARK : FROST_LIGHT;
+    const stops = crimson ? (dark ? CRIMSON_FROST_DARK : CRIMSON_FROST_LIGHT) : dark ? FROST_DARK : FROST_LIGHT;
     const grad = this.ctx.createLinearGradient(0, 0, size, size);
     stops.forEach((colour, i) => grad.addColorStop(i / (stops.length - 1), colour));
     this.inkFill = grad;

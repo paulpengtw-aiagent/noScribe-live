@@ -18,6 +18,10 @@
           el.dataset.theme = theme;
         } catch (e) {}
         try {
+          // The colour family (noscribe-live-palette): nordic unless the stored choice is crimson.
+          el.dataset.palette = localStorage.getItem("noscribe-live-palette") === "crimson" ? "crimson" : "nordic";
+        } catch (e) {}
+        try {
           if (localStorage.getItem("noscribe-live-easy") === "1") el.dataset.easy = "true";
         } catch (e) {}
         try {

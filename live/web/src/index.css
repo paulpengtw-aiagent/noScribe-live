@@ -200,6 +200,136 @@
     0 0 0 0.5px rgba(216, 222, 233, 0.12), 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
+/* Crimson palette: a second colour family for light and dark, selected by html[data-palette="crimson"] (index.html
+   sets it before first paint; use-theme.ts keeps it in step). Colours only: primary red #93272C, navy #003865,
+   black #2D2926, cool greys, cream #F7F3E8, with the accents and gold used sparingly. The Nordic blocks above are
+   unchanged. These selectors out-rank them: html[data-palette][:not(.dark)] is (0,2,1) against Nordic's (0,1,0).
+   Every text token is at least 4.5:1 on each surface it sits on. Ratios and the token table: live/docs/showreel/THEMES.md. */
+html[data-palette="crimson"]:not(.dark) {
+  color-scheme: light;
+  --background: #f7f3e8;
+  --foreground: #2d2926;
+  --card: #fbf9f3;
+  --card-foreground: #2d2926;
+  --popover: #fbf9f3;
+  --popover-foreground: #2d2926;
+  --primary: #93272c;
+  --primary-foreground: #ffffff;
+  --secondary: #003865;
+  --secondary-foreground: #ffffff;
+  --muted: #ede7d6;
+  --muted-foreground: #53565a;
+  --accent: #a4bcc2;
+  --accent-foreground: #2d2926;
+  --destructive: #a8163d;
+  --border: rgba(45, 41, 38, 0.12);
+  --input: rgba(45, 41, 38, 0.16);
+  --ring: #0077c8;
+  --hairline: rgba(45, 41, 38, 0.1);
+  --raised: #ede7d6;
+  --ink-2: #53565a;
+  --ink-3: #5b5e62;
+  --ink-4: #c8c9c7;
+  /* Status: green for live, gold for loading, a crimson-magenta red for failed and a burnt orange for stopped. */
+  --status-live: #276b4e;
+  --status-loading: #b9975b;
+  --status-failed: #a8163d;
+  --status-stopped: #9c4506;
+  --status-finished: #003865;
+  --status-live-ink: #276b4e;
+  --status-loading-ink: #6e5417;
+  --status-failed-ink: #a8163d;
+  --status-stopped-ink: #9c4506;
+  --status-finished-ink: #003865;
+  --glass-card: rgba(251, 249, 243, 0.86);
+  --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0) 55%),
+    linear-gradient(rgba(164, 188, 194, 0.08), rgba(164, 188, 194, 0.08));
+  --glass-edge: rgba(0, 56, 101, 0.2);
+  --glass-highlight: rgba(255, 255, 255, 0.7);
+  --card-shadow: 0 8px 30px rgba(45, 41, 38, 0.08), 0 1px 2px rgba(45, 41, 38, 0.05);
+  --live-glow: 0 0 24px rgba(0, 56, 101, 0.18);
+  --time-ink: #003865;
+  /* Aurora: soft blue-grey, gold, deep red and navy, at a low opacity so the text budget holds. */
+  --aurora-1: #a4bcc2;
+  --aurora-2: #b9975b;
+  --aurora-3: #93272c;
+  --aurora-4: #003865;
+  --aurora-opacity: 0.3;
+  --header-fill: color-mix(in oklab, var(--background) 82%, transparent);
+  --header-blur: blur(24px);
+  --orb-fg: #003865;
+  --orb-pill-bg: #fbf9f3;
+  --orb-label: #2d2926;
+  --timeline-rest-opacity: 0.9;
+  --timeline-block-filter: none;
+  --timeline-edge: #003865;
+  --radius: 10px;
+  --pill-shadow:
+    0 0 0 0.5px rgba(45, 41, 38, 0.1), 0 1px 2px rgba(45, 41, 38, 0.06), 0 2px 4px rgba(45, 41, 38, 0.03);
+}
+
+/* Crimson dark: navy-black page, navy-tinted cards, cream text, red lightened for text and accents. */
+html.dark[data-palette="crimson"] {
+  color-scheme: dark;
+  --background: #0b1622;
+  --foreground: #f2eee4;
+  --card: #0f1d2c;
+  --card-foreground: #f2eee4;
+  --popover: #142536;
+  --popover-foreground: #f2eee4;
+  --primary: #f08a8f;
+  --primary-foreground: #0b1622;
+  --secondary: #173a5c;
+  --secondary-foreground: #f2eee4;
+  --muted: #1a2b3e;
+  --muted-foreground: #c8c9c7;
+  --accent: #1f3b55;
+  --accent-foreground: #f2eee4;
+  --destructive: #ff8a80;
+  --border: rgba(242, 238, 228, 0.1);
+  --input: rgba(242, 238, 228, 0.14);
+  --ring: #a4bcc2;
+  --hairline: rgba(242, 238, 228, 0.1);
+  --raised: #1a2b3e;
+  --ink-2: #c8c9c7;
+  --ink-3: #b4b9c0;
+  --ink-4: #3a4a5c;
+  /* Status: mint green for live, pale gold for loading, coral for failed and peach for stopped. */
+  --status-live: #6cc59a;
+  --status-loading: #f5e1a4;
+  --status-failed: #ff8a80;
+  --status-stopped: #f2a65a;
+  --status-finished: #a4bcc2;
+  --status-live-ink: #6cc59a;
+  --status-loading-ink: #f5e1a4;
+  --status-failed-ink: #ff8a80;
+  --status-stopped-ink: #f2a65a;
+  --status-finished-ink: #a4bcc2;
+  --glass-card: rgba(15, 29, 44, 0.9);
+  --glass-sheen: linear-gradient(180deg, rgba(242, 238, 228, 0.06) 0%, rgba(242, 238, 228, 0) 50%);
+  --glass-edge: rgba(164, 188, 194, 0.26);
+  --glass-highlight: rgba(242, 238, 228, 0.08);
+  --card-shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.6);
+  --live-glow: 0 0 24px rgba(108, 197, 154, 0.22);
+  --time-ink: #9cc3dd;
+  --timeline-edge: transparent;
+  /* Aurora: navy, deep red and a touch of gold, soft, behind the glass. */
+  --aurora-1: #1f4e7a;
+  --aurora-2: #b9975b;
+  --aurora-3: #7a1f25;
+  --aurora-4: #2a5f8f;
+  --aurora-opacity: 0.45;
+  --header-fill: rgba(11, 22, 34, 0.6);
+  --header-blur: blur(12px) saturate(1.2);
+  --orb-fg: #f08a8f;
+  --orb-pill-bg: #0f1d2c;
+  --orb-label: #c8c9c7;
+  --timeline-rest-opacity: 0.85;
+  --timeline-block-filter: none;
+  --pill-shadow:
+    0 0 0 0.5px rgba(242, 238, 228, 0.12), 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
 @layer base {
   * {
     border-color: var(--border);

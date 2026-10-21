@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX } from "react";
+import { useLayoutEffect, useEffect, useRef, useState, type CSSProperties, type JSX } from "react";
 import { motion } from "motion/react";
 import { ActivityOrb } from "@/components/live/activity-orb";
 import type { OrbMode } from "@/lib/orb-renderer";
@@ -27,6 +27,7 @@ import {
 } from "@/lib/preroll-log";
 import type { PrerollMessages } from "@/i18n/catalog/preroll";
 import { cn } from "@/lib/utils";
+import { FLIGHT_MS, TERMINAL_FADE_MS } from "@/components/live/preroll/use-preroll-mode";
 
 /** The terminal types about 70 characters a second, one character per tick. */
 const TICK_MS = 14;
@@ -42,6 +43,9 @@ const VISIBLE_PHONE = 9;
 const FADE_MASK = "linear-gradient(to bottom, transparent, #000 3rem)";
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const PHONE_QUERY = "(max-width: 640px)";
+/** The flight layer sits above the page. */
+const FLIGHT_Z = 60;
+const EASE = "easeInOut";
 
 const ORB_MODE: Record<DisplayPhase, OrbMode> = {
   waiting: "idle",
@@ -55,7 +59,7 @@ const ORB_MODE: Record<DisplayPhase, OrbMode> = {
   canceled: "error",
 };
 
-/** The stat rows the terminal hands over to the stat cards in the full UI. */
+/** The stat rows the terminal hands over to the stat cards in the full UI: row id -> stat card id. */
 const STAT_LAYOUT: Partial<Record<PrerollLine["id"], string>> = {
   speakers: "stat-speakers",
   model: "stat-model",
@@ -75,11 +79,52 @@ interface Row {
   id: string;
   text: string;
   state: PrerollLine["state"];
-  layoutId?: string;
   /** A CLI log line: its dim clock and source tag, and its level tone. The text types at the log speed. */
   log?: { prefix: string; tone: string };
   /** A progress line updates in place: its text shows at once, without typing. */
   instant?: boolean;
+}
+
+/** A box on screen, in viewport pixels. */
+interface Box {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** One stat line in flight: its text leaves the terminal and lands on its stat card. */
+interface StatFlight {
+  key: string;
+  text: string;
+  from: Box;
+  to: Box;
+  scale: number;
+}
+
+/** The switch, measured once when the morph starts: the orb's two ends and the stat lines' paths. */
+interface Flight {
+  orb: { from: Box; to: Box };
+  stats: StatFlight[];
+}
+
+function boxOf(el: Element | null): Box | null {
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0 ? { left: r.left, top: r.top, width: r.width, height: r.height } : null;
+}
+
+/** A fixed-position layer that sits exactly on a box and scales from its top-left corner. */
+function fixedAt(b: Box): CSSProperties {
+  return {
+    position: "fixed",
+    left: b.left,
+    top: b.top,
+    width: b.width,
+    height: b.height,
+    transformOrigin: "0 0",
+    zIndex: FLIGHT_Z,
+  };
 }
 
 function rowText(line: PrerollLine, s: PrerollMessages): string {
@@ -137,7 +182,7 @@ function useTerminalRows(run: RunState, s: PrerollMessages): Row[] {
     if (!seen.has(key)) seen.set(key, run.lastSeq + 0.5);
     floor = Math.max(floor, seen.get(key) ?? floor);
     return {
-      item: { id: line.id, text: rowText(line, s), state: line.state, layoutId: STAT_LAYOUT[line.id] },
+      item: { id: line.id, text: rowText(line, s), state: line.state },
       key: floor,
     };
   });
@@ -207,13 +252,18 @@ function useViewport(): { w: number; h: number } {
 
 export interface PrerollViewProps {
   run: RunState;
-  /** "morph": the full UI is mounted beside this view; the shared elements fly to it and the view fades out. */
+  /** "morph": the full UI is mounted beside this view; the orb and the stat lines fly to it, then the view is removed. */
   morphing: boolean;
   easy: boolean;
   reduce: boolean;
 }
 
-/** The cinematic pre-roll: a large orb, a terminal fed by the run, and one status line. Lazy-loaded by App. */
+/**
+ * The cinematic pre-roll: a large orb, a terminal fed by the run, and one status line. Lazy-loaded by App.
+ * The switch (morphing): the orb is a fixed layer that flies from its pre-roll box to the stage card's orb slot,
+ * the rest of the terminal fades out, then the final stat lines fly into their stat cards. Reduced motion and the
+ * easy view skip the flight and crossfade.
+ */
 export default function PrerollView({ run, morphing, easy, reduce }: PrerollViewProps): JSX.Element {
   const { t } = useI18n();
   const s = t.preroll;
@@ -228,15 +278,35 @@ export default function PrerollView({ run, morphing, easy, reduce }: PrerollView
   const cap = phone ? VISIBLE_PHONE : VISIBLE_DESKTOP;
   const visible = rows.slice(-cap);
   const orbSize = phone ? Math.round(w * 0.7) : Math.round(Math.min(w, h) * 0.55);
-  const fade = morphing ? 0 : 1;
   const status = `${s.status[phase]} · ${s.elapsed(formatElapsed(elapsed))}`;
+
+  // The switch. Both ends are measured once, when the morph starts (the full UI is laid out underneath, so the
+  // stage slots have their final boxes). Reduced motion and the easy view measure nothing and crossfade instead.
+  const orbRef = useRef<HTMLDivElement>(null);
+  const [flight, setFlight] = useState<Flight | null>(null);
+  useLayoutEffect(() => {
+    if (!morphing || easy || reduce || flight) return;
+    const orbFrom = boxOf(orbRef.current);
+    const orbTo = boxOf(document.querySelector('[data-orb-slot="stage"]'));
+    if (!orbFrom || !orbTo) return;
+    const stats: StatFlight[] = [];
+    for (const [id, card] of Object.entries(STAT_LAYOUT)) {
+      const line = rows.find((row) => row.id === id);
+      const text = document.querySelector<HTMLElement>(`[data-testid="preroll-line"][data-line="${id}"] span.min-w-0`);
+      const from = boxOf(text);
+      const to = boxOf(document.querySelector(`[data-stat="${card}"]`));
+      if (!line || !from || !to) continue;
+      stats.push({ key: id, text: line.text, from, to, scale: Math.min(1, to.width / from.width) });
+    }
+    setFlight({ orb: { from: orbFrom, to: orbTo }, stats });
+  }, [morphing, easy, reduce, flight, rows]);
 
   if (easy) {
     return (
       <motion.section
         data-testid="preroll"
         data-easy="true"
-        animate={{ opacity: fade }}
+        animate={{ opacity: morphing ? 0 : 1 }}
         transition={{ duration: 0.4 }}
         className="flex min-h-[60svh] flex-col items-center justify-center gap-8 px-6 text-center"
       >
@@ -248,6 +318,9 @@ export default function PrerollView({ run, morphing, easy, reduce }: PrerollView
     );
   }
 
+  // While the flight plays the section stays opaque: its layers fade one by one. Otherwise it fades as a whole.
+  const fade = morphing && !flight ? 0 : 1;
+
   return (
     <motion.section
       data-testid="preroll"
@@ -255,25 +328,46 @@ export default function PrerollView({ run, morphing, easy, reduce }: PrerollView
       transition={{ duration: 0.6 }}
       className="flex min-h-[70svh] flex-col items-center justify-center gap-6 px-4 py-8"
     >
-      <motion.div layoutId="orb" className="flex shrink-0 items-center justify-center">
-        <ActivityOrb
-          mode={ORB_MODE[phase]}
-          envelope={[]}
-          pulseKey={run.liveCount}
-          progress={progressFraction(run)}
-          speakerColors={[]}
-          size={orbSize}
-          frozen={reduce}
-          prominent
-        />
-      </motion.div>
-      <div
+      {/* A box of the orb's exact size: the layout keeps it while the orb itself is in flight. */}
+      <div className="flex shrink-0 items-center justify-center" style={{ width: orbSize, height: orbSize, flex: "none", contain: "layout size" }}>
+        <motion.div
+          ref={orbRef}
+          data-orb-slot="preroll"
+          className="flex items-center justify-center"
+          style={flight ? fixedAt(flight.orb.from) : undefined}
+          initial={false}
+          animate={
+            flight
+              ? {
+                  x: flight.orb.to.left - flight.orb.from.left,
+                  y: flight.orb.to.top - flight.orb.from.top,
+                  scale: flight.orb.to.width / flight.orb.from.width,
+                }
+              : { x: 0, y: 0, scale: 1 }
+          }
+          transition={{ duration: FLIGHT_MS / 1000, ease: EASE }}
+        >
+          <ActivityOrb
+            mode={ORB_MODE[phase]}
+            envelope={[]}
+            pulseKey={run.liveCount}
+            progress={progressFraction(run)}
+            speakerColors={[]}
+            size={orbSize}
+            frozen={reduce}
+            prominent
+          />
+        </motion.div>
+      </div>
+      <motion.div
         data-testid="preroll-terminal"
         role="log"
         aria-live="polite"
         aria-label={s.terminalAria}
         className="flex w-full max-w-[min(92vw,720px)] flex-col justify-end overflow-hidden font-mono text-[14px] leading-6 text-foreground"
         style={{ height: cap * LINE_PX, maskImage: FADE_MASK, WebkitMaskImage: FADE_MASK }}
+        animate={{ opacity: flight ? 0 : 1 }}
+        transition={{ duration: TERMINAL_FADE_MS / 1000 }}
       >
         {visible.map((row) => {
           const at = typed[row.id];
@@ -281,9 +375,8 @@ export default function PrerollView({ run, morphing, easy, reduce }: PrerollView
           const shown = reduce || row.instant || at === undefined ? row.text : row.text.slice(0, at);
           const typing = !reduce && !row.instant && at !== undefined && at < row.text.length;
           return (
-            <motion.div
+            <div
               key={row.id}
-              layoutId={row.layoutId}
               data-testid="preroll-line"
               data-line={row.id}
               className="flex min-w-0 items-baseline gap-2 break-words"
@@ -297,7 +390,8 @@ export default function PrerollView({ run, morphing, easy, reduce }: PrerollView
                   ›
                 </span>
               )}
-              <span className={cn("min-w-0 break-words", row.log?.tone)}>
+              {/* One row is one line: a typed line that wraps would push the rows above it (layout shift). */}
+              <span className={cn("min-w-0 truncate", row.log?.tone)}>
                 {shown}
                 {typing ? <span aria-hidden="true" className="animate-pulse">▍</span> : null}
               </span>
@@ -308,13 +402,44 @@ export default function PrerollView({ run, morphing, easy, reduce }: PrerollView
                   {s.done}
                 </span>
               )}
-            </motion.div>
+            </div>
           );
         })}
-      </div>
-      <p data-testid="preroll-status" className="text-center text-[14px] text-ink-2 tabular-nums">
+      </motion.div>
+      <motion.p
+        data-testid="preroll-status"
+        className="text-center text-[14px] text-ink-2 tabular-nums"
+        animate={{ opacity: flight ? 0 : 1 }}
+        transition={{ duration: TERMINAL_FADE_MS / 1000 }}
+      >
         {status}
-      </p>
+      </motion.p>
+      {/* The stat lines in flight: a fixed copy of each line, moving and shrinking onto its stat card, then gone. */}
+      {flight
+        ? flight.stats.map((stat) => (
+            <motion.div
+              key={stat.key}
+              aria-hidden="true"
+              data-testid="preroll-flight"
+              data-flight={stat.key}
+              className="pointer-events-none font-mono text-[14px] leading-6 whitespace-nowrap text-foreground"
+              style={fixedAt(stat.from)}
+              initial={{ x: 0, y: 0, scale: 1, opacity: 1 }}
+              animate={{
+                x: stat.to.left - stat.from.left,
+                y: stat.to.top - stat.from.top,
+                scale: stat.scale,
+                opacity: 0,
+              }}
+              transition={{
+                default: { duration: FLIGHT_MS / 1000, ease: EASE, delay: TERMINAL_FADE_MS / 1000 },
+                opacity: { duration: 0.2, delay: (TERMINAL_FADE_MS + FLIGHT_MS - 200) / 1000 },
+              }}
+            >
+              {stat.text}
+            </motion.div>
+          ))
+        : null}
     </motion.section>
   );
 }

@@ -2,8 +2,8 @@
 """axe check during the pre-roll of a LIVE run, noScribe Live.
 
 While the pre-roll terminal is on screen, axe-core must report no serious or critical violation and
-the page must not scroll horizontally. Four configs: dark and light theme x en and zh-TW locale, at
-1440x900. Expected duration: about 1 to 2 minutes (about 25 s per config: pre-roll wait, 8 s settle,
+the page must not scroll horizontally. Eight configs: nordic and crimson palette x dark and light theme x en and zh-TW locale, at
+1440x900. Expected duration: about 3 to 4 minutes (about 25 s per config: pre-roll wait, 8 s settle,
 axe run, screenshot).
 
 Run from the repo root with the system Python that has Playwright:
@@ -17,7 +17,7 @@ The feed is only read. Feed lookup: --feed, else the demo feed in /workspace/noS
 else the newest *demo-en-zh*.ndjson in this repo's live/feeds.
 
 Output: one PASS/FAIL line per config, then `SUMMARY: n/m checks passed`. Exit 0 only if all pass.
-Screenshots: WORK/shots/preroll-<theme>-<locale>.png. Child processes are killed on exit.
+Screenshots: WORK/shots/preroll-<palette>-<theme>-<locale>.png. Child processes are killed on exit.
 """
 
 from __future__ import annotations
@@ -44,8 +44,10 @@ DEFAULT_AXE = "/tmp/nslive-r5/axe.min.js"
 DEFAULT_FEED = Path("/workspace/noScribe-live/live/feeds/20261022-003524-demo-en-zh.ndjson")  # read only
 DEFAULT_WORK = Path("/tmp/nslive-axe-preroll")
 DEFAULT_PORT = 8940
+PALETTES = ("nordic", "crimson")
 THEMES = ("dark", "light")
 LOCALES = ("en", "zh-TW")
+PALETTE_KEY = "noscribe-live-palette"  # matrix dimension; no palette picker in live/web/src yet
 
 
 def resolve_feed(arg: str | None) -> Path | None:
@@ -87,8 +89,9 @@ def stop(proc: subprocess.Popen | None) -> None:
             pass
 
 
-def run_config(p: Any, args: argparse.Namespace, feed: Path, axe_text: str, theme: str, locale: str) -> dict[str, Any]:
-    tag = f"{theme}-{locale}"
+def run_config(p: Any, args: argparse.Namespace, feed: Path, axe_text: str, palette: str, theme: str,
+               locale: str) -> dict[str, Any]:
+    tag = f"{palette}-{theme}-{locale}"
     feeds = args.work / "feeds" / tag
     shutil.rmtree(feeds, ignore_errors=True)
     feeds.mkdir(parents=True)
@@ -103,7 +106,7 @@ def run_config(p: Any, args: argparse.Namespace, feed: Path, axe_text: str, them
         browser = p.chromium.launch()
         ctx = browser.new_context(viewport={"width": 1440, "height": 900})
         ctx.add_init_script(
-            f"localStorage.setItem('noscribe-live-locale','{locale}');localStorage.setItem('noscribe-live-theme','{theme}')")
+            f"localStorage.setItem('noscribe-live-locale','{locale}');localStorage.setItem('noscribe-live-theme','{theme}');localStorage.setItem('noscribe-live-palette','{palette}')")
         page = ctx.new_page()
         page.goto(f"http://127.0.0.1:{args.port}/", wait_until="domcontentloaded", timeout=30000)
         time.sleep(1)
@@ -139,7 +142,7 @@ def run_config(p: Any, args: argparse.Namespace, feed: Path, axe_text: str, them
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="axe check during the live pre-roll (dark/light x en/zh-TW).")
+    parser = argparse.ArgumentParser(description="axe check during the live pre-roll (nordic/crimson x dark/light x en/zh-TW).")
     parser.add_argument("--feed", default=None, help="recorded feed to replay (default: the demo feed)")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="port for the server (default: %(default)s)")
     parser.add_argument("--static", type=Path, default=DEFAULT_STATIC, help="built frontend dir (has index.html)")
@@ -163,20 +166,22 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     axe_text = args.axe.read_text(encoding="utf-8")
     args.work.mkdir(parents=True, exist_ok=True)
-    results: list[tuple[str, str, dict[str, Any]]] = []
+    results: list[tuple[str, str, str, dict[str, Any]]] = []
     with sync_playwright() as p:
-        for theme in THEMES:
-            for locale in LOCALES:
-                results.append((theme, locale, run_config(p, args, feed, axe_text, theme, locale)))
+        for palette in PALETTES:
+            for theme in THEMES:
+                for locale in LOCALES:
+                    results.append((palette, theme, locale,
+                                    run_config(p, args, feed, axe_text, palette, theme, locale)))
     passed = 0
-    for theme, locale, res in results:
+    for palette, theme, locale, res in results:
         if res.get("ok"):
             passed += 1
         status = "PASS" if res.get("ok") else "FAIL"
         if "detail" in res:
-            print(f"{status} axe preroll {theme} {locale}: {res['detail']}", flush=True)
+            print(f"{status} axe preroll {palette} {theme} {locale}: {res['detail']}", flush=True)
         else:
-            print(f"{status} axe preroll {theme} {locale}: serious/critical {res['serious']}, "
+            print(f"{status} axe preroll {palette} {theme} {locale}: serious/critical {res['serious']}, "
                   f"all {res['all']}, terminal lines {res['lines']}, scroll {res['scroll']}", flush=True)
     total = len(results)
     print(f"SUMMARY: {passed}/{total} checks passed", flush=True)

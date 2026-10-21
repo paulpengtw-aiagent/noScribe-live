@@ -31,6 +31,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -136,6 +137,17 @@ def run_info(page: Any) -> dict[str, Any]:
 
 def state(page: Any) -> str | None:
     return run_info(page).get("state")
+
+
+# A run on the air reads "● Live" (green) or, before its first segment, "◐ Loading" (yellow); both carry
+# data-state running. The glyph is part of the chip text (top-bar.tsx), so the check matches it too.
+RUNNING_CHIP = re.compile(r"^(●\s*(Live|即時)|◐\s*(Loading|載入中))$")
+
+
+def running(page: Any) -> bool:
+    """True while a run is on the air: data-state running, chip Live/即時 or Loading/載入中 with its glyph."""
+    info = run_info(page)
+    return info.get("state") == "running" and bool(RUNNING_CHIP.match(info.get("text") or ""))
 
 
 def elapsed(page: Any) -> str | None:
@@ -307,7 +319,7 @@ def scenario_2(lab: Lab, page: Any, path_a: Path, run_a: str, run_b: str) -> Non
     if offered:
         other.click(timeout=5000)
     wait_until(lambda: shown_run(page) == run_a, 10)
-    switched = wait_full_ui(page, 30) and bool(wait_until(lambda: state(page) == "running", 5))
+    switched = wait_full_ui(page, 30) and bool(wait_until(lambda: running(page), 5))
     lab.check("2 switch button: page now shows A with run-state running", bool(offered) and bool(switched),
               f"button offered={bool(offered)}, shown run is A={shown_run(page) == run_a}, "
               f"run-state {run_info(page)}, button visible now={other.is_visible()}")
@@ -319,12 +331,12 @@ def scenario_3(lab: Lab, page: Any, replay_a: subprocess.Popen, path_a: Path) ->
     # must still be running at that point (checked against A's feed file).
     wait_full_ui(page, 30)
     e0 = elapsed(page)
-    ticked = wait_until(lambda: e0 is not None and elapsed(page) not in (None, e0) and state(page) == "running",
+    ticked = wait_until(lambda: e0 is not None and elapsed(page) not in (None, e0) and running(page),
                         5, 0.1)
     e1 = elapsed(page)
     still_live = "run_end" not in path_a.read_text(encoding="utf-8")
     lab.check("3 setup: Elapsed ticks while A runs and A has no run_end yet (killed while live)",
-              bool(ticked) and still_live and state(page) == "running",
+              bool(ticked) and still_live and running(page),
               f"{e0!r} -> {e1!r}, run-state {state(page)!r}, run_end absent from A's feed={still_live}")
     os.kill(replay_a.pid, signal.SIGKILL)
     replay_a.wait(timeout=10)
@@ -356,7 +368,7 @@ def run_checks(lab: Lab, browser: Any) -> None:
     ctx, page = new_page(browser)
     page.goto(lab.url, wait_until="domcontentloaded", timeout=30000)
     wait_until(lambda: shown_run(page) == run_a, 15)
-    on_a = wait_full_ui(page, 30) and bool(wait_until(lambda: state(page) == "running", 5))
+    on_a = wait_full_ui(page, 30) and bool(wait_until(lambda: running(page), 5))
     lab.check("setup: follow page shows A (run-state running) before B starts", bool(on_a),
               f"run-state {run_info(page)}")
     time.sleep(4)  # B starts 4 s after A
@@ -365,7 +377,7 @@ def run_checks(lab: Lab, browser: Any) -> None:
     replay_b = lab.start_replay(1, 30, "B")
     path_b, run_b = lab.new_run(before_b, "B")
     wait_until(lambda: shown_run(page) == run_b, 15)
-    on_b = wait_full_ui(page, 30) and bool(wait_until(lambda: state(page) == "running", 5))
+    on_b = wait_full_ui(page, 30) and bool(wait_until(lambda: running(page), 5))
     lab.check("1 follow newest: page shows B while B runs", bool(on_b),
               f"shown run is B={shown_run(page) == run_b}, run-state {run_info(page)}")
     lab.shot(page, "01-follow-b-running.png")
@@ -378,7 +390,7 @@ def run_checks(lab: Lab, browser: Any) -> None:
     delay = time.monotonic() - t_end
     # The run-state chip is hidden during the pre-roll of the switched-to run: read it only after the full UI.
     full_a = wait_full_ui(page, 30)
-    running_a = bool(wait_until(lambda: state(page) == "running", 5)) if full_a else False
+    running_a = bool(wait_until(lambda: running(page), 5)) if full_a else False
     lab.check("1 follow newest: page follows A again after B's run_end",
               bool(ended_b) and bool(back) and full_a and running_a,
               f"B run_end in its feed={bool(ended_b)}, seen by page={ended(page, run_b)}; "

@@ -29,9 +29,14 @@ declare global {
   }
 }
 
-/** Length of the morph into the full UI, in ms (reduced motion crossfades in 300 ms). */
-export const MORPH_MS = 1100;
-const REDUCED_MORPH_MS = 300;
+/** The orb's flight from the pre-roll to the stage card, in ms (ease-in-out). */
+export const FLIGHT_MS = 900;
+/** The rest of the terminal fades out in this many ms before the stat lines fly. */
+export const TERMINAL_FADE_MS = 250;
+/** Length of the morph into the full UI, in ms: the flight, the stat lines' flight, then the hand-over. */
+export const MORPH_MS = 1150;
+/** Reduced motion and easy view: a short crossfade, no flight. */
+export const REDUCED_MORPH_MS = 200;
 
 const IDLE: PrerollMachine = { runId: null, mode: "full", reason: "waiting", enteredAt: null, exitedAt: null };
 

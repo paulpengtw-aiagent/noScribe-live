@@ -202,16 +202,22 @@ export function StageCard({
         </>
       ) : phone ? (
         <div className="flex min-w-0 items-center gap-2.5 text-[13px]" data-testid="stage-summary">
-          <ActivityOrb
-            mode={orbMode}
-            envelope={envelope}
-            pulseKey={pulseKey}
-            progress={progress}
-            speakerColors={speakerColors}
-            activeColor={activeColor}
-            size={PHONE_SUMMARY_ORB_PX}
-            frozen={orbFrozen}
-          />
+          <div
+            data-orb-slot="stage"
+            className="flex items-center justify-center"
+            style={{ width: PHONE_SUMMARY_ORB_PX, height: PHONE_SUMMARY_ORB_PX, flex: "none", contain: "layout size" }}
+          >
+            <ActivityOrb
+              mode={orbMode}
+              envelope={envelope}
+              pulseKey={pulseKey}
+              progress={progress}
+              speakerColors={speakerColors}
+              activeColor={activeColor}
+              size={PHONE_SUMMARY_ORB_PX}
+              frozen={orbFrozen}
+            />
+          </div>
           {/* Wraps onto a second line instead of truncating: the phase, then the elapsed time and segment count. */}
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="font-medium break-words text-foreground">{phaseName}</span>
@@ -301,13 +307,23 @@ type OrbAreaProps = Omit<ActivityOrbProps, "size" | "className"> & { compact: bo
 function OrbArea({ compact, ...orb }: OrbAreaProps) {
   const ref = useRef<HTMLDivElement>(null);
   const area = useElementSize(ref);
-  // Desktop: the orb takes the room the stats leave over, between 120 and 260 px. Below 1100 px it is 140 px.
-  const size = compact ? 140 : area.height > 0 ? Math.round(Math.min(260, Math.max(120, area.height - 8))) : 260;
+  // Pinned: the desktop size is taken from the first measurement of this layout and then held, so the orb never
+  // resizes when the stats or the log beside it grow. Desktop: between 120 and 260 px. Below 1100 px it is 140 px.
+  const [pinnedPx, setPinnedPx] = useState<number | null>(null);
+  if (!compact && pinnedPx === null && area.height > 0) {
+    setPinnedPx(Math.round(Math.min(260, Math.max(120, area.height - 8))));
+  }
+  const size = compact ? 140 : (pinnedPx ?? 260);
   return (
     <div ref={ref} className={cn("flex items-center justify-center", compact ? "shrink-0" : "min-h-0 flex-1")}>
-      <motion.div layoutId="orb" className="flex shrink-0 items-center justify-center">
+      {/* The slot is a fixed box: it never shrinks or grows with its neighbours. The pre-roll flies its orb onto it. */}
+      <div
+        data-orb-slot="stage"
+        className="flex items-center justify-center"
+        style={{ width: size, height: size, flex: "none", contain: "layout size" }}
+      >
         <ActivityOrb {...orb} size={size} />
-      </motion.div>
+      </div>
     </div>
   );
 }
@@ -344,7 +360,7 @@ function StatTile({
     <Tooltip>
       <TooltipTrigger asChild>
         <motion.div
-          layoutId={layoutId}
+          data-stat={layoutId}
           data-testid="stat-card"
           className="min-w-0 cursor-default rounded-[12px] bg-raised px-3 py-1 shadow-ring"
         >

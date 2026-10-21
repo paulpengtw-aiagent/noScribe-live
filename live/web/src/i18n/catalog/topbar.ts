@@ -11,6 +11,13 @@ const en = {
   /** Header menu's language row on the English page: the endonym of the language it switches to. */
   languageEndonym: "中文（繁體）",
   switchTheme: { light: "Switch to light theme", dark: "Switch to dark theme" },
+  /** Theme button's menu label: the colour family and the light or dark theme. */
+  themeMenuLabel: "Theme and palette",
+  paletteLabel: "Palette",
+  /** The two colour families. "Crimson" is the second one. */
+  palette: { nordic: "Nordic", crimson: "Crimson" },
+  themeLabel: "Theme",
+  themeChoice: { light: "Light", dark: "Dark" },
   /** Screen-reader label of the logo's busy orb. */
   processing: "Processing…",
   /** Icon menu (compact header) that holds the theme and language switches. */
@@ -49,6 +56,11 @@ const zhTW: TopbarMessages = {
   languageShort: "EN",
   languageEndonym: "English",
   switchTheme: { light: "切換為淺色主題", dark: "切換為深色主題" },
+  themeMenuLabel: "主題與配色",
+  paletteLabel: "配色",
+  palette: { nordic: "Nordic", crimson: "緋紅" },
+  themeLabel: "主題",
+  themeChoice: { light: "淺色", dark: "深色" },
   processing: "處理中…",
   menuLabel: "主題與語言",
   cliLog: "CLI 紀錄",

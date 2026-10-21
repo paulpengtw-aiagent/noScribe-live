@@ -310,7 +310,8 @@ def click_block(page: Any, idx: int) -> None:
 
 def open_picker(page: Any) -> None:
     if not page.locator('[data-testid="run-option"]').first.is_visible():
-        page.locator('[data-testid="run-picker"]').click(timeout=5000)
+        # 15 s: a slow (0.5x) replay can keep the page in the pre-roll; the picker is inert until the full UI is up.
+        page.locator('[data-testid="run-picker"]').click(timeout=15000)
 
 
 PREROLL_DONE_JS = """() => { const p = window.__nslivePreroll; return !p || p.active === false; }"""
@@ -1050,7 +1051,8 @@ def loading_consistent(h: Harness, page: Any, run_id: str) -> tuple[bool, str]:
 
 
 def picker_body(h: Harness, page: Any, zh_id: str, demo_id: str) -> None:
-    wait_full_ui(page, 60)
+    # The picker is invisible and inert during the pre-roll (minimal header): wait for the full UI first.
+    wait_full_ui(page, 90)
     open_picker(page)
     wait_until(lambda: page.locator('[data-testid="run-option"]').count() >= 2, 10, 0.2)
     opts = page.evaluate(OPTS_JS)

@@ -1,4 +1,4 @@
-import type { Locale } from "../index";
+import { plural, type Locale } from "../core";
 
 const en = {
   /** Connection overlay. */
@@ -34,6 +34,15 @@ const en = {
   /** Persistent notice for a followed run that failed. */
   failedRunToast: (name: string) => `${name} failed`,
   failedRunView: "View",
+  /** CLI log on phones (below 640 px): the toggle between six lines and the full bounded height. */
+  cliLogExpand: "Expand",
+  cliLogCollapse: "Collapse",
+  /** Transcription-complete dialog, shown once when a run this page was watching live finishes. */
+  runCompleteTitle: "Transcription complete",
+  runCompleteLength: (time: string) => `Length ${time}`,
+  runCompleteSegments: (n: number) => plural("en", n, { one: `${n} segment`, other: `${n} segments` }),
+  runCompleteSpeakers: (n: number) => plural("en", n, { one: `${n} speaker`, other: `${n} speakers` }),
+  runCompleteKeep: "Keep viewing",
 };
 
 export type AppMessages = typeof en;
@@ -63,6 +72,13 @@ const zhTW: AppMessages = {
   toastClose: "關閉通知",
   failedRunToast: (name) => `${name} 轉錄失敗`,
   failedRunView: "查看",
+  cliLogExpand: "展開",
+  cliLogCollapse: "收合",
+  runCompleteTitle: "轉錄完成",
+  runCompleteLength: (time) => `長度 ${time}`,
+  runCompleteSegments: (n) => plural("zh-TW", n, { one: `${n} 段`, other: `${n} 段` }),
+  runCompleteSpeakers: (n) => plural("zh-TW", n, { one: `${n} 位說話者`, other: `${n} 位說話者` }),
+  runCompleteKeep: "繼續查看",
 };
 
 export const app = { en, "zh-TW": zhTW } satisfies Record<Locale, unknown>;

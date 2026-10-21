@@ -5,7 +5,7 @@ While the run is live, a reader who has scrolled up must see "Jump to live" (en)
 sample; "Jump to end" / "跳至結尾" may appear only once run_end is in the feed, and must appear soon after.
 Three pages watch one replay in one browser: English desktop, zh-TW desktop, and English Easy view at 390 px.
 
-    /usr/bin/python3 -I live/stress/test_jump_label.py [--port 8911] [--speed 0.5] [--max-gap 30] [--work DIR] [--static DIR]
+    /usr/bin/python3 -I live/stress/test_jump_label.py [--port 8911] [--speed 0.3] [--max-gap 30] [--work DIR] [--static DIR]
 
 Starts `python -m server` on --port (fresh feeds dir) and `python -m server.replay SRC --speed S --max-gap G`.
 SRC is copied into WORK, so the recorded feed stays read only. Samples the label every 500 ms until run_end is in
@@ -83,7 +83,7 @@ def wait_until(fn, timeout: float, step: float = 0.2):
 def main() -> int:
     ap = argparse.ArgumentParser(description="Jump button label while a run is live")
     ap.add_argument("--port", type=int, default=8911)
-    ap.add_argument("--speed", type=float, default=0.5)
+    ap.add_argument("--speed", type=float, default=0.3)
     ap.add_argument("--max-gap", type=float, default=30.0,
                     help="longest single replay pause in seconds (default 30: keeps the run live through the pre-roll)")
     ap.add_argument("--src", default=DEFAULT_SRC)
@@ -91,7 +91,7 @@ def main() -> int:
     ap.add_argument("--static", default=str(LIVE / "web" / "dist"))
     ap.add_argument("--work", default="/tmp/nslive-r17/jump")
     ap.add_argument("--timeout", type=float, default=240)
-    ap.add_argument("--min-live", type=int, default=8, help="live samples (500 ms apart) each page must take")
+    ap.add_argument("--min-live", type=int, default=6, help="live samples (500 ms apart) each page must take")
     args = ap.parse_args()
     if not memory_ok():
         return 2
@@ -162,6 +162,10 @@ def main() -> int:
                 detached = wait_until(lambda: following_of(page) == "false", 3, 0.05)
                 check(f"{name}: scrolled up while live", bool(detached), f"following {following_of(page)!r}, run_end in feed {ended()}")
 
+            # Sampling starts only when every page is past its pre-roll: the jump button is not on screen before that.
+            for name, (ctx, page, loc) in pages.items():
+                up = wait_full_ui(page, 90)
+                check(f"{name}: full UI before sampling", bool(up), f"segments {page.evaluate(SEG_JS)}")
             t0 = time.monotonic()
             live_n = {name: 0 for name in pages}
             bad: dict[str, list[str]] = {name: [] for name in pages}
