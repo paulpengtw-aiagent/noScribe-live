@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type Ref,
 } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
@@ -264,12 +265,56 @@ function OverlapTag({ speaker }: { speaker: string }) {
   );
 }
 
+// Phone width: below Tailwind's sm breakpoint (40rem). Read only by the Easy end-state strip.
+const PHONE_QUERY = "(max-width: 39.99rem)";
+
+function subscribePhone(onChange: () => void) {
+  if (typeof window.matchMedia !== "function") return () => {};
+  const query = window.matchMedia(PHONE_QUERY);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+function usePhone(): boolean {
+  return useSyncExternalStore(
+    subscribePhone,
+    () => typeof window.matchMedia === "function" && window.matchMedia(PHONE_QUERY).matches,
+    () => false,
+  );
+}
+
 /**
  * How a run ended: the title, one detail line, and the raw CLI error behind one disclosure. This is the only place
  * the page explains an ended run. Centred in place of an empty transcript; a left-aligned strip under the header
- * when the run kept some segments, so the reason stays in view.
+ * when the run kept some segments, so the reason stays in view. In Easy view on a phone the strip is one row: a
+ * one-line headline and a "Details" disclosure that holds the detail and the raw error.
  */
 function EndNotice({ end, strip = false }: { end: EndDescription; strip?: boolean }) {
+  const { t } = useI18n();
+  const { easy } = useEasyView();
+  const phone = usePhone();
+  if (strip && easy && phone) {
+    return (
+      <div className="flex w-full min-w-0 shrink-0 flex-row flex-wrap items-center gap-x-3 gap-y-1 px-6 pb-4 text-left">
+        <h3 className="text-[18px] leading-tight font-medium tracking-[-0.01em]">
+          {end.kind === "stale" ? t.errors.endStoppedLine : end.title}
+        </h3>
+        <details className="min-w-0 text-[15px] text-ink-2 open:w-full">
+          <summary className="inline-flex min-h-12 min-w-[3rem] cursor-pointer items-center select-none hover:text-foreground">
+            {t.errors.endMoreDetails}
+          </summary>
+          <div className="flex flex-col gap-2 pb-1">
+            {end.detail ? <p className="leading-relaxed">{end.detail}</p> : null}
+            {end.rawError ? (
+              <pre className="max-h-48 overflow-auto rounded-[10px] bg-raised p-2.5 font-mono text-[11px] leading-[1.5] text-ink-2 break-words whitespace-pre-wrap shadow-ring select-text">
+                {end.rawError}
+              </pre>
+            ) : null}
+          </div>
+        </details>
+      </div>
+    );
+  }
   return (
     <div
       className={cn(
@@ -388,6 +433,9 @@ export function TranscriptCard({
   const [view, setView] = useState<RevealView>(() => engine.view());
   const loop = useRef<RevealLoop>({ frame: null, last: null });
   const { easy } = useEasyView();
+  const phone = usePhone();
+  // Easy view on a phone: the export sits under the transcript, not in the title row (that row pushed the transcript down).
+  const exportBelow = easy && phone;
   const queueable = !reduce && !easy && !frozen;
   useLayoutEffect(() => {
     if (engine.runId !== runId) {
@@ -549,6 +597,8 @@ export function TranscriptCard({
   const showJump = !following && segments.length > 0;
   // How the run ended, or null while it is still running.
   const end = run ? describeEnd(run, t.errors) : null;
+  // Shown only when ExportButton would render (run ended, with segments), so no empty footer is left while live.
+  const exportFooter = exportBelow && run !== null && !active && segments.length > 0;
 
   return (
     // Below the sm breakpoint the box has a fixed 70vh height: it stays a scroller that follows new text, and the
@@ -564,7 +614,7 @@ export function TranscriptCard({
             >
               {name}
             </h2>
-            <ExportButton run={run} />
+            {exportBelow ? null : <ExportButton run={run} />}
           </div>
           {/* Easy view drops the file path and the model: the title is enough to say which run this is. */}
           {easy ? null : (
@@ -699,6 +749,12 @@ export function TranscriptCard({
         ) : null}
       </div>
 
+      {run && exportFooter ? (
+        <div className="shrink-0 px-6 pt-2 pb-4 [&_[data-testid=export-odt]]:flex [&_[data-testid=export-odt]]:min-h-12 [&_[data-testid=export-odt]]:w-full">
+          <ExportButton run={run} />
+        </div>
+      ) : null}
+
       <div data-testid="sr-announcer" aria-live="polite" className="sr-only">
         {announcer.lines.map((line) => (
           <p key={line.key}>{line.text}</p>
@@ -716,7 +772,11 @@ export function TranscriptCard({
             animate={{ opacity: 1, y: 0 }}
             exit={reduce || easy ? undefined : { opacity: 0, y: 6 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
-            className="absolute right-6 bottom-5 inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3.5 text-[13px] font-medium text-secondary-foreground shadow-ring hover:bg-raised"
+            className={cn(
+              "absolute right-6 inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3.5 text-[13px] font-medium text-secondary-foreground shadow-ring hover:bg-raised",
+              // Lifted above the export footer when it shows, so the two do not overlap.
+              exportFooter ? "bottom-20" : "bottom-5",
+            )}
           >
             <ArrowDown className="size-3.5" aria-hidden="true" />
             {active ? t.transcript.jumpToLive : t.transcript.jumpToEnd}

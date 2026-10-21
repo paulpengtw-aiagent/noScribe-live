@@ -196,6 +196,9 @@ export function TopBar({
                 className={cn(
                   "flex min-w-0 items-center gap-1.5 rounded-full bg-raised px-2.5 py-0.5 text-[12px] font-medium shadow-ring",
                   easyPhone ? "shrink-0" : "shrink",
+                  // Easy view on phones: the status pill is visually hidden (the Easy status sentence under the stage
+                  // says the same). The node stays in the DOM and its text stays for screen readers.
+                  easy && "max-sm:sr-only",
                   TONE_TEXT[tone],
                 )}
               >
