@@ -2,6 +2,7 @@ import type { Locale } from "../index";
 
 const en = {
   runStatusLabel: "Run status",
+  progressLabel: "Transcription progress",
   phase: {
     waiting: "Waiting for a transcription",
     converting: "Preparing audio",
@@ -86,6 +87,7 @@ export type StageMessages = typeof en;
 
 const zhTW: StageMessages = {
   runStatusLabel: "轉錄狀態",
+  progressLabel: "轉錄進度",
   phase: {
     waiting: "等待轉錄",
     converting: "準備音訊",

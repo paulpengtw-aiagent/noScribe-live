@@ -12,7 +12,7 @@ Groups (--only):
   zhterms   zh-TW: body.innerText contains none of the listed terms.
   export    token gate on (--token). A finished run: export-odt is enabled, the download is an .odt whose zip
             starts with a stored mimetype entry (application/vnd.oasis.opendocument.text) and whose content.xml
-            names a speaker; the button then shows its success state. A live run: export-odt is disabled.
+            names a speaker; the button then shows its success state. A live run: export-odt is not rendered until run_end, then appears enabled.
 
 Run from the repo root with the system Python that has Playwright:
 
@@ -826,14 +826,23 @@ def export_live_body(h: Any, browser: Any, port: int, run_id: str) -> None:
     page = ctx.new_page()
     try:
         page.goto(f"{h.url(port)}?token={EXPORT_TOKEN}", wait_until="domcontentloaded", timeout=30000)
-        shown = ux.wait_until(lambda: ux.seg_count(page) >= 1, 30, 0.3)
-        btn = page.locator('[data-testid="export-odt"]').first
-        btn.wait_for(state="visible", timeout=15000)
-        enabled = btn.is_enabled()
-        h.check("export live run: export-odt disabled while the run is live", bool(shown) and not enabled,
-                f"segments {ux.seg_count(page)}, enabled {enabled}, data-state {btn.get_attribute('data-state')!r}, "
-                f"run_end seen {ux.page_ended(page, run_id)}")
+        shown = ux.wait_until(lambda: ux.seg_count(page) >= 1, 60, 0.3)
+        # The replay runs at speed 1, so the run stays live for minutes: check right after the first segment renders.
+        seen_end = ux.page_ended(page, run_id)
+        export = page.locator('[data-testid="export-odt"]')
+        live_count = export.count()
+        h.check("export live run: export-odt not rendered while the run is live",
+                bool(shown) and not seen_end and live_count == 0,
+                f"segments {ux.seg_count(page)}, run_end seen {seen_end}, export-odt count {live_count}")
         h.shot(page, "export-live.png")
+        # After run_end the button appears, enabled.
+        ended = ux.wait_until(lambda: ux.page_ended(page, run_id), 400, 0.5)
+        appeared = ux.wait_until(lambda: export.count() == 1, 15, 0.3)
+        enabled = bool(appeared) and export.first.is_enabled()
+        state = export.first.get_attribute("data-state") if appeared else None
+        h.check("export live run: export-odt appears (count 1) and enabled after run_end",
+                bool(ended) and bool(appeared) and enabled,
+                f"run_end seen {bool(ended)}, export-odt count {export.count()}, enabled {enabled}, data-state {state!r}")
     finally:
         ctx.close()
 
@@ -852,7 +861,7 @@ def group_export(h: Any, browser: Any) -> None:
     replay = None
     try:
         before = h.feeds_now(feeds)
-        replay = h.start_replay(h.demo_src, feeds, 2, 2, "export-live")
+        replay = h.start_replay(h.demo_src, feeds, 1, 2, "export-live")
         _path, run_id = h.new_run(feeds, before, "export-live")
         h.scenario("export live run", export_live_body, h, browser, port, run_id)
     finally:

@@ -186,7 +186,7 @@ export function StageCard({
       )}
 
       <div>
-        <Progress value={pctValue} live={liveRun} className="h-[2px]! bg-hairline!" />
+        <Progress value={pctValue} live={liveRun} className="h-[2px]! bg-hairline!" aria-label={s.progressLabel} />
         {/* The progress line never repeats the phase name: the row above already names it. */}
         <div className="mt-2 flex h-5 items-baseline justify-between gap-3 text-[12px] tabular-nums">
           <span className={cn("min-w-0 truncate text-ink-3", timed && "font-mono")}>
