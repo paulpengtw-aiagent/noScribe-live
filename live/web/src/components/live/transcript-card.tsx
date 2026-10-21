@@ -297,8 +297,15 @@ function EndNotice({ end, strip = false }: { end: EndDescription; strip?: boolea
     return (
       <div className="flex w-full min-w-0 shrink-0 flex-row flex-wrap items-center gap-x-3 gap-y-1 px-6 pb-4 text-left">
         <h3 className="text-[18px] leading-tight font-medium tracking-[-0.01em]">
-          {end.kind === "stale" ? t.errors.endStoppedLine : end.title}
+          {end.kind === "stale" ? (
+            <>
+              <span aria-hidden="true" className="text-status-stopped-ink">■</span> {t.errors.endStoppedLine}
+            </>
+          ) : (
+            end.title
+          )}
         </h3>
+        <span aria-hidden="true" className="text-ink-3">·</span>
         <details className="min-w-0 text-[15px] text-ink-2 open:w-full">
           <summary className="inline-flex min-h-12 min-w-[3rem] cursor-pointer items-center select-none hover:text-foreground">
             {t.errors.endMoreDetails}

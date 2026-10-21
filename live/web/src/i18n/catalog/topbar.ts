@@ -22,6 +22,8 @@ const en = {
   connConnecting: "Connecting…",
   connReconnecting: "Reconnecting…",
   otherLive: "Another transcription is running → Switch",
+  /** The same switch on the Easy phone header, short enough to keep the header to one row. */
+  otherLiveShort: "Live run → Switch",
   clockOf: (transcribed: string, duration: string) => `${transcribed} of ${duration}`,
   latency: {
     noSamples:
@@ -49,6 +51,7 @@ const zhTW: TopbarMessages = {
   connConnecting: "連線中…",
   connReconnecting: "重新連線中…",
   otherLive: "另一個轉錄正在進行 → 切換",
+  otherLiveShort: "有新轉錄 → 切換",
   clockOf: (transcribed: string, duration: string) => `${transcribed} / ${duration}`,
   latency: {
     noSamples: "從 CLI 完成一段到它出現在這裡的時間。以本頁開啟期間收到的各段測量。",

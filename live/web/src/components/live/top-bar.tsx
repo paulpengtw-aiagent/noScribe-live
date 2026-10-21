@@ -155,7 +155,7 @@ export function TopBar({
         </div>
 
         <div className={cn("flex min-w-0 flex-1 items-center gap-2 sm:flex-initial sm:gap-4", easyPhone && "flex-wrap justify-end")}>
-          {otherLive && (
+          {otherLive && !easyPhone && (
             <Button
               type="button"
               variant="ghost"
@@ -170,7 +170,7 @@ export function TopBar({
               )}
             >
               <span aria-hidden="true" className="size-1.5 shrink-0 animate-pulse rounded-full bg-foreground" />
-              <span className={easyPhone ? "whitespace-normal" : "truncate"}>{t.topbar.otherLive}</span>
+              <span className={easyPhone ? "whitespace-normal" : "truncate"}>{easyPhone ? t.topbar.otherLiveShort : t.topbar.otherLive}</span>
             </Button>
           )}
 

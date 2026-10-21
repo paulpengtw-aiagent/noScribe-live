@@ -144,8 +144,8 @@ html[data-easy="true"] button:not(.timeline-block) {
   }
 
   html[data-easy="true"] [data-testid="stage-card"] {
-    gap: 4px;
-    padding: 10px;
+    gap: 2px;
+    padding: 8px 10px;
   }
 
   html[data-easy="true"] [data-testid="stage-card"] .mt-2.h-5 {
@@ -153,7 +153,7 @@ html[data-easy="true"] button:not(.timeline-block) {
   }
 
   html[data-easy="true"] [data-testid="easy-status-sentence"] {
-    line-height: 1.25;
+    line-height: 1.2;
   }
 
   html[data-easy="true"] header:has(> div > [data-testid="run-title"]) {

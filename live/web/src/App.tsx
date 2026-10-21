@@ -287,6 +287,8 @@ export default function App() {
             <div className="live-grid">
               <div className="live-stage">
                 <StageCard
+                  otherLive={otherLive}
+                  onRunChange={setRunParam}
                   run={run}
                   phase={phase}
                   compact={!wide}

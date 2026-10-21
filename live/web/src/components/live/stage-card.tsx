@@ -2,6 +2,7 @@ import { useId, useRef, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { Orb } from "@/components/aicss/Orb";
 import { ActivityOrb, type ActivityOrbProps, type OrbMode } from "@/components/live/activity-orb";
+import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatClock, useI18n, type Messages } from "@/i18n";
@@ -10,6 +11,7 @@ import { useElementSize } from "@/hooks/use-element-size";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { DASH, formatElapsed, formatMs, formatRtf } from "@/lib/format";
 import { type DisplayPhase, type LatencyStats, type RunState } from "@/lib/live-state";
+import type { RunSummary } from "@/lib/live-types";
 import { deviceText, languageText } from "@/lib/live-view";
 import { useSpeakerName } from "@/lib/speaker-names";
 import { cn } from "@/lib/utils";
@@ -44,6 +46,9 @@ export interface StageCardProps {
   lastUpdateT?: number | null;
   /** A picked run whose snapshot has not arrived yet: the phase row reads "Loading…", not "Listening for a run…". */
   loading?: boolean;
+  /** Easy view on a phone: the other live run's switch sits under the status sentence (the header has no room). */
+  otherLive?: RunSummary | null;
+  onRunChange?: (runId: string) => void;
 }
 
 export function StageCard({
@@ -63,6 +68,8 @@ export function StageCard({
   frozen = false,
   lastUpdateT = null,
   loading = false,
+  otherLive = null,
+  onRunChange,
 }: StageCardProps) {
   const { t, locale } = useI18n();
   const s = t.stage;
@@ -112,6 +119,50 @@ export function StageCard({
   // Easy view: wider screens show the primary tiles and fold the rest behind "Show details". Phones fold every tile.
   const easyGrid: Stat[] = phone ? [] : stats.filter((stat) => !stat.secondary && !stat.hiddenInEasy);
   const easyFolded: Stat[] = phone ? stats.filter((stat) => !stat.hiddenInEasy) : stats.filter((stat) => stat.secondary);
+  // Easy phone: the other-live switch and the "Show details" toggle share one row under the sentence, and an ended run
+  // drops its progress bar (the status sentence already says how it ended).
+  const phoneEasy = easy && phone;
+  const ended = phase === "finished" || phase === "error" || phase === "canceled";
+  const otherLiveButton =
+    compact && otherLive ? (
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        data-testid="other-live-run"
+        onClick={() => onRunChange?.(otherLive.run_id)}
+        className={cn(
+          "h-auto min-h-12 rounded-full bg-raised py-2 text-[15px] text-foreground shadow-ring hover:bg-raised dark:bg-raised dark:hover:bg-raised",
+          phoneEasy ? "min-w-0 flex-auto shrink px-2" : "w-full px-3",
+        )}
+      >
+        <span
+          aria-hidden="true"
+          className={cn("size-1.5 shrink-0 animate-pulse rounded-full bg-foreground", phoneEasy && "hidden")}
+        />
+        <span>{t.topbar.otherLiveShort}</span>
+      </Button>
+    ) : null;
+  const moreButton = (
+    <button
+      type="button"
+      data-testid="easy-more"
+      aria-expanded={moreOpen}
+      aria-controls={moreId}
+      onClick={() => setMoreOpen((open) => !open)}
+      className={cn(
+        "flex items-center justify-center gap-1.5 rounded-[12px] text-[17px] font-medium text-foreground shadow-ring hover:bg-raised",
+        phoneEasy ? "min-h-12 min-w-0 flex-auto shrink px-1.5" : "w-full px-3",
+      )}
+    >
+      {t.easy.moreInfo}
+      {/* Easy phone: the row is one line only without the chevron; aria-expanded still carries the state. */}
+      <ChevronDown
+        aria-hidden="true"
+        className={cn("size-4 shrink-0 transition-transform", moreOpen && "rotate-180", phoneEasy && "hidden")}
+      />
+    </button>
+  );
 
   // A frozen run stops its spinner: the pill's CSS animations are paused on their current frame.
   const phaseRowClass = cn(
@@ -131,12 +182,22 @@ export function StageCard({
     >
       {/* Easy view: no orb. The status sentence leads the card on every width. */}
       {easy ? (
+        <>
         <p
           data-testid="easy-status-sentence"
           className="text-center text-[22px] leading-snug font-medium break-words text-foreground"
         >
           {easySentence(s, run, phase, frozen, pctValue)}
         </p>
+        {phoneEasy ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {otherLiveButton}
+            {moreButton}
+          </div>
+        ) : (
+          otherLiveButton
+        )}
+        </>
       ) : phone ? (
         <div className="flex min-w-0 items-center gap-2.5 text-[13px]" data-testid="stage-summary">
           <ActivityOrb
@@ -185,7 +246,7 @@ export function StageCard({
         </div>
       )}
 
-      <div>
+      <div className={cn(phoneEasy && ended && "hidden")}>
         <Progress value={pctValue} live={liveRun} className="h-[2px]! bg-hairline!" aria-label={s.progressLabel} />
         {/* The progress line never repeats the phase name: the row above already names it. */}
         <div className="mt-2 flex h-5 items-baseline justify-between gap-3 text-[12px] tabular-nums">
@@ -202,26 +263,21 @@ export function StageCard({
       </p>
 
       {/* A plain grid, never a horizontal scroller: the stat tiles are read-only and are not tab stops. */}
-      <div id={statsId} className={cn("grid grid-cols-2 gap-1.5", phone && !easy && !statsOpen && "hidden")}>
+      <div
+        id={statsId}
+        className={cn(
+          "grid grid-cols-2 gap-1.5",
+          phone && !easy && !statsOpen && "hidden",
+          // Easy phone: the toggle sits in the row under the sentence, so this grid holds only the details, when open.
+          phoneEasy && !moreOpen && "hidden",
+        )}
+      >
         {(easy ? easyGrid : stats).map((stat) => (
           <StatTile key={stat.label} label={stat.label} value={stat.value} hint={stat.hint} />
         ))}
         {easy ? (
           <div className="col-span-2 flex flex-col gap-1.5">
-            <button
-              type="button"
-              data-testid="easy-more"
-              aria-expanded={moreOpen}
-              aria-controls={moreId}
-              onClick={() => setMoreOpen((open) => !open)}
-              className="flex w-full items-center justify-center gap-1.5 rounded-[12px] px-3 text-[17px] font-medium text-foreground shadow-ring hover:bg-raised"
-            >
-              {t.easy.moreInfo}
-              <ChevronDown
-                aria-hidden="true"
-                className={cn("size-4 shrink-0 transition-transform", moreOpen && "rotate-180")}
-              />
-            </button>
+            {phone ? null : moreButton}
             <div id={moreId} hidden={!moreOpen} className="grid grid-cols-2 gap-1.5">
               {easyFolded.map((stat) => (
                 <StatTile key={stat.label} label={stat.label} value={stat.value} hint={stat.hint} />
