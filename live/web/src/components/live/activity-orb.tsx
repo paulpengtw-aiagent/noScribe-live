@@ -73,6 +73,7 @@ export function ActivityOrb({
     <canvas
       ref={canvasRef}
       role="img"
+      data-testid="activity-orb"
       aria-label={label ?? t.stage.orbAria[mode]}
       data-frozen={frozen ? "true" : undefined}
       className={cn("block shrink-0", className)}

@@ -19,7 +19,7 @@ Contract checked (the UI side is being implemented): localStorage noscribe-live-
 from the first browser language; html lang en | zh-Hant-TW; [data-testid=locale-toggle]; conn-state
 connecting -> live -> reconnecting -> live; stage-card data-frozen; last-update; conn-banner overlay that
 does not move transcript-scroll; new-run-notice that does not overlap the timeline card; a visible focus ring
-on transcript-scroll; mobile first paragraph top <= 400 px and timeline hit areas >= 24 px.
+on transcript-scroll; mobile first paragraph top <= 400 px and the timeline-hit layer >= 24 px tall and mouse clicks on blocks 0, 1 and the last one.
 """
 
 from __future__ import annotations
@@ -84,13 +84,9 @@ CHROME_JS = """() => {
   return { header: pick(document.querySelector('header')), stage: pick(document.querySelector('[data-testid="stage-card"]')),
            timeline: pick(tl), banner: pick(document.querySelector('[data-testid="conn-banner"]')),
            picker: pick(document.querySelector('[data-testid="run-picker"]')) }; }"""
-# Per timeline block: the hit layer is the ::before pseudo-element. Pass when max(own width, ::before width) >= 24 px.
-HIT_JS = """() => Array.from(document.querySelectorAll('[data-timeline-index]')).map((el) => {
-  const visual = el.getBoundingClientRect().width;
-  const before = parseFloat(getComputedStyle(el, '::before').width) || 0;
-  const hit = Math.max(visual, before);
-  return { index: el.getAttribute('data-timeline-index'), visual: Math.round(visual * 10) / 10,
-           before: Math.round(before * 10) / 10, hit: Math.round(hit * 10) / 10, ok: hit >= 24 }; })"""
+# Timeline block indices in DOM order (block index == segment index).
+INDEX_JS = """() => Array.from(document.querySelectorAll('[data-timeline-index]'))
+  .map((el) => Number(el.getAttribute('data-timeline-index')))"""
 
 
 def open_ctx(browser: Any, locale: str, viewport: dict[str, int] | None = None,
@@ -227,14 +223,21 @@ def mobile_body(h: ux.Harness, browser: Any, port: int, expected: int) -> None:
         top = page.evaluate(FIRST_PARA_JS)
         h.check("mobile 390x844: first paragraph top <= 400 px on a finished run",
                 top is not None and top <= 400, f"top {top}")
-        blocks = page.evaluate(HIT_JS) or []
-        bad = [b for b in blocks if not b["ok"]]
-        visuals = [b["visual"] for b in blocks]
-        hits = [b["hit"] for b in blocks]
-        h.check("mobile 390x844: every timeline block has a >= 24 px hit area (max of own width and ::before width)",
-                bool(blocks) and not bad,
-                f"{len(blocks)} blocks, {len(bad)} below 24 px {bad[:3]}; visual width min {min(visuals, default=None)} px, "
-                f"hit min {min(hits, default=None)} px")
+        hit = page.locator('[data-testid="timeline-hit"]')
+        hit_box = hit.first.bounding_box(timeout=5000) if hit.count() else None
+        h.check("mobile 390x844: timeline-hit layer exists with height >= 24 px",
+                hit_box is not None and hit_box["height"] >= 24, f"hit layer box {hit_box}")
+        indices = page.evaluate(INDEX_JS) or []
+        last = max(indices, default=-1)
+        for idx in sorted({0, 1, last}):
+            if idx not in indices:
+                h.check(f"mobile 390x844: timeline block {idx} exists", False, f"block indices {indices[:5]}")
+                continue
+            ux.click_block(page, idx)
+            sel = f'[data-segment-index="{idx}"][data-active="true"]'
+            active = ux.wait_until(lambda s=sel: page.locator(s).count() > 0, 3, 0.1)
+            h.check(f"mobile 390x844: mouse click at the centre of timeline block {idx} activates segment {idx}",
+                    bool(active), f"{sel} count {page.locator(sel).count()}")
         h.shot(page, "i18n-mobile-390.png")
     finally:
         ctx.close()

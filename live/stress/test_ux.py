@@ -286,6 +286,23 @@ def highlighted(page: Any, idx: int) -> bool:
     return attr_of(page, sel, "data-active") == "true" or attr_of(page, sel, "data-hovered") == "true"
 
 
+# Timeline clicks: the timeline has one hit layer ([data-testid="timeline-hit"]) that maps the pointer x to the
+# nearest segment; the per-block [data-timeline-index] buttons are pointer-events-none, so a block is clicked at
+# its bounding-box centre with a real mouse click.
+def block_centre(page: Any, idx: int) -> tuple[float, float]:
+    loc = page.locator(f'[data-timeline-index="{idx}"]').first
+    loc.scroll_into_view_if_needed(timeout=5000)
+    box = loc.bounding_box(timeout=5000)
+    if box is None:
+        raise RuntimeError(f"timeline block {idx} has no bounding box")
+    return box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+
+
+def click_block(page: Any, idx: int) -> None:
+    x, y = block_centre(page, idx)
+    page.mouse.click(x, y)
+
+
 def open_picker(page: Any) -> None:
     if not page.locator('[data-testid="run-option"]').first.is_visible():
         page.locator('[data-testid="run-picker"]').click(timeout=5000)
@@ -517,7 +534,7 @@ def stick_body(h: Harness, page: Any, path: Path, run_id: str) -> None:
             f"following {m.get('following')!r}, scrollTop+clientHeight {m.get('top', 0) + m.get('client', 0)}, "
             f"scrollHeight-10 {m.get('height', 0) - 10}")
 
-    page.locator('[data-timeline-index="2"]').first.click(timeout=5000)
+    click_block(page, 2)
     detached = wait_until(lambda: following(page) == "false", 2, 0.05)
     in_view = wait_until(lambda: page.evaluate(IN_VIEW_JS, 2), 2, 0.1)
     seg_active = attr_of(page, '[data-segment-index="2"]', "data-active")
@@ -926,7 +943,7 @@ def linking_body(h: Harness, page: Any) -> None:
     h.check("para linking: hovering text segment 4 highlights timeline block 4",
             bool(hl), f"timeline 4 data-active {attr_of(page, tl4, 'data-active')!r}, "
                       f"data-hovered {attr_of(page, tl4, 'data-hovered')!r}")
-    page.locator('[data-timeline-index="5"]').first.click(timeout=5000)
+    click_block(page, 5)
     seg5_sel = '[data-segment-index="5"]'
     seg5 = wait_until(lambda: attr_of(page, seg5_sel, "data-active") == "true", 2, 0.05)
     h.check("para linking: clicking timeline block 5 activates text segment 5",

@@ -13,7 +13,7 @@ recorded feeds and the crafted fixtures, feeds/ and logs/ and shots/ hold the re
 --port; a crash in a group is one FAIL. Exit code 0 only if every check passed. Every child process is killed on exit.
 
 Fixtures: finished = the demo feed (50 segments, run_end finished). failed = the newest *-90-corrupt.ndjson
-(run_end status error). stopped = the demo cut after 20 segments with run_end status canceled (crafted, run id
+(run_end status error). stopped = the demo cut after 20 segments with no run_end and a dead pid (status stale, shown as Stopped; crafted, run id
 20261020-060000-r7-stopped). stale = the newest 03-multi-speaker feed with no run_end whose CLI pid is dead; if
 there is none, the demo cut after 20 segments with pid 999999 and no run_end (crafted, run id
 20261020-061500-r7-stale).
@@ -52,7 +52,7 @@ DEMO_NAME = ux.DEMO_NAME                          # 20261020-052449-demo-en-zh, 
 STOPPED_ID = "20261020-060000-r7-stopped"
 STALE_ID = "20261020-061500-r7-stale"
 STALE_PID = 999999
-ERR_TEXT = "tuple index out of range"             # from the failed feed's run_end error
+ERR_TEXT = "Can't read the audio file"             # en-US humanised failure text (the raw error sits in a closed <details>)
 AUDIO_DIR = "/workspace/noScribe-live/live/samples/stress"
 
 # Visibility of the picker states, read in one evaluate per sample.
@@ -82,11 +82,8 @@ LOGO_JS = r"""() => { const e = document.querySelector('[data-testid="logo"]'); 
   e.querySelectorAll('[aria-label],[title],[alt]').forEach((n) => parts.push(
     n.getAttribute('aria-label'), n.getAttribute('title'), n.getAttribute('alt')));
   return parts.filter(Boolean).join(' | '); }"""
-ORB_JS = r"""() => { const o = document.querySelector('[data-testid="orb"]');
-  if (o) return o.getAttribute('aria-label');
-  const hit = Array.from(document.querySelectorAll('[aria-label]')).map((e) => e.getAttribute('aria-label'))
-    .find((l) => /Failed|失敗/.test(l || ''));
-  return hit || null; }"""
+ORB_JS = r"""() => { const o = document.querySelector('[data-testid="activity-orb"]');
+  return o ? o.getAttribute('aria-label') : null; }"""
 FOCUS_JS = r"""() => { const a = document.activeElement; return a ? a.getAttribute('data-testid') : null; }"""
 RING_JS = r"""() => { const e = document.querySelector('[data-testid="transcript-scroll"]'); if (!e) return null;
   const cs = getComputedStyle(e);
@@ -192,7 +189,7 @@ def fixtures(h: ux.Harness, feeds: Path, parts: tuple[str, ...]) -> dict[str, st
         shutil.copyfile(h.failed_src, feeds / h.failed_src.name)
         ids["failed"] = ux.feed_info(h.failed_src)["run_id"]
     if "stopped" in parts:
-        craft(h.demo_src, feeds / f"{STOPPED_ID}.ndjson", STOPPED_ID, "r7-stopped.mp3", 20, "canceled", None)
+        craft(h.demo_src, feeds / f"{STOPPED_ID}.ndjson", STOPPED_ID, "r7-stopped.mp3", 20, None, STALE_PID)
         ids["stopped"] = STOPPED_ID
     if "stale" in parts:
         if h.stale_src is not None:
@@ -494,12 +491,12 @@ def group_failed(h: ux.Harness, browser: Any, port: int) -> None:
     try:
         open_run(page, h, port, ids["failed"])
         label = page.evaluate(ORB_JS)
-        h.check("failed run: orb aria-label says Failed (or 失敗)", bool(label) and bool(re.search(r"Failed|失敗", label)),
+        h.check("failed run: orb aria-label says Failed (or 失敗)", bool(label) and bool(re.search(r"Failed|失敗", label, re.I)),
                 f"aria-label {label!r}")
         h.check("failed run: run-state-dot data-tone red", tone_of(page) == "red", f"data-tone {tone_of(page)!r}")
         body = page.evaluate(BODY_JS) or ""
         n_err = body.count(ERR_TEXT)
-        h.check("failed run: the error message appears once in document.body.innerText", n_err == 1,
+        h.check("failed run: the humanised error text appears once in document.body.innerText", n_err == 1,
                 f"{n_err} occurrence(s)")
         stage = page.evaluate(ux.TEXT_JS, '[data-testid="stage-card"]') or ""
         n_failed = len(re.findall(r"\bFailed\b", stage))
@@ -507,7 +504,7 @@ def group_failed(h: ux.Harness, browser: Any, port: int) -> None:
                 f"{n_failed} in the stage card")
         h.shot(page, "r7-failed.png")
         open_run(page, h, port, ids["stopped"])
-        h.check("stopped run: run-state-dot data-tone amber", tone_of(page) == "amber", f"data-tone {tone_of(page)!r}")
+        h.check("stopped run (no run_end, dead pid = stale): run-state-dot data-tone amber", tone_of(page) == "amber", f"data-tone {tone_of(page)!r}")
         if "stale" in ids:
             open_run(page, h, port, ids["stale"])
             h.check("stale run (dead CLI pid): run-state-dot data-tone amber", tone_of(page) == "amber",

@@ -106,7 +106,7 @@ export function TopBar({
     <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center border-b border-hairline bg-background/80 backdrop-blur-xl">
       <div className="flex w-full min-w-0 items-center justify-between gap-3 px-4 min-[1100px]:px-6">
         <div className="flex min-w-0 items-center gap-2.5">
-          <span aria-hidden="true" className="flex shrink-0 max-sm:size-7 max-sm:items-center max-sm:justify-center">
+          <span aria-hidden="true" data-testid="logo" className="flex shrink-0 max-sm:size-7 max-sm:items-center max-sm:justify-center">
             <Orb variant="G1" size={18} label={t.topbar.processing} />
           </span>
           <span className="min-w-0 truncate text-[15px] font-medium tracking-[-0.01em] max-sm:sr-only">
