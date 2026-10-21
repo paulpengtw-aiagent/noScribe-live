@@ -154,24 +154,22 @@ def configure(page: Any, base: str, key: str, model: str, remember: bool = False
 
 
 def click_test(page: Any) -> None:
-    """Clicks the settings dialog's test button, opening the dialog first when it is closed. The dialog animates in,
-    so the button can be moving or re-mounted for a moment: let the animation settle, then click with a fresh locator
-    on each attempt, and fall back to a DOM click last."""
-    if not page.is_visible(T("llm-test")):
-        page.click(T("llm-settings-open"))
-        page.wait_for_selector(T("llm-test"), state="visible", timeout=15000)
-    page.wait_for_timeout(500)
+    """Clicks the settings dialog's test button, reopening the dialog first when it is closed.
+    The dialog animates open and closed: wait for that to settle, then up to four attempts, each with a fresh
+    locator and a bounded click."""
+    page.wait_for_timeout(700)  # let any open/close animation finish before reading visibility
     last: Exception | None = None
-    for attempt in range(4):
+    for _ in range(4):
         try:
-            if attempt < 3:
-                page.locator(T("llm-test")).click(timeout=4000)
-            else:
-                page.locator(T("llm-test")).evaluate("el => el.click()")
+            if not page.locator(T("llm-test")).is_visible():
+                page.click(T("llm-settings-open"))
+                page.wait_for_selector(T("llm-test"), state="visible", timeout=10000)
+                page.wait_for_timeout(500)
+            page.locator(T("llm-test")).click(timeout=4000)
             return
-        except Exception as exc:  # not stable or detached: retry with a fresh locator
+        except Exception as exc:  # detached, unstable or not yet open: retry with a fresh locator
             last = exc
-            page.wait_for_timeout(400)
+            page.wait_for_timeout(500)
     raise RuntimeError(f"could not click llm-test: {last!r}")
 
 
@@ -413,20 +411,21 @@ def group_cors(h: Any, browser: Any) -> None:
         open_run(page, h.port, st.run_id)
         configure(page, st.base, "sk-llm-test-COR-6666", "mock")
         click_test(page)
-        cors = page.locator(f'{T("llm-error")}[data-kind="cors"]')
-        seen = ux.wait_until(lambda: cors.count() > 0 and cors.first.is_visible(), 25, 0.3)
-        h.check("cors: a mock without CORS headers shows llm-error[data-kind=cors]", bool(seen),
-                f"cors error elements {cors.count()}")
+        cors = page.locator('[data-testid="llm-test-result"][data-ok="false"][data-kind="cors"]')
+        seen = ux.wait_until(lambda: cors.count() > 0, 25, 0.3)
+        h.check("cors: test connection against a mock without CORS headers reports kind=cors (llm-test-result)",
+                bool(seen), f"cors error elements {cors.count()}")
         h.shot(page, "cors-error.png")
         # The same failure from a correction run. Reload first, so the settings test result is gone and only the
         # run's error can match; the saved settings survive the reload.
         page.reload(wait_until="domcontentloaded", timeout=30000)
         page.wait_for_selector(T("llm-open"), timeout=30000)
         open_panel(page)
+        run_cors = page.locator('[data-testid="llm-error"][data-kind="cors"]')
         try:
             page.click(T("llm-run"), timeout=10000)
-            run_seen = ux.wait_until(lambda: cors.count() > 0 and cors.first.is_visible(), 30, 0.3)
-            run_detail = f"cors error elements {cors.count()}"
+            run_seen = ux.wait_until(lambda: run_cors.count() > 0 and run_cors.first.is_visible(), 30, 0.3)
+            run_detail = f"cors error elements {run_cors.count()}"
         except Exception as exc:  # the run could not start: a failed check, not a crash of the group
             run_seen, run_detail = False, f"run not started: {exc!r}"[:200]
         h.check("cors: a correction run shows llm-error[data-kind=cors] too", bool(run_seen), run_detail)

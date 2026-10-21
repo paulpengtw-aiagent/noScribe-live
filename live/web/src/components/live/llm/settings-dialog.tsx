@@ -261,6 +261,7 @@ function SettingsForm({ onDone }: { onDone: () => void }) {
           <p
             data-testid="llm-test-result"
             data-ok={result.ok ? "true" : "false"}
+            data-kind={result.ok ? undefined : result.error.kind}
             role="status"
             className={cn(
               "text-sm",
