@@ -15,12 +15,15 @@ const en = {
   processing: "Processing…",
   /** Icon menu (compact header) that holds the theme and language switches. */
   menuLabel: "Theme and language",
-  runStatus: { running: "Live", finished: "Finished", error: "Failed", canceled: "Canceled", stale: "Stopped" },
+  /** Run state words. "loading" is a running run with no segment yet. */
+  runStatus: { running: "Live", loading: "Loading", finished: "Finished", error: "Failed", canceled: "Canceled", stale: "Stopped" },
   runDisconnected: "Disconnected",
   connConnected: "Connected",
   connConnecting: "Connecting…",
   connReconnecting: "Reconnecting…",
   otherLive: "Another transcription is running → Switch",
+  /** The same switch on the Easy phone header, short enough to keep the header to one row. */
+  otherLiveShort: "Live run → Switch",
   clockOf: (transcribed: string, duration: string) => `${transcribed} of ${duration}`,
   latency: {
     noSamples:
@@ -42,18 +45,19 @@ const zhTW: TopbarMessages = {
   switchTheme: { light: "切換為淺色主題", dark: "切換為深色主題" },
   processing: "處理中…",
   menuLabel: "主題與語言",
-  runStatus: { running: "進行中", finished: "已完成", error: "失敗", canceled: "已取消", stale: "已停止" },
+  runStatus: { running: "即時", loading: "載入中", finished: "已完成", error: "失敗", canceled: "已取消", stale: "意外停止" },
   runDisconnected: "連線中斷",
   connConnected: "已連線",
   connConnecting: "連線中…",
   connReconnecting: "重新連線中…",
   otherLive: "另一個轉錄正在進行 → 切換",
+  otherLiveShort: "有新轉錄 → 切換",
   clockOf: (transcribed: string, duration: string) => `${transcribed} / ${duration}`,
   latency: {
-    noSamples: "從 CLI 完成一段到它出現在這裡的時間。以本頁開啟期間收到的段落測量。",
+    noSamples: "從 CLI 完成一段到它出現在這裡的時間。以本頁開啟期間收到的各段測量。",
     stats: (last: string, median: string, split: string) =>
       `從 CLI 完成一段到它出現在這裡的時間。最近 ${last} · 中位數 ${median}${split}。`,
-    split: (tail: string, push: string) => `（尾端 ${tail} + 推送 ${push}）`,
+    split: (tail: string, push: string) => `（尾端 ${tail} + 推播 ${push}）`,
   },
 };
 

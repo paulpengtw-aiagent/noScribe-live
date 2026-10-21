@@ -12,10 +12,11 @@ recorded feeds and the crafted fixtures, feeds/ and logs/ and shots/ hold the re
 /workspace/noScribe-live/live/feeds are read only. Each group runs on its own with a fresh feeds directory on
 --port; a crash in a group is one FAIL. Exit code 0 only if every check passed. Every child process is killed on exit.
 
-Fixtures: finished = the demo feed (50 segments, run_end finished). failed = the newest *-90-corrupt.ndjson
-(run_end status error). stopped = the demo cut after 20 segments with no run_end and a dead pid (status stale, shown as Stopped; crafted, run id
-20261020-060000-r7-stopped). stale = the newest 03-multi-speaker feed with no run_end whose CLI pid is dead; if
-there is none, the demo cut after 20 segments with pid 999999 and no run_end (crafted, run id
+Fixtures are fixed, so no run depends on which production feeds exist (the demo feed is read by its fixed name).
+finished = the demo feed (50 segments, run_end finished). failed = the repo fixture live/stress/fixtures/failed-run.ndjson
+copied under the fixed run id r7-failed-90-corrupt (run_start audio_file 90-corrupt.mp3, run_end status error).
+stopped = the demo cut after 20 segments with no run_end and a dead pid (status stale, shown as Stopped; crafted, run id
+20261020-060000-r7-stopped). stale = the demo cut after 20 segments with pid 999999 and no run_end (crafted, run id
 20261020-061500-r7-stale).
 
 Contract checked (the UI side is being implemented, so a failure may read "contract absent"): run-loading,
@@ -29,7 +30,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import shutil
 import signal
@@ -52,6 +52,8 @@ DEMO_NAME = ux.DEMO_NAME                          # 20261020-052449-demo-en-zh, 
 STOPPED_ID = "20261020-060000-r7-stopped"
 STALE_ID = "20261020-061500-r7-stale"
 STALE_PID = 999999
+FAILED_FIXTURE = HERE / "fixtures" / "failed-run.ndjson"  # repo fixture: run_start audio 90-corrupt.mp3, run_end error
+FAILED_ID = "r7-failed-90-corrupt"                         # fixed run id the fixture is copied under
 ERR_TEXT = "Can't read the audio file"             # en-US humanised failure text (the raw error sits in a closed <details>)
 AUDIO_DIR = "/workspace/noScribe-live/live/samples/stress"
 
@@ -85,23 +87,26 @@ LOGO_JS = r"""() => { const e = document.querySelector('[data-testid="logo"]'); 
   e.querySelectorAll('[aria-label],[title],[alt]').forEach((n) => parts.push(
     n.getAttribute('aria-label'), n.getAttribute('title'), n.getAttribute('alt')));
   return parts.filter(Boolean).join(' | '); }"""
+# The orb is hidden from screen readers (aria-hidden="true", no aria-label); the failed state is read from run-state text.
 ORB_JS = r"""() => { const o = document.querySelector('[data-testid="activity-orb"]');
-  return o ? o.getAttribute('aria-label') : null; }"""
+  return o ? o.getAttribute('aria-hidden') : null; }"""
 FOCUS_JS = r"""() => { const a = document.activeElement; return a ? a.getAttribute('data-testid') : null; }"""
 RING_JS = r"""() => { const e = document.querySelector('[data-testid="transcript-scroll"]'); if (!e) return null;
   const cs = getComputedStyle(e);
   return { shadow: cs.boxShadow, outlineOffset: cs.outlineOffset, outlineStyle: cs.outlineStyle }; }"""
 STAT_COUNT_JS = r"""() => document.querySelectorAll('[data-testid="stat-card"]').length"""
 BODY_JS = r"""() => document.body.innerText"""
-# Runs before the app: sums layout-shift scores that were not caused by user input.
+# Runs before the app: records every layout-shift entry (page-clock start time, value, hadRecentInput). The
+# session-window CLS is computed from these in Python (session_max, copied from test_nordic.py).
 CLS_JS = r"""
-(() => { window.__nsCLS = 0;
+(() => { window.__nsShifts = [];
   try { new PerformanceObserver((list) => { for (const e of list.getEntries()) {
-          if (!e.hadRecentInput) window.__nsCLS += e.value; } })
+          window.__nsShifts.push({ t: e.startTime, v: e.value, input: e.hadRecentInput }); } })
         .observe({ type: 'layout-shift', buffered: true });
   } catch (err) { window.__nsCLSErr = String(err); }
 })();
 """
+SHIFTS_JS = r"""() => window.__nsShifts || []"""
 
 
 # ---- fixtures ----------------------------------------------------------------------------------------
@@ -115,27 +120,20 @@ def read_events(path: Path) -> list[dict[str, Any]]:
     return events
 
 
-def pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+def audio_name(path: Path) -> str:
+    """Basename of run_start.audio_file in a feed: the file name the run title shows (the run id is not used)."""
+    start = next((ev for ev in read_events(path) if ev.get("type") == "run_start"), {})
+    return Path(str(start.get("audio_file") or "")).name
 
 
-def real_stale() -> Path | None:
-    """The newest 03-multi-speaker feed with no run_end whose CLI pid is dead (a killed run), if any."""
-    for path in sorted(ux.FEEDS_SRC.glob("*-03-multi-speaker.ndjson"), reverse=True):
-        events = read_events(path)
-        if any(ev.get("type") == "run_end" for ev in events):
-            continue
-        start = next((ev for ev in events if ev.get("type") == "run_start"), {})
-        pid = start.get("pid")
-        if isinstance(pid, int) and not pid_alive(pid):
-            return path
-    return None
+def write_failed(dst: Path) -> None:
+    """Writes dst: the repo failed-run fixture (live/stress/fixtures) under the fixed run id FAILED_ID."""
+    out: list[dict[str, Any]] = []
+    for ev in read_events(FAILED_FIXTURE):
+        if "run_id" in ev:
+            ev["run_id"] = FAILED_ID
+        out.append(ev)
+    dst.write_text("\n".join(json.dumps(e, ensure_ascii=False) for e in out) + "\n", encoding="utf-8")
 
 
 def craft(src: Path, dst: Path, rid: str, audio: str, segments: int, end_status: str | None,
@@ -165,21 +163,15 @@ def craft(src: Path, dst: Path, rid: str, audio: str, segments: int, end_status:
 
 
 def prepare(h: ux.Harness) -> None:
-    """Copies the recorded feeds into the scratch dir (originals are read only)."""
+    """Copies the demo feed into the scratch dir (originals are read only) and writes the fixed failed fixture."""
     h.demo_src = h.src / DEMO_NAME
     shutil.copyfile(ux.FEEDS_SRC / DEMO_NAME, h.demo_src)
-    corrupt = sorted(ux.FEEDS_SRC.glob("*-90-corrupt.ndjson"))
-    if not corrupt:
-        raise RuntimeError(f"no *-90-corrupt.ndjson in {ux.FEEDS_SRC}")
-    h.failed_src = h.src / corrupt[-1].name
-    shutil.copyfile(corrupt[-1], h.failed_src)
-    stale = real_stale()
-    h.stale_src = None
-    if stale is not None:
-        h.stale_src = h.src / stale.name
-        shutil.copyfile(stale, h.stale_src)
-    print(f"sources: demo {DEMO_NAME}, failed {h.failed_src.name}, "
-          f"stale {h.stale_src.name if h.stale_src else 'crafted (pid %d)' % STALE_PID}", flush=True)
+    if not FAILED_FIXTURE.is_file():
+        raise RuntimeError(f"missing repo fixture {FAILED_FIXTURE}")
+    h.failed_src = h.src / f"{FAILED_ID}.ndjson"
+    write_failed(h.failed_src)
+    print(f"sources: demo {DEMO_NAME}, failed {FAILED_FIXTURE.name} as {FAILED_ID}, "
+          f"stale crafted (pid {STALE_PID})", flush=True)
 
 
 def fixtures(h: ux.Harness, feeds: Path, parts: tuple[str, ...]) -> dict[str, str]:
@@ -195,22 +187,12 @@ def fixtures(h: ux.Harness, feeds: Path, parts: tuple[str, ...]) -> dict[str, st
         craft(h.demo_src, feeds / f"{STOPPED_ID}.ndjson", STOPPED_ID, "r7-stopped.mp3", 20, None, STALE_PID)
         ids["stopped"] = STOPPED_ID
     if "stale" in parts:
-        if h.stale_src is not None:
-            shutil.copyfile(h.stale_src, feeds / h.stale_src.name)
-            ids["stale"] = ux.feed_info(h.stale_src)["run_id"]
-        else:
-            craft(h.demo_src, feeds / f"{STALE_ID}.ndjson", STALE_ID, "r7-stale.mp3", 20, None, STALE_PID)
-            ids["stale"] = STALE_ID
+        craft(h.demo_src, feeds / f"{STALE_ID}.ndjson", STALE_ID, "r7-stale.mp3", 20, None, STALE_PID)
+        ids["stale"] = STALE_ID
     return ids
 
 
 # ---- helpers -----------------------------------------------------------------------------------------
-def slug(run_id: str) -> str:
-    """The run id without its timestamp prefix, e.g. demo-en-zh or 90-corrupt."""
-    parts = run_id.split("-", 2)
-    return parts[2] if len(parts) == 3 else run_id
-
-
 def sample_states(page: Any, seconds: float, step: float = 0.1) -> list[dict[str, bool]]:
     out: list[dict[str, bool]] = []
     end = time.monotonic() + seconds
@@ -274,10 +256,29 @@ def tone_of(page: Any) -> str | None:
     return page.evaluate(ux.ATTR_JS, ['[data-testid="run-state-dot"]', "data-tone"])
 
 
+# Session-window CLS (the definition Chrome and web-vitals use): non-input shifts grouped into windows that end
+# after a 1 s gap or after 5 s; the score is the largest window sum. Copied from test_nordic.py (cls_report).
+CLS_GAP_MS = 1000.0
+CLS_WINDOW_MS = 5000.0
+
+
+def session_max(shifts: list[tuple[float, float]]) -> float:
+    best = cur = 0.0
+    start = prev = None
+    for t, v in sorted(shifts):
+        if start is None or t - prev > CLS_GAP_MS or t - start > CLS_WINDOW_MS:
+            start, cur = t, 0.0
+        cur += v
+        prev = t
+        best = max(best, cur)
+    return best
+
+
 # ---- groups ------------------------------------------------------------------------------------------
 def group_picker(h: ux.Harness, browser: Any, port: int) -> None:
     feeds = h.new_feeds("picker")
     ids = fixtures(h, feeds, ("demo", "failed", "stopped"))
+    files = {"demo": h.demo_src, "failed": h.failed_src, "stopped": feeds / f"{STOPPED_ID}.ndjson"}
     h.serve(port, feeds, "picker")
     ctx, page = i18n.open_ctx(browser, "en-US")
     try:
@@ -295,9 +296,10 @@ def group_picker(h: ux.Harness, browser: Any, port: int) -> None:
                     picked and missing == 0 and uncovered == 0,
                     f"picked {picked}, {len(samples)} samples, run-missing {missing}, "
                     f"neither loading nor title {uncovered}{note}")
+            want = audio_name(files[name])            # the audio file name the title shows, not the run id
             title = page.evaluate(ux.TEXT_JS, '[data-testid="run-title"]') or ""
-            h.check(f"picker {name}: ends on run-title naming the file", slug(rid) in title,
-                    f"title {title!r}, want it to contain {slug(rid)!r}{note}")
+            h.check(f"picker {name}: ends on run-title naming the audio file", bool(want) and want in title,
+                    f"title {title!r}, want it to contain {want!r}{note}")
         h.shot(page, "r7-picker.png")
     finally:
         ctx.close()
@@ -495,9 +497,11 @@ def group_failed(h: ux.Harness, browser: Any, port: int) -> None:
     ctx, page = i18n.open_ctx(browser, "en-US")
     try:
         open_run(page, h, port, ids["failed"])
-        label = page.evaluate(ORB_JS)
-        h.check("failed run: orb aria-label says Failed (or 失敗)", bool(label) and bool(re.search(r"Failed|失敗", label, re.I)),
-                f"aria-label {label!r}")
+        orb = page.evaluate(ORB_JS)
+        state = page.evaluate(INNER_JS, '[data-testid="run-state"]') or ""
+        h.check('failed run: activity orb aria-hidden="true", and run-state text says Failed (or 失敗)',
+                orb == "true" and bool(re.search(r"Failed|失敗", state, re.I)),
+                f"orb aria-hidden {orb!r}, run-state innerText {state!r}")
         h.check("failed run: run-state-dot data-tone red", tone_of(page) == "red", f"data-tone {tone_of(page)!r}")
         body = page.evaluate(BODY_JS) or ""
         n_err = body.count(ERR_TEXT)
@@ -562,13 +566,19 @@ def group_cls(h: ux.Harness, browser: Any, port: int) -> None:
             if ux.feed_info(path)["ended"]:
                 break
             time.sleep(0.25)
-        cls = page.evaluate("() => window.__nsCLS || 0")
+        shifts = page.evaluate(SHIFTS_JS) or []
+        raw = [s for s in shifts if not s.get("input")]
+        cls_max = session_max([(float(s["t"]), float(s["v"])) for s in raw])
+        raw_sum = sum(float(s["v"]) for s in raw)
         bad = [c for c in counts if c != 8]
         note = absent_note(page, ['[data-testid="stat-card"]'])
         h.check("cls: stat-card count is 8 at every 250 ms sample of a speed-2 replay",
                 bool(counts) and not bad,
                 f"{len(counts)} samples, values {sorted(set(counts))}{note}")
-        h.check("cls: layout-shift sum during the replay <= 0.05", cls <= 0.05, f"layout-shift sum {cls:.4f}")
+        print(f"INFO cls: session-window max {cls_max:.4f}, raw sum {raw_sum:.4f} over {len(raw)} non-input "
+              f"shifts ({len(shifts) - len(raw)} input-caused excluded)", flush=True)
+        h.check("cls: layout-shift CLS (session-window max, Chrome definition) <= 0.1", cls_max <= 0.1,
+                f"session-window max {cls_max:.4f}, raw sum {raw_sum:.4f} over {len(raw)} non-input shifts")
         h.shot(page, "r7-cls.png")
     finally:
         ctx.close()

@@ -2,12 +2,14 @@ import { lazy, Suspense, useSyncExternalStore } from "react";
 import { Moon, Sun } from "lucide-react";
 import { Orb } from "@/components/aicss/Orb";
 import { HeaderMenu } from "@/components/live/header-menu";
+import { EasyStatus, EasyToggle, type EasyStatusKind } from "@/components/live/easy-toggle";
 import { LocaleToggle } from "@/components/live/locale-toggle";
 import { Button } from "@/components/ui/button";
+import { useEasyView } from "@/hooks/use-easy-view";
 import type { Connection } from "@/hooks/use-live-feed";
 import type { Theme } from "@/hooks/use-theme";
 import { useI18n } from "@/i18n";
-import type { RunState } from "@/lib/live-state";
+import { displayPhase, type RunState } from "@/lib/live-state";
 import { runStateBadge } from "@/lib/live-view";
 import type { RunSummary } from "@/lib/live-types";
 import { cn } from "@/lib/utils";
@@ -35,14 +37,16 @@ function useCompactHeader(): boolean {
   );
 }
 
-/** Status dot colours, the same as the run picker's: failed red, stopped amber, live green, the rest neutral. */
-type Tone = "red" | "amber" | "green" | "neutral";
+/** Status colours, the same as the run picker's: failed red, stopped orange, live green, loading yellow, else neutral. */
+type Tone = "red" | "amber" | "green" | "yellow" | "neutral";
 
-const TONE_DOT: Record<Tone, string> = {
-  red: "bg-red-500",
-  amber: "bg-amber-500",
-  green: "bg-emerald-500",
-  neutral: "bg-foreground/60",
+/** Icon glyph per tone; the glyph and the word carry the state, so colour is never the only cue. */
+const TONE_TEXT: Record<Tone, string> = {
+  red: "text-status-failed-ink",
+  amber: "text-status-stopped-ink",
+  green: "text-status-live-ink",
+  yellow: "text-status-loading-ink",
+  neutral: "text-foreground",
 };
 
 export interface TopBarProps {
@@ -69,7 +73,10 @@ export function TopBar({
   onToggleTheme,
 }: TopBarProps) {
   const { t } = useI18n();
+  const { easy } = useEasyView();
   const compact = useCompactHeader();
+  // Easy view on a phone-width header: the header may wrap to two rows instead of overflowing.
+  const easyPhone = easy && compact;
   const badge = runStateBadge(run);
   const live = badge?.status === "running";
   // Only "live" counts as connected. Any other state (including the legacy "stale") reads as reconnecting.
@@ -78,12 +85,16 @@ export function TopBar({
   // connection text is kept for screen readers only. data-state keeps the raw link state either way.
   const feedDown = live && link !== "live";
   const cutOff = feedDown && link === "reconnecting";
+  // A running run with no segment yet (or still diarizing / loading the model) reads Loading, not Live.
+  const loading = live && displayPhase(run) !== "transcribing";
   const badgeText = badge
     ? feedDown
       ? cutOff
         ? t.topbar.runDisconnected
         : t.topbar.connConnecting
-      : t.topbar.runStatus[badge.status]
+      : loading
+        ? t.topbar.runStatus.loading
+        : t.topbar.runStatus[badge.status]
     : null;
   // A live run whose feed is cut off reads amber (connection trouble), whatever the run's own status.
   const tone: Tone = cutOff
@@ -93,8 +104,27 @@ export function TopBar({
       : badge?.status === "stale"
         ? "amber"
         : badge?.status === "running"
-          ? "green"
+          ? loading
+            ? "yellow"
+            : "green"
           : "neutral";
+  const GLYPH: Record<Tone, string> = { red: "✕", amber: cutOff ? "⟳" : "■", green: "●", yellow: "◐", neutral: badge?.status === "canceled" ? "○" : "✓" };
+  // Easy view names the run's state with an icon and a word (EasyStatus) instead of the run badge text.
+  const easyKind: EasyStatusKind | null = !badge
+    ? null
+    : feedDown
+      ? "reconnecting"
+      : badge.status === "running"
+        ? loading
+          ? "loading"
+          : "live"
+        : badge.status === "finished"
+          ? "finished"
+          : badge.status === "error"
+            ? "failed"
+            : badge.status === "canceled"
+              ? "canceled"
+              : "stopped";
   const connText =
     link === "live"
       ? t.topbar.connConnected
@@ -103,8 +133,18 @@ export function TopBar({
         : t.topbar.connReconnecting;
 
   return (
-    <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center border-b border-hairline bg-background/80 backdrop-blur-xl">
-      <div className="flex w-full min-w-0 items-center justify-between gap-3 px-4 min-[1100px]:px-6">
+    <header
+      className={cn(
+        "sticky top-0 z-40 flex shrink-0 items-center border-b border-hairline header-glass",
+        easyPhone ? "min-h-14 py-2" : "h-14",
+      )}
+    >
+      <div
+        className={cn(
+          "flex w-full min-w-0 items-center justify-between px-4 min-[1100px]:px-6",
+          easyPhone ? "flex-wrap gap-x-3 gap-y-2" : "gap-3",
+        )}
+      >
         <div className="flex min-w-0 items-center gap-2.5">
           <span aria-hidden="true" data-testid="logo" className="flex shrink-0 max-sm:size-7 max-sm:items-center max-sm:justify-center">
             <Orb variant="G1" size={18} label={t.topbar.processing} />
@@ -114,18 +154,23 @@ export function TopBar({
           </span>
         </div>
 
-        <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-initial sm:gap-4">
-          {otherLive && (
+        <div className={cn("flex min-w-0 flex-1 items-center gap-2 sm:flex-initial sm:gap-4", easyPhone && "flex-wrap justify-end")}>
+          {otherLive && !easyPhone && (
             <Button
               type="button"
               variant="ghost"
               size="sm"
               data-testid="other-live-run"
               onClick={() => onRunChange(otherLive.run_id)}
-              className="h-8 min-w-0 max-w-[120px] shrink rounded-full bg-raised px-3 text-[13px] text-foreground shadow-ring hover:bg-raised sm:max-w-none sm:shrink-0 dark:bg-raised dark:hover:bg-raised"
+              className={cn(
+                "rounded-full bg-raised px-3 text-[13px] text-foreground shadow-ring hover:bg-raised sm:max-w-none sm:shrink-0 dark:bg-raised dark:hover:bg-raised",
+                easyPhone
+                  ? "h-auto max-w-full shrink-0 whitespace-normal py-1.5 text-left"
+                  : "h-8 min-w-0 max-w-[120px] shrink",
+              )}
             >
               <span aria-hidden="true" className="size-1.5 shrink-0 animate-pulse rounded-full bg-foreground" />
-              <span className="truncate">{t.topbar.otherLive}</span>
+              <span className={easyPhone ? "whitespace-normal" : "truncate"}>{easyPhone ? t.topbar.otherLiveShort : t.topbar.otherLive}</span>
             </Button>
           )}
 
@@ -149,21 +194,31 @@ export function TopBar({
                 data-testid="run-state"
                 data-state={badge.status}
                 className={cn(
-                  "flex min-w-0 shrink items-center gap-2 rounded-full bg-raised px-2.5 py-0.5 text-[12px] font-medium shadow-ring",
-                  cutOff ? "text-amber-700 dark:text-amber-400" : "text-foreground",
+                  "flex min-w-0 items-center gap-1.5 rounded-full bg-raised px-2.5 py-0.5 text-[12px] font-medium shadow-ring",
+                  easyPhone ? "shrink-0" : "shrink",
+                  // Easy view on phones: the status pill is visually hidden (the Easy status sentence under the stage
+                  // says the same). The node stays in the DOM and its text stays for screen readers.
+                  easy && "max-sm:sr-only",
+                  TONE_TEXT[tone],
                 )}
               >
                 <span
                   aria-hidden="true"
                   data-testid="run-state-dot"
                   data-tone={tone}
-                  className={cn("size-1.5 shrink-0 rounded-full", TONE_DOT[tone], live && "animate-pulse")}
-                />
-                <span className="min-w-0 truncate max-[359px]:sr-only">{badgeText}</span>
+                  className="shrink-0 text-[11px] leading-none"
+                >
+                  {GLYPH[tone]}
+                </span>
+                <span className={cn("min-w-0 truncate", !easy && "max-[359px]:sr-only")}>
+                  {easy && easyKind ? <EasyStatus kind={easyKind} /> : badgeText}
+                </span>
               </span>
             )}
           </div>
 
+          {/* Easy view is always one visible header button (the short label on phones); the gear menu holds the rest. */}
+          <EasyToggle compact={compact} />
           {compact ? (
             <HeaderMenu theme={theme} onToggleTheme={onToggleTheme} />
           ) : (

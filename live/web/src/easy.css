@@ -1,0 +1,202 @@
+/*
+ * Easy view (大字模式). Every rule is scoped to html[data-easy="true"], which useEasyView sets.
+ * Unlayered on purpose: Tailwind's utilities sit in @layer, and unlayered rules win over them without !important.
+ */
+
+/* Contrast: foreground and muted text at 7:1 or better against the card and raised surfaces, in both themes. */
+html[data-easy="true"][data-theme="dark"] {
+  --foreground: #ffffff;
+  --card-foreground: #ffffff;
+  --muted-foreground: #f2f4f8;
+  --ink-2: #f2f4f8;
+  --ink-3: #eceff4;
+  /* Status inks (TOKENS.md, Round 15): on the round-14 card composite (aurora at 0.3 in Easy view) Failed #ffcbd2 is
+     5.0:1 and Stopped #ffc88a 4.7:1. The pair is 36 ΔE apart (CIE76). */
+  --status-live-ink: #e6ede0;
+  --status-failed-ink: #ffcbd2;
+  --status-stopped-ink: #ffc88a;
+  --status-finished-ink: #deedf2;
+  --status-loading-ink: #f7eacf;
+}
+
+html[data-easy="true"][data-theme="light"] {
+  --foreground: #000000;
+  --card-foreground: #000000;
+  --muted-foreground: #3d3d3d;
+  --ink-2: #3d3d3d;
+  --ink-3: #3d3d3d;
+  /* Status inks (TOKENS.md, Round 15): Failed #800f2f is 9.0:1 on the card, Stopped #6b3a00 8.2:1 on the card and
+     7.7:1 on the raised tile. The pair is 40 ΔE apart (CIE76). */
+  --status-live-ink: #3b5031;
+  --status-failed-ink: #800f2f;
+  --status-stopped-ink: #6b3a00;
+  --status-finished-ink: #374c67;
+  --status-loading-ink: #5c470e;
+}
+
+/* Weight: body text 500 by default. */
+html[data-easy="true"] body {
+  font-weight: 500;
+}
+
+/* Transcript paragraphs: 23 px at line-height 1.7 (the timestamp keeps its own size). */
+html[data-easy="true"] [data-testid="paragraph"],
+html[data-easy="true"] [data-testid="paragraph"] :not([data-testid="paragraph-time"]) {
+  font-size: 23px;
+  line-height: 1.7;
+  font-weight: 500;
+}
+
+/* Card, header, picker and transcript label text: every small Tailwind size class (the arbitrary px classes and the
+   xs/sm/base steps) is raised to 20 px in Easy view. Sizes already at 20 px or more (stat values) are left alone, and
+   the transcript paragraphs keep their own 23 px rule, which is more specific. */
+html[data-easy="true"]
+  :is(.text-\[11px\], .text-\[12px\], .text-\[13px\], .text-\[14px\], .text-\[15px\], .text-\[17px\], .text-\[18px\],
+      .text-xs, .text-sm, .text-base) {
+  font-size: 20px;
+  line-height: 1.5;
+}
+
+/* Transcript header meta line (output name and model) at the label size. */
+html[data-easy="true"] [data-testid="run-title"] ~ div {
+  font-size: 20px;
+  line-height: 1.5;
+}
+
+/* Transcript timestamps are labels too. */
+html[data-easy="true"] [data-testid="paragraph-time"] {
+  font-size: 20px;
+}
+
+/* Phones: the stat tiles stack one per row, so the 20 px values never squeeze or overflow a 390 px screen. */
+@media (max-width: 480px) {
+  html[data-easy="true"] [data-testid="stage-card"] .grid-cols-2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Jump-to-live button label (transcript card) at the easy-view label size. */
+html[data-easy="true"] [data-testid="jump-to-live"] {
+  font-size: 20px;
+  line-height: 1.5;
+}
+
+/* Header toggles (the menu is portaled, so it is matched by its popover slot in the generic rule above). */
+html[data-easy="true"] [data-testid="easy-toggle"],
+html[data-easy="true"] [data-testid="locale-toggle"] {
+  font-size: 20px;
+  line-height: 1.5;
+}
+
+/* The header's status chip keeps its icon glyph, so the dot beside it is hidden (the testid stays in the DOM). */
+html[data-easy="true"] [data-testid="run-state-dot"] {
+  display: none;
+}
+
+/* No decorative motion: animations and transitions stop. The orb is drawn still (stage-card passes frozen). */
+html[data-easy="true"] *,
+html[data-easy="true"] *::before,
+html[data-easy="true"] *::after {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* Timestamps: 7:1 or better against the card in both themes (the Frost --time-ink measured 4.3:1 dark, 4.6:1 light).
+   Dark: #dcf1fb is 7.4:1 on the raised tile #434c5e, the lightest surface under the timestamp, and more on the card.
+   Light: #284660 is 8.5:1 on the card #eceff4 and 8.1:1 on the raised tile #e5e9f0. */
+html[data-easy="true"][data-theme="dark"] [data-testid="paragraph-time"] {
+  color: #dcf1fb;
+}
+
+html[data-easy="true"][data-theme="light"] [data-testid="paragraph-time"] {
+  color: #284660;
+}
+
+/* Hit targets: every Easy control is at least 48 px tall and 48 px wide. Covers the buttons (the header toggles and
+   gear, the picker trigger, the stage card's disclosure, the jump button, the menu items), the Download .odt control,
+   the timeline hit layer and the run-picker rows (cmdk items). The timeline blocks are decorative (pointer-events: none). */
+html[data-easy="true"] button:not(.timeline-block),
+html[data-easy="true"] [role="button"],
+html[data-easy="true"] [data-testid="timeline-hit"],
+html[data-easy="true"] [data-testid="run-picker"],
+html[data-easy="true"] [data-testid="export-odt"],
+html[data-easy="true"] [cmdk-item] {
+  min-height: 3rem;
+  min-width: 3rem;
+}
+
+/* Buttons keep the 20 px label size. */
+html[data-easy="true"] button:not(.timeline-block) {
+  font-size: 20px;
+  line-height: 1.5;
+}
+
+/* Phones (up to 640 px) in Easy view: tighter page, card and transcript-header spacing, so the first transcript paragraph
+   sits higher. The Download .odt button shares the title's row when both fit (flex-wrap); a long title keeps its own full
+   row and is not truncated. */
+@media (max-width: 640px) {
+  html[data-easy="true"] .live-page {
+    padding-top: 8px;
+  }
+
+  html[data-easy="true"] .live-grid {
+    gap: 8px;
+  }
+
+  html[data-easy="true"] [data-testid="stage-card"] {
+    gap: 2px;
+    padding: 8px 10px;
+  }
+
+  html[data-easy="true"] [data-testid="stage-card"] .mt-2.h-5 {
+    margin-top: 4px;
+  }
+
+  html[data-easy="true"] [data-testid="easy-status-sentence"] {
+    line-height: 1.2;
+  }
+
+  html[data-easy="true"] header:has(> div > [data-testid="run-title"]) {
+    padding-top: 10px;
+    padding-bottom: 6px;
+  }
+
+  html[data-easy="true"] header:has(> div > [data-testid="run-title"]) > div {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 8px;
+  }
+
+  html[data-easy="true"] header:has(> div > [data-testid="run-title"]) > div > :not([data-testid="run-title"]) {
+    align-self: center;
+  }
+
+  html[data-easy="true"] [data-testid="speaker-header"] {
+    line-height: 24px;
+  }
+
+  html[data-easy="true"] [data-testid="paragraph"] {
+    margin-top: 4px;
+  }
+
+  /* The end-state strip under the transcript header (EndNotice, strip; a div with an h3 that sits right before the
+     transcript scroller). Tighter spacing in Easy phone so the first transcript paragraph starts higher. Text stays at
+     the 20 px easy size or more; only padding, gaps and line height change. */
+  html[data-easy="true"] div:has(> h3):has(+ [data-testid="transcript-scroll"]) {
+    gap: 4px;
+    padding: 0 16px 6px;
+  }
+
+  html[data-easy="true"] div:has(> h3):has(+ [data-testid="transcript-scroll"]) > h3 {
+    line-height: 1.2;
+  }
+
+  html[data-easy="true"] div:has(> h3):has(+ [data-testid="transcript-scroll"]) > p {
+    line-height: 1.3;
+  }
+
+  html[data-easy="true"] div:has(> h3):has(+ [data-testid="transcript-scroll"]) > div {
+    margin-top: 0;
+  }
+}

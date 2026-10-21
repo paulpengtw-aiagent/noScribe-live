@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type Ref,
 } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
@@ -13,14 +14,17 @@ import { ArrowDown, Check, Copy } from "lucide-react";
 import { useI18n } from "@/i18n";
 import { StreamingTextInline } from "@/components/aicss/streaming-text-inline";
 import { ErrorDetails } from "@/components/live/error-details";
+import { ExportButton } from "@/components/live/export-button";
 import { Button } from "@/components/ui/button";
 import { describeEnd, type EndDescription } from "@/lib/end-state";
 import { formatElapsed, isMostlyCjk } from "@/lib/format";
 import { isRunActive, type RunState, type Segment } from "@/lib/live-state";
 import { useSpeakerName } from "@/lib/speaker-names";
 import { speakerColor, speakerKey } from "@/lib/speakers";
-import { useZhTw } from "@/lib/zh-tw";
+import { hasCJK, requestConverter, useZhConverter, zhStats } from "@/lib/zh-tw";
 import { buildBlocks, type Paragraph, type SegmentItem } from "@/lib/transcript-blocks";
+import { useEasyView } from "@/hooks/use-easy-view";
+import { RevealEngine, type RevealView } from "@/lib/reveal-engine";
 import { cn } from "@/lib/utils";
 
 /** The view follows new text while the reader is within this many px of the bottom. */
@@ -29,23 +33,26 @@ const STICK_PX = 8;
 const HOLD_MS = 1000;
 /** Content this far past an edge (px) counts as "more above or below" and gets a soft fade. */
 const EDGE_PX = 2;
-/** A burst of live segments finishes revealing this long after its last arrival (ms). */
-const BURST_MS = 1200;
-/** Bounds for how long one live segment takes to reveal (ms). */
-const MIN_REVEAL_MS = 120;
-const MAX_REVEAL_MS = 700;
-/** A finished run drains its pending text within this long (ms). */
-const FINISH_MS = 400;
-/** The reveal is behind when more than this many segments wait, or the oldest has waited this long (ms). */
-const FLUSH_SEGMENTS = 2;
-const FLUSH_MS = 2000;
+/** A reveal this far behind the data (ms) is flushed: shown at once, not replayed. Only a stalled tab gets here. */
+const FLUSH_LAG_MS = 4000;
+/** Longest frame step (ms) the reveal integrates in one go. Real elapsed time counts up to this: at 7 fps a frame is
+ *  143 ms, and a 100 ms cap silently dropped that time, so the reveal fell behind. Longer stalls are still bounded. */
+const MAX_FRAME_MS = 250;
+/** Frame step (ms) for the first frame of a loop. */
+const FIRST_FRAME_MS = 16;
 /** The screen reader keeps this many announced lines; the oldest are removed. */
 const SR_KEEP = 20;
+/** Held CJK text is shown raw (unconverted) once the converter has been late this long (ms). It swaps when ready. */
+const ZH_FALLBACK_MS = 1500;
+/** Opacity cross-fade (ms) from the raw text to the converted text. Opacity only: the text does not move. */
+const ZH_FADE_MS = 150;
 const CLI_COMMAND =
   "python -m noScribe --no-gui --model breeze-asr-25 --speaker-detection auto --timestamps --live-feed live/feeds/ INPUT OUTPUT.html";
 
 const NO_SEGMENTS: Segment[] = [];
 const NO_LINES: SpokenLine[] = [];
+/** Held text keeps its layout (same element, same size) but is not painted, so nothing shifts when it appears. */
+const HIDDEN_STYLE = { visibility: "hidden" } as const;
 
 /** How one segment is drawn: plain text, waiting its turn (nothing shown), revealing now, or shown whole with the caret. */
 type Reveal = "plain" | "waiting" | "reveal" | "caret";
@@ -82,7 +89,7 @@ export interface TranscriptHandle {
 export interface TranscriptCardProps {
   run: RunState | null;
   speakers: string[];
-  /** Wall-clock ms; paces the reveal of queued live segments. */
+  /** Wall-clock ms. No longer used by the reveal (the reveal reads its own clock); kept so callers need no change. */
   now: number;
   hoveredIndex: number | null;
   onHover: (index: number | null) => void;
@@ -97,30 +104,66 @@ export interface TranscriptCardProps {
   ref?: Ref<TranscriptHandle>;
 }
 
-/** A live segment with text that has not finished revealing yet. Snapshot segments never queue. */
-function isQueued(segment: Segment, doneThrough: number): boolean {
-  return segment.live && segment.index > doneThrough && segment.text.trim() !== "";
+/** Test instrumentation, exposed as window.__nsliveReveal. Lag runs from the oldest segment not yet fully revealed. */
+interface RevealStats {
+  maxLagMs: number;
+  currentLagMs: number;
+  queued: number;
+  revealedSegments: number;
 }
 
-/** The newest live segment index, or -1. */
-function highestLiveIndex(segments: readonly Segment[]): number {
-  let highest = -1;
-  for (const segment of segments) {
-    if (segment.live && segment.index > highest) highest = segment.index;
+declare global {
+  interface Window {
+    __nsliveReveal?: RevealStats;
   }
-  return highest;
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
+const revealStats: RevealStats = { maxLagMs: 0, currentLagMs: 0, queued: 0, revealedSegments: 0 };
+if (typeof window !== "undefined") window.__nsliveReveal = revealStats;
+
+/** Frame-loop state for one card: the pending frame id (null when idle) and the previous frame's timestamp. */
+interface RevealLoop {
+  frame: number | null;
+  last: number | null;
 }
 
-/** One-shot highlight that fades out over 1.2 s. Under reduced motion it holds, then drops. */
-function flashSegment(el: HTMLElement, reduce: boolean) {
+function recordStats(engine: RevealEngine, now: number) {
+  const lag = engine.lagMs(now);
+  revealStats.currentLagMs = lag;
+  revealStats.maxLagMs = Math.max(revealStats.maxLagMs, lag);
+  revealStats.queued = engine.queued();
+  revealStats.revealedSegments = engine.revealedSegments;
+}
+
+/**
+ * One rAF loop drives the reveal for the card. It advances the queue, publishes the view at most once per frame,
+ * and stops once nothing is revealing.
+ */
+function pumpReveal(engine: RevealEngine, loop: RevealLoop, publish: (view: RevealView) => void) {
+  if (loop.frame !== null || !engine.busy()) return;
+  const step = (time: number) => {
+    const dt = loop.last === null ? FIRST_FRAME_MS : Math.min(MAX_FRAME_MS, time - loop.last);
+    loop.last = time;
+    if (engine.lagMs(Date.now()) > FLUSH_LAG_MS) engine.flush();
+    engine.advance(dt, Date.now());
+    recordStats(engine, Date.now());
+    publish(engine.view());
+    if (engine.busy()) {
+      loop.frame = requestAnimationFrame(step);
+    } else {
+      loop.frame = null;
+      loop.last = null;
+    }
+  };
+  loop.frame = requestAnimationFrame(step);
+}
+
+
+/** One-shot highlight that fades out over 1.2 s. Callers skip it under reduced motion and Easy view (no JS motion). */
+function flashSegment(el: HTMLElement) {
   const lit = { backgroundColor: "rgb(128 128 128 / 0.22)", boxShadow: "0 0 0 0.5px rgb(128 128 128 / 0.8)" };
   const clear = { backgroundColor: "rgb(128 128 128 / 0)", boxShadow: "0 0 0 0.5px rgb(128 128 128 / 0)" };
-  const frames: Keyframe[] = reduce ? [lit, { ...lit, offset: 0.85 }, { ...clear, offset: 1 }] : [lit, clear];
-  el.animate(frames, { duration: 1200, easing: "ease-out" });
+  el.animate([lit, clear], { duration: 1200, easing: "ease-out" });
 }
 
 interface SegmentSpanProps {
@@ -129,12 +172,16 @@ interface SegmentSpanProps {
   spaceBefore: boolean;
   thinBefore: boolean;
   reveal: Reveal;
-  /** Only for the segment revealing now: how long its reveal takes (ms). */
-  revealMs?: number;
-  /** Only for the segment revealing now: called once its text is fully shown. */
-  onRevealed?: (index: number) => void;
+  /** Only for the segment revealing now: graphemes of its text shown so far. Passed to that segment alone, so the others do not re-render per frame. */
+  shown?: number;
   /** Display text for a segment (Traditional Chinese conversion when loaded). */
   display: (text: string) => string;
+  /** CJK text the converter has not produced yet, or a segment queued behind one: laid out but not painted. */
+  hidden: boolean;
+  /** Drawn unconverted because the converter is late (fallback). It cross-fades when the converted text arrives. */
+  raw: boolean;
+  /** Motion allowed: not reduced motion and not Easy view. The cross-fade runs only then. */
+  motion: boolean;
   hovered: boolean;
   active: boolean;
   onHover: (index: number | null) => void;
@@ -147,15 +194,26 @@ const SegmentSpan = memo(function SegmentSpan({
   spaceBefore,
   thinBefore,
   reveal,
-  revealMs,
-  onRevealed,
+  shown,
   display,
+  hidden,
+  raw,
+  motion,
   hovered,
   active,
   onHover,
   onSelect,
 }: SegmentSpanProps) {
   const text = display(segment.text.trim());
+  const ref = useRef<HTMLSpanElement>(null);
+  const wasRaw = useRef(raw);
+  // Raw text becomes converted text: fade the span's opacity in. Opacity only, so the layout does not move.
+  useLayoutEffect(() => {
+    if (wasRaw.current && !raw && motion && ref.current) {
+      ref.current.animate([{ opacity: 0.4 }, { opacity: 1 }], { duration: ZH_FADE_MS, easing: "ease-out" });
+    }
+    wasRaw.current = raw;
+  }, [raw, motion]);
   return (
     <>
       {spaceBefore ? " " : null}
@@ -165,10 +223,12 @@ const SegmentSpan = memo(function SegmentSpan({
         </span>
       ) : null}
       <span
+        ref={ref}
         data-index={segment.index}
         data-segment-index={segment.index}
         data-segment-seq={segment.seq}
         data-active={active ? "true" : undefined}
+        style={hidden ? HIDDEN_STYLE : undefined}
         lang={isMostlyCjk(text) ? "zh-Hant" : undefined}
         onMouseEnter={() => onHover(segment.index)}
         onMouseLeave={() => onHover(null)}
@@ -186,13 +246,7 @@ const SegmentSpan = memo(function SegmentSpan({
             {reveal === "plain" ? (
               text
             ) : (
-              <StreamingTextInline
-                text={text}
-                caret
-                instant={reveal === "caret"}
-                durationMs={revealMs}
-                onRevealed={onRevealed ? () => onRevealed(segment.index) : undefined}
-              />
+              <StreamingTextInline text={text} shown={shown} caret idle={reveal === "caret"} />
             )}
           </>
         )}
@@ -211,12 +265,63 @@ function OverlapTag({ speaker }: { speaker: string }) {
   );
 }
 
+// Phone width: below Tailwind's sm breakpoint (40rem). Read only by the Easy end-state strip.
+const PHONE_QUERY = "(max-width: 39.99rem)";
+
+function subscribePhone(onChange: () => void) {
+  if (typeof window.matchMedia !== "function") return () => {};
+  const query = window.matchMedia(PHONE_QUERY);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+function usePhone(): boolean {
+  return useSyncExternalStore(
+    subscribePhone,
+    () => typeof window.matchMedia === "function" && window.matchMedia(PHONE_QUERY).matches,
+    () => false,
+  );
+}
+
 /**
  * How a run ended: the title, one detail line, and the raw CLI error behind one disclosure. This is the only place
  * the page explains an ended run. Centred in place of an empty transcript; a left-aligned strip under the header
- * when the run kept some segments, so the reason stays in view.
+ * when the run kept some segments, so the reason stays in view. In Easy view on a phone the strip is one row: a
+ * one-line headline and a "Details" disclosure that holds the detail and the raw error.
  */
 function EndNotice({ end, strip = false }: { end: EndDescription; strip?: boolean }) {
+  const { t } = useI18n();
+  const { easy } = useEasyView();
+  const phone = usePhone();
+  if (strip && easy && phone) {
+    return (
+      <div className="flex w-full min-w-0 shrink-0 flex-row flex-wrap items-center gap-x-3 gap-y-1 px-6 pb-4 text-left">
+        <h3 className="text-[18px] leading-tight font-medium tracking-[-0.01em]">
+          {end.kind === "stale" ? (
+            <>
+              <span aria-hidden="true" className="text-status-stopped-ink">■</span> {t.errors.endStoppedLine}
+            </>
+          ) : (
+            end.title
+          )}
+        </h3>
+        <span aria-hidden="true" className="text-ink-3">·</span>
+        <details className="min-w-0 text-[15px] text-ink-2 open:w-full">
+          <summary className="inline-flex min-h-12 min-w-[3rem] cursor-pointer items-center select-none hover:text-foreground">
+            {t.errors.endMoreDetails}
+          </summary>
+          <div className="flex flex-col gap-2 pb-1">
+            {end.detail ? <p className="leading-relaxed">{end.detail}</p> : null}
+            {end.rawError ? (
+              <pre className="max-h-48 overflow-auto rounded-[10px] bg-raised p-2.5 font-mono text-[11px] leading-[1.5] text-ink-2 break-words whitespace-pre-wrap shadow-ring select-text">
+                {end.rawError}
+              </pre>
+            ) : null}
+          </div>
+        </details>
+      </div>
+    );
+  }
   return (
     <div
       className={cn(
@@ -274,7 +379,6 @@ function CommandBlock() {
 export function TranscriptCard({
   run,
   speakers,
-  now,
   hoveredIndex,
   onHover,
   activeIndex = null,
@@ -285,7 +389,10 @@ export function TranscriptCard({
   const { t } = useI18n();
   const reduce = useReducedMotion() ?? false;
   const speakerName = useSpeakerName();
-  const toDisplay = useZhTw();
+  const { display: toDisplay, ready: zhReady } = useZhConverter();
+  // Held CJK is drawn raw once the converter has been late for ZH_FALLBACK_MS (zhFallback); zhGate is true when CJK may be drawn.
+  const [zhFallback, setZhFallback] = useState(false);
+  const zhGate = zhReady || zhFallback;
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   // Whether the view follows new text. A ref so observers and handlers read the latest value; the state mirrors it for the UI.
@@ -316,46 +423,72 @@ export function TranscriptCard({
   const blocks = useMemo(() => buildBlocks(segments), [segments]);
   const lastIndex = segments.length > 0 ? segments[segments.length - 1].index : -1;
   const hasBlocks = run !== null && segments.length > 0;
+  const hasCjkText = useMemo(() => segments.some((segment) => hasCJK(segment.text)), [segments]);
+  // The fallback clock runs while CJK text waits for the converter; it stops when the converter is ready.
+  const cjkHeld = !zhGate && hasCjkText;
+  useEffect(() => {
+    if (!cjkHeld) return;
+    const id = window.setTimeout(() => setZhFallback(true), ZH_FALLBACK_MS);
+    return () => window.clearTimeout(id);
+  }, [cjkHeld]);
   const name = run ? (run.audioName ?? run.runId) : null;
 
-  // Live segments reveal one after another, in arrival order. `doneThrough` is the newest live segment that has
-  // finished revealing in this run. The live text on screen when the card mounts counts as done, so a remount
-  // does not replay it.
-  const [revealed, setRevealed] = useState(() => ({ runId, through: highestLiveIndex(segments) }));
-  const doneThrough = revealed.runId === runId ? revealed.through : -1;
-  // Reduced motion shows everything at once. Otherwise queued text reveals, including after the run ends.
-  const queueable = !reduce;
-  const pendingQueue = useMemo(
-    () => (queueable ? segments.filter((segment) => isQueued(segment, doneThrough)) : NO_SEGMENTS),
-    [queueable, segments, doneThrough],
+  // The reveal (see src/lib/reveal-engine.ts). Live segments type out one grapheme at a time, in arrival order; a
+  // segment is queued only when it arrives live after the run was opened. Reduced motion, Easy view and a frozen feed
+  // show text at once. `view` is the only React state the reveal changes, and it changes at most once per frame.
+  const [engine] = useState(() => new RevealEngine());
+  const [view, setView] = useState<RevealView>(() => engine.view());
+  const loop = useRef<RevealLoop>({ frame: null, last: null });
+  const { easy } = useEasyView();
+  const phone = usePhone();
+  // Easy view on a phone: the export sits under the transcript, not in the title row (that row pushed the transcript down).
+  const exportBelow = easy && phone;
+  const queueable = !reduce && !easy && !frozen;
+  useLayoutEffect(() => {
+    if (engine.runId !== runId) {
+      engine.reset(runId, segments);
+      revealStats.maxLagMs = 0;
+    } else {
+      // Live CJK text waits for the converter, and so does the live text behind it (sync keeps the arrival order).
+      engine.sync(segments, (segment) => zhGate || !hasCJK(segment.text));
+    }
+    if (!queueable) engine.flush();
+    recordStats(engine, Date.now());
+    const next = engine.view();
+    setView(next);
+    pumpReveal(engine, loop.current, setView);
+    // Held segments are counted for the test hook. CJK text starts the converter now, without waiting for idle.
+    let held = 0;
+    let cjk = false;
+    if (!zhReady) {
+      for (const segment of segments) {
+        const isCjk = hasCJK(segment.text);
+        if (isCjk) cjk = true;
+        if (isCjk || next.held.has(segment.index)) held += 1;
+      }
+    }
+    zhStats.heldSegments = held;
+    if (cjk) requestConverter();
+  }, [engine, runId, segments, queueable, zhGate, zhReady]);
+  useEffect(
+    () => () => {
+      if (loop.current.frame !== null) cancelAnimationFrame(loop.current.frame);
+      loop.current.frame = null;
+    },
+    [],
   );
-  const oldest = pendingQueue.length > 0 ? pendingQueue[0] : null;
-  // Behind by too much, or frozen: the pending text is shown at once, and the reveal state catches up.
-  const behind = oldest !== null && (frozen || pendingQueue.length > FLUSH_SEGMENTS || now - oldest.recvAt > FLUSH_MS);
-  // Adjusts the reveal state during render (React's pattern for state that follows props); the next render has nothing pending.
-  if (behind) setRevealed({ runId, through: highestLiveIndex(segments) });
-  const queueing = queueable && !behind;
-  const queue = queueing ? pendingQueue : NO_SEGMENTS;
-  const head = queue.length > 0 ? queue[0] : null;
-  const headIndex = head ? head.index : -1;
-  // A segment whose turn has not come yet: nothing is drawn for it.
-  const isWaiting = (segment: Segment) => queueing && segment.index !== headIndex && isQueued(segment, doneThrough);
-  // The caret sits on the segment revealing now, or on the last segment while the run is live and idle.
-  const caretIndex = frozen ? null : head ? head.index : active ? lastIndex : null;
-  // The queue's last segment is due BURST_MS after its arrival. A finished run drains the queue within FINISH_MS.
-  const revealMs = head
-    ? active
-      ? clamp((queue[queue.length - 1].recvAt + BURST_MS - now) / queue.length, MIN_REVEAL_MS, MAX_REVEAL_MS)
-      : clamp(FINISH_MS / queue.length, 16, MAX_REVEAL_MS)
-    : MAX_REVEAL_MS;
-  const markRevealed = (index: number) => setRevealed({ runId, through: index });
+  // The caret rests after the newest text of a live run while nothing reveals; it is off under reduced motion and Easy view.
+  const idleCaretIndex = active && view.head === null && queueable ? lastIndex : -1;
 
   // Turns whose text has not started yet are not drawn at all, so a speaker header never shows without words under it.
   const visibleBlocks = blocks
-    .map((block) => ({
-      block,
-      paragraphs: block.paragraphs.filter((paragraph) => paragraph.items.some((item) => !isWaiting(item.seg))),
-    }))
+    .map((block) => {
+      const paragraphs = block.paragraphs.filter((paragraph) => paragraph.items.some((item) => !view.waiting.has(item.seg.index)));
+      // The turn whose text is being revealed now: its speaker dot glows (data-streaming).
+      const streaming =
+        view.head !== null && paragraphs.some((paragraph) => paragraph.items.some(({ seg }) => seg.index === view.head));
+      return { block, paragraphs, streaming };
+    })
     .filter((entry) => entry.paragraphs.length > 0);
 
   // What the screen reader announces: one line per segment, appended when the segment's data arrives. The feed text
@@ -368,13 +501,16 @@ export function TranscriptCard({
     const fresh = segments.filter((segment) => !announcer.seen.has(segment.seq));
     if (fresh.length > 0) {
       const lines: SpokenLine[] = [];
+      const seen = new Set(announcer.seen);
       for (const segment of fresh) {
+        // Converted text is spoken. CJK waits for the converter (or the fallback: then the raw text is spoken once, and not
+        // again when it converts). The segments after a waiting CJK segment wait too, so the order holds.
+        if (!zhGate && hasCJK(segment.text)) break;
+        seen.add(segment.seq);
         const text = toDisplay(segment.text.trim());
         if (text) lines.push({ key: segment.seq, text: segment.speaker ? t.transcript.srLine(speakerName(segment.speaker), text) : text });
       }
-      const seen = new Set(announcer.seen);
-      for (const segment of fresh) seen.add(segment.seq);
-      setAnnouncer({ runId, seen, lines: [...announcer.lines, ...lines].slice(-SR_KEEP) });
+      if (seen.size > announcer.seen.size) setAnnouncer({ runId, seen, lines: [...announcer.lines, ...lines].slice(-SR_KEEP) });
     }
   }
 
@@ -423,10 +559,10 @@ export function TranscriptCard({
         holdRef.current = performance.now() + HOLD_MS;
         setFollow(false);
         target.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
-        flashSegment(target, reduce);
+        if (!reduce && !easy) flashSegment(target);
       },
     }),
-    [reduce],
+    [reduce, easy],
   );
 
   const onScroll = () => {
@@ -468,6 +604,8 @@ export function TranscriptCard({
   const showJump = !following && segments.length > 0;
   // How the run ended, or null while it is still running.
   const end = run ? describeEnd(run, t.errors) : null;
+  // Shown only when ExportButton would render (run ended, with segments), so no empty footer is left while live.
+  const exportFooter = exportBelow && run !== null && !active && segments.length > 0;
 
   return (
     // Below the sm breakpoint the box has a fixed 70vh height: it stays a scroller that follows new text, and the
@@ -475,26 +613,32 @@ export function TranscriptCard({
     <section aria-label={t.transcript.transcriptLabel} className="live-card relative flex min-h-0 flex-1 flex-col overflow-hidden max-sm:h-[70vh] max-sm:flex-none">
       {run ? (
         <header className="shrink-0 px-6 pt-5 pb-4">
-          <h2
-            data-testid="run-title"
-            title={name ?? undefined}
-            className="truncate text-[22px] leading-tight font-medium tracking-[-0.02em]"
-          >
-            {name}
-          </h2>
-          <div className="mt-1.5 flex min-w-0 items-center gap-2 text-[13px] leading-5 text-ink-2">
-            {run.outputName ? (
-              <span title={run.outputName} className="min-w-0 truncate">
-                {run.outputName}
-              </span>
-            ) : null}
-            {run.model ? (
-              <>
-                {run.outputName ? <span aria-hidden="true" className="text-ink-3">·</span> : null}
-                <span className="shrink-0 whitespace-nowrap">{t.transcript.model(run.model)}</span>
-              </>
-            ) : null}
+          <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+            <h2
+              data-testid="run-title"
+              title={name ?? undefined}
+              className="min-w-0 truncate text-[22px] leading-tight font-semibold tracking-[-0.02em] sm:text-[26px]/[28px]"
+            >
+              {name}
+            </h2>
+            {exportBelow ? null : <ExportButton run={run} />}
           </div>
+          {/* Easy view drops the file path and the model: the title is enough to say which run this is. */}
+          {easy ? null : (
+            <div className="mt-1.5 flex min-w-0 items-center gap-2 text-[13px] leading-5 text-ink-2">
+              {run.outputName ? (
+                <span title={run.outputName} className="min-w-0 truncate">
+                  {run.outputName}
+                </span>
+              ) : null}
+              {run.model ? (
+                <>
+                  {run.outputName ? <span aria-hidden="true" className="text-ink-3">·</span> : null}
+                  <span className="shrink-0 whitespace-nowrap">{t.transcript.model(run.model)}</span>
+                </>
+              ) : null}
+            </div>
+          )}
         </header>
       ) : null}
 
@@ -527,20 +671,23 @@ export function TranscriptCard({
           </div>
         ) : hasBlocks ? (
           <div ref={contentRef} className="shrink-0">
-            {visibleBlocks.map(({ block, paragraphs }) => (
+            <div key={runId ?? ""} className="run-fade">
+            {visibleBlocks.map(({ block, paragraphs, streaming }) => (
               <section key={block.id} data-testid="turn" className="mt-[18px] first:mt-0">
                 <header
                   data-testid="speaker-header"
                   title={block.speaker || undefined}
-                  className="flex min-w-0 items-center gap-2 text-[13px] leading-5"
+                  className={cn("flex min-w-0 items-center gap-2", easy ? "text-[20px] leading-7" : "text-[13px] leading-5")}
                 >
                   <span
                     aria-hidden="true"
+                    data-speaker-dot
+                    data-streaming={streaming ? "true" : undefined}
                     className="size-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: speakerColor(speakers, block.speaker) }}
+                    style={{ backgroundColor: speakerColor(speakers, block.speaker), color: speakerColor(speakers, block.speaker) }}
                   />
                   {block.speaker ? (
-                    <span className="truncate font-medium text-ink-2">{speakerName(block.speaker)}</span>
+                    <span className={cn("truncate text-ink-2", easy ? "font-bold" : "font-medium")}>{speakerName(block.speaker)}</span>
                   ) : null}
                   {formatElapsed(paragraphs[0].start) !== formatElapsed(block.start) ? (
                     <>
@@ -561,14 +708,18 @@ export function TranscriptCard({
                     </span>
                     <p className="max-w-[70ch] text-pretty text-[17px] leading-[1.7] text-foreground">
                       {paragraph.items.map(({ seg, overlap, spaceBefore, thinBefore }: SegmentItem) => {
-                        const isHead = seg.index === headIndex;
-                        const reveal: Reveal = isHead
-                          ? "reveal"
-                          : isWaiting(seg)
-                            ? "waiting"
-                            : seg.index === caretIndex && !reduce
-                              ? "caret"
-                              : "plain";
+                        // Held text is laid out but not painted: CJK before the converter is ready, and what queues behind it.
+                        const hidden = (!zhGate && hasCJK(seg.text)) || view.held.has(seg.index);
+        const raw = zhFallback && !zhReady && hasCJK(seg.text);
+                        const reveal: Reveal = hidden
+                          ? "plain"
+                          : seg.index === view.head
+                            ? "reveal"
+                            : view.waiting.has(seg.index)
+                              ? "waiting"
+                              : seg.index === idleCaretIndex
+                                ? "caret"
+                                : "plain";
                         return (
                           <SegmentSpan
                             key={seg.index}
@@ -577,9 +728,11 @@ export function TranscriptCard({
                             spaceBefore={spaceBefore}
                             thinBefore={thinBefore}
                             reveal={reveal}
-                            revealMs={isHead ? revealMs : undefined}
-                            onRevealed={isHead ? markRevealed : undefined}
+                            shown={reveal === "reveal" ? view.shown : undefined}
                             display={toDisplay}
+                            hidden={hidden}
+                            raw={raw}
+                            motion={!reduce && !easy}
                             hovered={hoveredIndex === seg.index}
                             active={activeIndex === seg.index}
                             onHover={onHover}
@@ -592,6 +745,7 @@ export function TranscriptCard({
                 ))}
               </section>
             ))}
+            </div>
           </div>
         ) : active ? (
           <p className="m-auto px-2 py-10 text-[15px] text-ink-2">
@@ -601,6 +755,12 @@ export function TranscriptCard({
           <EndNotice end={end} />
         ) : null}
       </div>
+
+      {run && exportFooter ? (
+        <div className="shrink-0 px-6 pt-2 pb-4 [&_[data-testid=export-odt]]:flex [&_[data-testid=export-odt]]:min-h-12 [&_[data-testid=export-odt]]:w-full">
+          <ExportButton run={run} />
+        </div>
+      ) : null}
 
       <div data-testid="sr-announcer" aria-live="polite" className="sr-only">
         {announcer.lines.map((line) => (
@@ -615,11 +775,15 @@ export function TranscriptCard({
             type="button"
             data-testid="jump-to-live"
             onClick={jumpToLive}
-            initial={reduce ? false : { opacity: 0, y: 6 }}
+            initial={reduce || easy ? false : { opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={reduce ? { opacity: 0 } : { opacity: 0, y: 6 }}
+            exit={reduce || easy ? undefined : { opacity: 0, y: 6 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
-            className="absolute right-6 bottom-5 inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3.5 text-[13px] font-medium text-secondary-foreground shadow-ring hover:bg-raised"
+            className={cn(
+              "absolute right-6 inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3.5 text-[13px] font-medium text-secondary-foreground shadow-ring hover:bg-raised",
+              // Lifted above the export footer when it shows, so the two do not overlap.
+              exportFooter ? "bottom-20" : "bottom-5",
+            )}
           >
             <ArrowDown className="size-3.5" aria-hidden="true" />
             {active ? t.transcript.jumpToLive : t.transcript.jumpToEnd}

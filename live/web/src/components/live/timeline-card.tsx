@@ -1,9 +1,12 @@
 import { WaveformTimeline, type WaveformTimelineProps } from "@/components/live/waveform-timeline";
+import { useEasyView } from "@/hooks/use-easy-view";
 import type { PeaksError } from "@/hooks/use-run-peaks";
+import type { Theme } from "@/hooks/use-theme";
 import { useI18n } from "@/i18n";
 import { DASH } from "@/lib/format";
 import { type DisplayPhase } from "@/lib/live-state";
 import { useSpeakerName } from "@/lib/speaker-names";
+import { speakerDotColor } from "@/lib/speakers";
 import { cn } from "@/lib/utils";
 
 export interface TimelineCardProps {
@@ -20,6 +23,8 @@ export interface TimelineCardProps {
   frozen?: boolean;
   /** Unix seconds of the last update, exposed as data-last-update while frozen. */
   lastUpdateT?: number | null;
+  /** The page theme: the legend dots take the theme's variant of the speaker colour. */
+  theme: Theme;
 }
 
 /** Phases in which "transcribed of length" is a meaningful progress reading. */
@@ -36,9 +41,11 @@ export function TimelineCard({
   className,
   frozen = false,
   lastUpdateT = null,
+  theme,
 }: TimelineCardProps) {
   const { t } = useI18n();
   const speakerName = useSpeakerName();
+  const { easy } = useEasyView();
   const note = peaksError ? t.timeline.peaks[peaksError] : undefined;
   // loaded | loading | missing | undecodable | failed: the waveform state, on the card root.
   const peaksState = waveform.peaks ? "loaded" : (peaksError ?? "loading");
@@ -68,7 +75,7 @@ export function TimelineCard({
                 <span
                   aria-hidden="true"
                   className="size-2 shrink-0 rounded-full"
-                  style={{ backgroundColor: waveform.speakerColor(speaker) }}
+                  style={{ backgroundColor: speakerDotColor(speakers, speaker, theme) }}
                 />
                 {speakerName(speaker)}
               </li>
@@ -78,12 +85,15 @@ export function TimelineCard({
         <span className={cn("max-w-full shrink-0 text-[12px] tabular-nums text-ink-3", timed && "font-mono")}>{status}</span>
       </header>
       <div className="relative min-h-0 flex-1">
-        <WaveformTimeline {...waveform} />
+        {/* Easy view keeps only the speaker blocks: no loudness bars, and no waveform note. */}
+        <WaveformTimeline {...waveform} showWaveform={!easy} />
       </div>
-      {/* Always reserves its line, so a note appearing does not move the card. */}
-      <p data-testid={note ? "waveform-note" : undefined} className="min-h-[20px] shrink-0 text-[12px] leading-5 text-ink-3">
-        {note}
-      </p>
+      {/* Always reserves its line, so a note appearing does not move the card. Easy view has no waveform to explain. */}
+      {easy ? null : (
+        <p data-testid={note ? "waveform-note" : undefined} className="min-h-[20px] shrink-0 text-[12px] leading-5 text-ink-3">
+          {note}
+        </p>
+      )}
     </section>
   );
 }

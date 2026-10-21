@@ -4,6 +4,9 @@ const en = {
   genericError: "Something went wrong",
   details: "Error details",
   endStopped: "Stopped unexpectedly",
+  /** The cause only, for the Easy phone strip; the ■ glyph is drawn by the component. */
+  endStoppedLine: "noScribe stopped before finishing",
+  endMoreDetails: "Details",
   endStoppedDetail: "noScribe stopped before it finished (the process exited).",
   endUnreadable: "Can't read the audio file (unsupported format or damaged)",
   endFailed: "Transcription failed",
@@ -18,9 +21,11 @@ export type ErrorsMessages = typeof en;
 
 const zhTW: ErrorsMessages = {
   genericError: "發生錯誤",
-  details: "詳細錯誤",
-  endStopped: "意外中止",
-  endStoppedDetail: "noScribe 在完成前停止了（行程已結束）。",
+  details: "錯誤詳情",
+  endStopped: "意外停止",
+  endStoppedLine: "noScribe 在完成前停止",
+  endMoreDetails: "詳細說明",
+  endStoppedDetail: "noScribe 在完成前停止了（程式已結束）。",
   endUnreadable: "無法讀取音訊檔（格式不支援或檔案損毀）",
   endFailed: "轉錄失敗",
   endCanceled: "已取消",

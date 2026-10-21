@@ -20,10 +20,17 @@
 #   KILL_TIMEOUT_S=120              ... or after this long, whichever comes first (a safety net: killed anyway)
 #   KILL_CLIP=live/samples/stress/03-multi-speaker.mp3   clip for the killed run (same guards as a real run)
 #   FAIL_CLIP=live/samples/stress/90-corrupt.mp3         clip for the failed run (fails in ~2 s, no GPU)
+#   REPLAY_FAULTS_EVERY=3           synthetic failed + stopped runs (replays only: no GPU, no CLI) every this many
+#                                   cycles; 0 disables. Independent of the KILL_* schedule.
 #
 # Fault injection, when due: (a) a killed run: a real run, SIGKILL to the CLI once its feed has KILL_AFTER_SEGMENTS
 # segments (KILL_TIMEOUT_S at most), with its multiprocessing children (found with pgrep -P before the kill) killed
 # too; (b) a failed run: the CLI on the corrupt clip. Both write their feeds to FEEDS_DIR like any other run.
+#
+# Synthetic runs, when REPLAY_FAULTS_EVERY is due (both through server.replay, which rewrites run_id, t and pid):
+# (c) a failed run: the newest recorded FEEDS_DIR/*-90-corrupt.ndjson whose run_end is "error", else the fixture
+# live/stress/fixtures/failed-run.ndjson; (d) a stopped run: live/stress/fixtures/stopped-run.ndjson, a demo feed cut
+# after 15 segments with no run_end, so its replay process exits mid-run and the server marks the run stale.
 #
 # Every step is logged with a timestamp to live/logs/driver.log.
 set -uo pipefail
@@ -45,6 +52,8 @@ KILL_AFTER_SEGMENTS="${KILL_AFTER_SEGMENTS:-3}"
 KILL_TIMEOUT_S="${KILL_TIMEOUT_S:-120}"
 KILL_CLIP="${KILL_CLIP:-live/samples/stress/03-multi-speaker.mp3}"
 FAIL_CLIP="${FAIL_CLIP:-live/samples/stress/90-corrupt.mp3}"
+REPLAY_FAULTS_EVERY="${REPLAY_FAULTS_EVERY:-3}"
+FIXTURES_DIR="$STRESS_DIR/fixtures"
 FAULT_CYCLE=0
 FAULT_LAST_CYCLE=0
 FAULT_LAST_TIME=0
@@ -60,6 +69,9 @@ case "$FEEDS_DIR" in
   *) FEEDS_DIR="$REPO_ROOT/$FEEDS_DIR" ;;
 esac
 read -r -a CLIP_LIST <<< "$CLIPS"
+case "$REPLAY_FAULTS_EVERY" in
+  ''|*[!0-9]*) echo "REPLAY_FAULTS_EVERY must be a whole number of cycles (0 disables)" >&2; exit 2 ;;
+esac
 
 log() {
   mkdir -p "$(dirname "$LOG")"
@@ -179,6 +191,13 @@ latest_feed() {
   return 1
 }
 
+# Replays the feed SRC as a new run: server.replay writes it to FEEDS_DIR with a new run_id and t, and the
+# replay's own pid in run_start. Sets STATUS.
+replay_src() {
+  cd "$LIVE_DIR" || return 1
+  run_child .venv/bin/python -m server.replay "$1" --feeds "$FEEDS_DIR" --speed 1 --max-gap 5
+}
+
 replay() {
   local feed
   if ! feed="$(latest_feed)"; then
@@ -186,9 +205,50 @@ replay() {
     return 0
   fi
   log "start replay feed=$feed"
-  cd "$LIVE_DIR" || return 1
-  run_child .venv/bin/python -m server.replay "$feed" --feeds "$FEEDS_DIR" --speed 1 --max-gap 5
+  replay_src "$feed"
   log "end replay feed=$feed exit=$STATUS"
+}
+
+# The newest recorded failed feed: a *-90-corrupt.ndjson (a real run on the corrupt clip) whose run_end is
+# "error". Replay copies (replay-*) are skipped. Prints nothing and returns 1 when there is none.
+failed_feed() {
+  local f
+  local -a files
+  mapfile -t files < <(ls -1t "$FEEDS_DIR"/*-90-corrupt.ndjson 2>/dev/null)
+  for f in "${files[@]}"; do
+    case "$(basename "$f")" in replay-*) continue ;; esac
+    if grep -q '"type": *"run_end".*"status": *"error"' "$f"; then
+      echo "$f"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Synthetic failed run (no GPU, no CLI): replays the newest recorded failed feed, else the fixture.
+synthetic_failed_run() {
+  local src
+  src="$(failed_feed)" || src="$FIXTURES_DIR/failed-run.ndjson"
+  if [ ! -f "$src" ]; then
+    log "skip synthetic failed run: $src does not exist"
+    return 0
+  fi
+  log "start synthetic failed run feed=$src"
+  replay_src "$src"
+  log "end synthetic failed run feed=$src exit=$STATUS"
+}
+
+# Synthetic stopped run (no GPU, no CLI): replays the fixture that has no run_end, so the replay process exits
+# before the run finishes.
+synthetic_stopped_run() {
+  local src="$FIXTURES_DIR/stopped-run.ndjson"
+  if [ ! -f "$src" ]; then
+    log "skip synthetic stopped run: $src does not exist"
+    return 0
+  fi
+  log "start synthetic stopped run feed=$src"
+  replay_src "$src"
+  log "end synthetic stopped run feed=$src exit=$STATUS"
 }
 
 # True while the process runs (a zombie, exited but not yet waited for, counts as gone).
@@ -366,12 +426,28 @@ fault_injection() {
   failed_run
 }
 
+# Due when REPLAY_FAULTS_EVERY cycles have passed (0 disables). Independent of the KILL_* schedule.
+replay_fault_due() {
+  [ "$REPLAY_FAULTS_EVERY" -gt 0 ] && [ $(( FAULT_CYCLE % REPLAY_FAULTS_EVERY )) -eq 0 ]
+}
+
+replay_fault_injection() {
+  log "synthetic faults at cycle $FAULT_CYCLE: failed run, then stopped run"
+  synthetic_failed_run
+  pause
+  synthetic_stopped_run
+  pause
+}
+
 DEADLINE=$(( $(date +%s) + DURATION_S ))
-log "driver start duration=${DURATION_S}s gap=${GAP_S}s feeds=$FEEDS_DIR clips=\"$CLIPS\" kill_every=${KILL_EVERY} cycles, min interval ${KILL_MIN_INTERVAL_S}s"
+log "driver start duration=${DURATION_S}s gap=${GAP_S}s feeds=$FEEDS_DIR clips=\"$CLIPS\" kill_every=${KILL_EVERY} cycles, min interval ${KILL_MIN_INTERVAL_S}s, replay_faults_every=${REPLAY_FAULTS_EVERY} cycles"
 while [ "$(date +%s)" -lt "$DEADLINE" ]; do
   FAULT_CYCLE=$(( FAULT_CYCLE + 1 ))
   if fault_due; then
     fault_injection
+  fi
+  if replay_fault_due; then
+    replay_fault_injection
   fi
   if ! next_clip; then
     log "skip real run: no clip in \"$CLIPS\" exists"

@@ -11,7 +11,7 @@ export interface HeaderMenuProps {
   onToggleTheme: () => void;
 }
 
-/** Compact header only (below sm): the theme and language switches, in one icon menu. */
+/** Compact header only (below sm): the theme and language switches, in one icon menu. Easy view has its own header button. */
 export function HeaderMenu({ theme, onToggleTheme }: HeaderMenuProps) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);

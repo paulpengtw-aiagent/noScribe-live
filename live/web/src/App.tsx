@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { motion, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
+import { AuroraBackground } from "@/components/live/aurora-background";
 import { StageCard } from "@/components/live/stage-card";
 import { TimelineCard } from "@/components/live/timeline-card";
 import type { TimelineSegment, WaveformTimelineProps } from "@/components/live/waveform-timeline";
@@ -39,7 +39,6 @@ import { speakerColor } from "@/lib/speakers";
 /** Below this width the page stacks into one column. */
 const WIDE_QUERY = "(min-width: 1100px)";
 const NO_SPEAKERS: string[] = [];
-const EASE_OUT: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
 function orbModeFor(phase: DisplayPhase): OrbMode {
   switch (phase) {
@@ -60,16 +59,6 @@ function orbModeFor(phase: DisplayPhase): OrbMode {
     case "canceled":
       return "error";
   }
-}
-
-/** One orchestrated entrance on load: the three cards fade and rise 8 px, staggered by 60 ms. */
-function entrance(index: number, reduce: boolean) {
-  if (reduce) return {};
-  return {
-    initial: { opacity: 0, y: 8 },
-    animate: { opacity: 1, y: 0 },
-    transition: { duration: 0.4, delay: index * 0.06, ease: EASE_OUT },
-  };
 }
 
 /** `?run=<id>` from the URL, or the follow-newest default. */
@@ -128,7 +117,6 @@ export default function App() {
   const { t, locale } = useI18n();
   const { theme, toggle: toggleTheme } = useTheme();
   const wide = useMediaQuery(WIDE_QUERY);
-  const reduceMotion = useReducedMotion() ?? false;
 
   // A run that has no start event is a stale or unknown id: show the waiting state.
   const run: RunState | null = state.run && state.run.startedT !== null ? state.run : null;
@@ -139,8 +127,8 @@ export default function App() {
   const clockNow = frozen && lastUpdateT !== null ? lastUpdateT * 1000 : now;
   // Offers a switch to another still-running run; never moves the user off a run they picked.
   const otherLive = otherLiveRun(state.runs, run?.runId ?? null, active, runParam === FOLLOW_NEWEST);
-  // The waveform is requested as soon as the run's audio is known, live or not.
-  const peakRunId = run?.audioFile ? run.runId : null;
+  // The waveform is requested for every shown run. A run with no audio answers 404, which reads as "missing".
+  const peakRunId = run ? run.runId : null;
   const { peaks, error: peaksError } = useRunPeaks(peakRunId, !active);
   // The header never says "Live" while the stream is down: the run's state is unknown then.
   const badgeRun = active && connection !== "live" ? null : run;
@@ -280,6 +268,7 @@ export default function App() {
     <TooltipProvider delayDuration={150}>
       <SpeakerOrderContext.Provider value={speakers}>
         <div className="flex min-h-svh flex-col bg-background text-foreground">
+          <AuroraBackground live={active && !frozen} />
           <TopBar
             runs={state.runs}
             runParam={runParam}
@@ -296,8 +285,10 @@ export default function App() {
               <LoadingSkeleton />
             ) : (
             <div className="live-grid">
-              <motion.div className="live-stage" {...entrance(0, reduceMotion)}>
+              <div className="live-stage">
                 <StageCard
+                  otherLive={otherLive}
+                  onRunChange={setRunParam}
                   run={run}
                   phase={phase}
                   compact={!wide}
@@ -315,9 +306,9 @@ export default function App() {
                   lastUpdateT={lastUpdateT}
                   loading={picked !== null && !run && !missingRun}
                 />
-              </motion.div>
+              </div>
 
-              <motion.div className="live-transcript" {...entrance(1, reduceMotion)}>
+              <div className="live-transcript">
                 {awaitingRun ? (
                   <TranscriptSkeleton />
                 ) : picked !== null && !run ? (
@@ -345,19 +336,20 @@ export default function App() {
                 />
                 </div>
                 )}
-              </motion.div>
+              </div>
 
-              <motion.div className="live-timeline" {...entrance(2, reduceMotion)}>
+              <div className="live-timeline">
                 <TimelineCard
                   speakers={speakers}
                   phase={phase}
+                  theme={theme}
                   transcribed={run ? transcribed : DASH}
                   waveform={waveform}
                   peaksError={peaksError}
                   frozen={frozen}
                   lastUpdateT={lastUpdateT}
                 />
-              </motion.div>
+              </div>
             </div>
             )}
           </main>

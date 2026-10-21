@@ -74,6 +74,9 @@ const CLS_SPEAKER = 4;
 const CLS_DIM = 12;
 const MAX_SPEAKERS = 8;
 const TINT_WEIGHTS = [0.35, 0.6, 0.85] as const;
+/** Ink dots on the dark theme take a Frost gradient across the orb; the light theme gets a deeper Frost run. */
+const FROST_DARK = ["#8fbcbb", "#88c0d0", "#5e81ac"] as const;
+const FROST_LIGHT = ["#81a1c1", "#5e81ac", "#486488"] as const;
 
 const FALLBACK_INK: RGB = { r: 245, g: 245, b: 245 };
 const FALLBACK_INK3: RGB = { r: 115, g: 115, b: 115 };
@@ -210,7 +213,10 @@ export class OrbRenderer {
   private ink: RGB = FALLBACK_INK;
   private ink3: RGB = FALLBACK_INK3;
   /** Fill style per colour class; rebuilt when the ink, the active colour or the speakers change. */
-  private styles: string[] = [];
+  private styles: Array<string | CanvasGradient> = [];
+  /** The Frost gradient for the ink class; rebuilt only when the size or the theme ink changes. */
+  private inkFill: CanvasGradient | null = null;
+  private inkFillKey = "";
   private stylesKey = "";
   private speakerRgb: RGB[] = [];
   private activeRgb: RGB | null = null;
@@ -390,7 +396,7 @@ export class OrbRenderer {
     this.speakerRgb = input.speakerColors.slice(0, MAX_SPEAKERS).map((c) => parseColor(c) ?? ink);
     this.activeRgb = input.activeColor ? parseColor(input.activeColor) : null;
 
-    const styles: string[] = new Array<string>(CLASSES).fill(rgbCss(ink));
+    const styles: Array<string | CanvasGradient> = new Array<string | CanvasGradient>(CLASSES).fill(rgbCss(ink));
     for (let k = 0; k < 3; k++) {
       styles[CLS_TINT + k] = this.activeRgb ? rgbCss(mixColor(ink, this.activeRgb, TINT_WEIGHTS[k])) : rgbCss(ink);
     }
@@ -419,6 +425,20 @@ export class OrbRenderer {
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
+  /** The ink class as a Frost gradient across the orb, cached until the size or the theme ink changes. */
+  private frostInk(size: number): string | CanvasGradient {
+    const { ink } = this;
+    const dark = ink.r + ink.g + ink.b > 382;
+    const key = `${size}|${dark}`;
+    if (this.inkFill && key === this.inkFillKey) return this.inkFill;
+    const stops = dark ? FROST_DARK : FROST_LIGHT;
+    const grad = this.ctx.createLinearGradient(0, 0, size, size);
+    stops.forEach((colour, i) => grad.addColorStop(i / (stops.length - 1), colour));
+    this.inkFill = grad;
+    this.inkFillKey = key;
+    return grad;
+  }
+
   private ensureSprite(): HTMLCanvasElement {
     const { ink } = this;
     const key = `${ink.r},${ink.g},${ink.b}`;
@@ -435,6 +455,15 @@ export class OrbRenderer {
       grad.addColorStop(1, rgbaCss(ink, 0));
       sctx.fillStyle = grad;
       sctx.fillRect(0, 0, 128, 128);
+      // Soft aurora rim light: a thin Aurora-green band on the same rim. Drawn once into the cached sprite.
+      const rim = sctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+      rim.addColorStop(0, "rgba(163, 190, 140, 0)");
+      rim.addColorStop(0.6, "rgba(163, 190, 140, 0)");
+      rim.addColorStop(0.66, "rgba(163, 190, 140, 0.6)");
+      rim.addColorStop(0.76, "rgba(163, 190, 140, 0)");
+      rim.addColorStop(1, "rgba(163, 190, 140, 0)");
+      sctx.fillStyle = rim;
+      sctx.fillRect(0, 0, 128, 128);
     }
     this.sprite = sprite;
     this.spriteKey = key;
@@ -447,6 +476,7 @@ export class OrbRenderer {
     this.syncStyles();
     const size = input.size;
     this.fit(size);
+    this.styles[CLS_INK] = this.frostInk(size);
     const ctx = this.ctx;
     const c = this.clock;
     const spec = MODES[input.mode];

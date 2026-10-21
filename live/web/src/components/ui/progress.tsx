@@ -5,8 +5,12 @@ import { Progress as ProgressPrimitive } from "radix-ui"
 function Progress({
   className,
   value,
+  live = false,
   ...props
-}: React.ComponentProps<typeof ProgressPrimitive.Root>) {
+}: React.ComponentProps<typeof ProgressPrimitive.Root> & {
+  /** The run is live: the Frost fill carries a slow sheen. Off by default; reduced motion and Easy view hide it. */
+  live?: boolean
+}) {
   return (
     <ProgressPrimitive.Root
       data-slot="progress"
@@ -18,8 +22,14 @@ function Progress({
     >
       <ProgressPrimitive.Indicator
         data-slot="progress-indicator"
-        className="size-full flex-1 bg-primary transition-all"
-        style={{ transform: `translateX(-${100 - (value || 0)}%)` }}
+        data-live={live ? "true" : undefined}
+        className="progress-frost size-full flex-1 transition-all"
+        style={{
+          transform: `translateX(-${100 - (value || 0)}%)`,
+          // The Frost gradient fills the visible part of the indicator, its right-hand value% of the width.
+          backgroundSize: `${value || 0}% 100%`,
+          backgroundPosition: "100% 0",
+        }}
       />
     </ProgressPrimitive.Root>
   )

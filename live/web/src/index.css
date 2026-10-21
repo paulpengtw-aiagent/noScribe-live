@@ -36,6 +36,16 @@
   --color-ink-2: var(--ink-2);
   --color-ink-3: var(--ink-3);
   --color-ink-4: var(--ink-4);
+  --color-status-live: var(--status-live);
+  --color-status-failed: var(--status-failed);
+  --color-status-stopped: var(--status-stopped);
+  --color-status-finished: var(--status-finished);
+  --color-status-live-ink: var(--status-live-ink);
+  --color-status-failed-ink: var(--status-failed-ink);
+  --color-status-stopped-ink: var(--status-stopped-ink);
+  --color-status-finished-ink: var(--status-finished-ink);
+  --color-status-loading: var(--status-loading);
+  --color-status-loading-ink: var(--status-loading-ink);
 
   --radius-card: 18px;
   --radius-pill: 999px;
@@ -49,72 +59,145 @@
   --shadow-ring: 0 0 0 0.5px var(--hairline);
 }
 
-/* Light theme */
+/* Light theme: Nord Snow Storm surfaces, Frost #5E81AC for rings, darkened Nord text.
+   Every text token is at least 4.5:1 on each surface it sits on; see live/docs/nordic/TOKENS.md. */
 :root,
 [data-theme="light"] {
   color-scheme: light;
-  --background: #ffffff;
-  --foreground: #1a1a1a;
-  --card: #fafafa;
-  --card-foreground: #1a1a1a;
-  --popover: #ffffff;
-  --popover-foreground: #1a1a1a;
-  --primary: #1a1a1a;
+  --background: #e5e9f0;
+  --foreground: #2e3440;
+  --card: #eceff4;
+  --card-foreground: #2e3440;
+  --popover: #eceff4;
+  --popover-foreground: #2e3440;
+  --primary: #486488;
   --primary-foreground: #ffffff;
-  --secondary: #f1f2f4;
-  --secondary-foreground: #1a1a1a;
-  --muted: #f4f5f7;
-  --muted-foreground: #5c5c5c;
-  --accent: #f4f5f7;
-  --accent-foreground: #1a1a1a;
-  --destructive: #5c5c5c;
-  --border: rgba(0, 0, 0, 0.08);
-  --input: rgba(0, 0, 0, 0.1);
-  --ring: #737373;
-  --hairline: rgba(0, 0, 0, 0.08);
-  --raised: #f4f5f7;
-  --ink-2: #5c5c5c;
-  --ink-3: #6b6b6b;
-  --ink-4: #d4d4d4;
-  /* Timeline blocks: darkened and nearly opaque on light, so each reaches 3:1 against the card. */
+  --secondary: #d8dee9;
+  --secondary-foreground: #2e3440;
+  --muted: #d8dee9;
+  --muted-foreground: #434c5e;
+  --accent: #e5e9f0;
+  --accent-foreground: #2e3440;
+  --destructive: #984a52;
+  --border: rgba(46, 52, 64, 0.12);
+  --input: rgba(46, 52, 64, 0.16);
+  --ring: #5e81ac;
+  --hairline: rgba(46, 52, 64, 0.1);
+  --raised: #e5e9f0;
+  --ink-2: #434c5e;
+  --ink-3: #586274;
+  --ink-4: #d8dee9;
+  /* Status: dots and text share one value each (4.5:1 on the light surfaces). Failed is a deep rose-red and
+     stopped a burnt orange, apart in lightness as well as hue. */
+  --status-live: #4d683f;
+  --status-loading: #8a6a00;
+  --status-failed: #b8454f;
+  --status-stopped: #bc5a14;
+  --status-finished: #486488;
+  --status-live-ink: #4d683f;
+  --status-loading-ink: #7a5c00;
+  --status-failed-ink: #8e2a36;
+  --status-stopped-ink: #8f4a12;
+  --status-finished-ink: #486488;
+  /* Frosted glass: translucent Snow Storm card, Frost hairline, soft shadow, frost live glow. */
+  /* Frosted glass: near-white Snow Storm card with a faint Frost sheen, Frost hairline, soft shadow. */
+  --glass-card: rgba(236, 239, 244, 0.82);
+  --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0) 55%),
+    linear-gradient(rgba(136, 192, 208, 0.07), rgba(136, 192, 208, 0.07));
+  --glass-edge: rgba(94, 129, 172, 0.22);
+  --glass-highlight: rgba(255, 255, 255, 0.7);
+  --card-shadow: 0 8px 30px rgba(46, 52, 64, 0.08), 0 1px 2px rgba(46, 52, 64, 0.05);
+  --live-glow: 0 0 24px rgba(94, 129, 172, 0.22);
+  --time-ink: #4c6e94;
+  /* Aurora: Aurora green, teal and purple with a touch of Frost. Opacity is set against the header text budget (docs/nordic/TOKENS.md). */
+  --aurora-1: #8fbcbb;
+  --aurora-2: #a3be8c;
+  --aurora-3: #b48ead;
+  --aurora-4: #88c0d0;
+  --aurora-opacity: 0.46;
+  /* Header glass: the light page at 80% over the aurora, with the 24 px blur the header always had (unchanged). */
+  --header-fill: color-mix(in oklab, var(--background) 80%, transparent);
+  --header-blur: blur(24px);
+  --orb-fg: #486488;
+  --orb-pill-bg: #eceff4;
+  --orb-label: #434c5e;
+  /* Timeline blocks: pale Frost/Aurora fills with no darkening filter (a brightness cut turns them brown).
+     Each block gets a Frost-deep edge instead, which carries the 3:1 non-text contrast. */
   --timeline-rest-opacity: 0.9;
-  --timeline-block-filter: brightness(0.6);
+  --timeline-block-filter: none;
+  --timeline-edge: #4c6e94;
   --radius: 10px;
   --pill-shadow:
-    0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.05), 0 2px 4px rgba(0, 0, 0, 0.02);
+    0 0 0 0.5px rgba(46, 52, 64, 0.1), 0 1px 2px rgba(46, 52, 64, 0.06), 0 2px 4px rgba(46, 52, 64, 0.03);
 }
 
-/* Dark theme (default) */
+/* Dark theme (default): Nord Polar Night surfaces, Frost #88C0D0 accents, Snow Storm text. */
 .dark,
 [data-theme="dark"] {
   color-scheme: dark;
-  --background: #0a0a0a;
-  --foreground: #f5f5f5;
-  --card: #141414;
-  --card-foreground: #f5f5f5;
-  --popover: #1a1a1a;
-  --popover-foreground: #f5f5f5;
-  --primary: #f5f5f5;
-  --primary-foreground: #0a0a0a;
-  --secondary: #262626;
-  --secondary-foreground: #f5f5f5;
-  --muted: #1a1a1a;
-  --muted-foreground: #a3a3a3;
-  --accent: #1a1a1a;
-  --accent-foreground: #f5f5f5;
-  --destructive: #a3a3a3;
-  --border: rgba(255, 255, 255, 0.08);
-  --input: rgba(255, 255, 255, 0.12);
-  --ring: #737373;
-  --hairline: rgba(255, 255, 255, 0.08);
-  --raised: #1a1a1a;
-  --ink-2: #a3a3a3;
-  --ink-3: #8f8f8f;
-  --ink-4: #404040;
+  --background: #242933;
+  --foreground: #eceff4;
+  --card: #3b4252;
+  --card-foreground: #eceff4;
+  --popover: #3b4252;
+  --popover-foreground: #eceff4;
+  --primary: #88c0d0;
+  --primary-foreground: #2e3440;
+  --secondary: #434c5e;
+  --secondary-foreground: #eceff4;
+  --muted: #3b4252;
+  --muted-foreground: #cbd3de;
+  --accent: #434c5e;
+  --accent-foreground: #eceff4;
+  --destructive: #eacbcd;
+  --border: rgba(216, 222, 233, 0.1);
+  --input: rgba(216, 222, 233, 0.14);
+  --ring: #88c0d0;
+  --hairline: rgba(216, 222, 233, 0.1);
+  --raised: #434c5e;
+  --ink-2: #d8dee9;
+  --ink-3: #cbd3de;
+  --ink-4: #4c566a;
+  /* Status: Aurora green, yellow, a rose-red and a peach. Failed and stopped differ in hue and lightness.
+     Each dot reaches 3:1 on the raised chip (#434C5E); each -ink reaches 4.5:1 on it. See TOKENS.md. */
+  --status-live: #a3be8c;
+  --status-loading: #ebcb8b;
+  --status-failed: #ff9aa6;
+  --status-stopped: #ffa860;
+  --status-finished: #88c0d0;
+  --status-live-ink: #c7d8b9;
+  --status-loading-ink: #eccf93;
+  --status-failed-ink: #ffcbd2;
+  --status-stopped-ink: #ffcb8e;
+  --status-finished-ink: #b0d9e3;
+  /* Frosted glass: a brighter translucent card over the darker page, Frost hairline, inner highlight, soft shadow.
+     Round 14: fill 0.62 to 0.90 so card text holds 4.5:1 under the aurora (docs/nordic/TOKENS.md). */
+  --glass-card: rgba(67, 76, 94, 0.9);
+  --glass-sheen: linear-gradient(180deg, rgba(236, 239, 244, 0.07) 0%, rgba(236, 239, 244, 0) 50%);
+  --glass-edge: rgba(136, 192, 208, 0.28);
+  --glass-highlight: rgba(236, 239, 244, 0.08);
+  --card-shadow: 0 10px 30px -12px rgba(8, 10, 16, 0.6);
+  --live-glow: 0 0 24px rgba(136, 192, 208, 0.25);
+  --time-ink: #b4d8e2;
+  --timeline-edge: transparent;
+  /* Aurora: Aurora green, teal and purple with a touch of Frost, behind the glass. */
+  --aurora-1: #8fbcbb;
+  --aurora-2: #a3be8c;
+  --aurora-3: #b48ead;
+  --aurora-4: #88c0d0;
+  /* Round 14: doubled from the round-13 cap of 0.25. Muted header text keeps 4.5:1 because the header glass
+     (--header-fill) sits over it. Glass-card text is not covered by that budget (docs/nordic/TOKENS.md, Round 14). */
+  --aurora-opacity: 0.5;
+  /* Header glass: Polar Night at 60% over the aurora, blur 12 px and saturate 1.2 (TOKENS.md, Round 14). */
+  --header-fill: rgba(36, 41, 51, 0.6);
+  --header-blur: blur(12px) saturate(1.2);
+  --orb-fg: #88c0d0;
+  --orb-pill-bg: #3b4252;
+  --orb-label: #b4bfcf;
   --timeline-rest-opacity: 0.85;
   --timeline-block-filter: none;
   --pill-shadow:
-    0 0 0 0.5px rgba(255, 255, 255, 0.12), 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3);
+    0 0 0 0.5px rgba(216, 222, 233, 0.12), 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
 @layer base {
@@ -136,7 +219,7 @@
   }
 
   :focus-visible {
-    outline: 2px solid #737373;
+    outline: 2px solid var(--ring);
     outline-offset: 2px;
   }
 
@@ -163,11 +246,27 @@
     display: none;
   }
 
-  /* Surface card: 18 px radius, surface fill, hairline ring, no drop shadow. */
+  /* Frosted-glass card: translucent card fill with a faint sheen, 16 px backdrop blur, a 1 px frost hairline
+     drawn as a box-shadow ring (no layout change), an inner highlight and a soft shadow. Sits above the
+     aurora layer (z-index 0). */
   .live-card {
+    position: relative;
+    z-index: 1;
     border-radius: var(--radius-card);
-    background-color: var(--card);
-    box-shadow: var(--shadow-ring);
+    background-color: var(--glass-card);
+    background-image: var(--glass-sheen);
+    -webkit-backdrop-filter: blur(16px) saturate(1.3);
+    backdrop-filter: blur(16px) saturate(1.3);
+    box-shadow: 0 0 0 1px var(--glass-edge), inset 0 1px 0 var(--glass-highlight), var(--card-shadow);
+    animation: live-card-rise 400ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  /* Header glass: a translucent page-colour fill over the aurora. The header's border-b border-hairline is the
+     hairline bottom edge. Fill and blur come from the theme tokens (light: 80% page, 24 px; dark: Polar Night 60%). */
+  .header-glass {
+    background-color: var(--header-fill);
+    -webkit-backdrop-filter: var(--header-blur);
+    backdrop-filter: var(--header-blur);
   }
 
   /* A transcript segment: an inline box with a little breathing room that costs no layout width. */
@@ -176,6 +275,12 @@
     padding: 0 0.15em;
     margin: 0 -0.15em;
     transition: background-color 200ms ease;
+  }
+
+  /* Run switch: the transcript body fades in over 200 ms when the run id changes (keyed in transcript-card).
+     Opacity only; off under reduced motion and Easy view. */
+  .run-fade {
+    animation: run-fade 200ms ease-out both;
   }
 
   /* Fresh text settles from tertiary to ink over 600 ms. */
@@ -192,6 +297,153 @@
   .timeline-block[data-active="true"] {
     opacity: 1;
   }
+
+  /* Light theme: a Frost-deep edge keeps each pale block at 3:1 against the card. Dark: no edge. */
+  .timeline-block[data-timeline-index] {
+    box-shadow: inset 0 0 0 1px var(--timeline-edge);
+  }
+
+  /* Status chips change state over 200 ms: colour and opacity only, never layout. */
+  [data-testid="run-state"],
+  [data-testid="run-state-dot"],
+  [data-testid="conn-state"] {
+    transition:
+      background-color 200ms ease,
+      color 200ms ease,
+      opacity 200ms ease,
+      box-shadow 200ms ease;
+  }
+
+  /* A live run's chip gets the frost glow. */
+  [data-testid="run-state"][data-state="running"] {
+    box-shadow: 0 0 0 0.5px var(--hairline), var(--live-glow);
+  }
+
+  /* Aurora: a fixed strip behind the header and hero. Blurred radial blobs drift on transform only.
+     z-index 0 sits above the page background and below the header (z-40) and the frosted cards (z-1). */
+  .aurora {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 70vh;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+    opacity: var(--aurora-opacity);
+    contain: strict;
+    /* Fades out toward the bottom, so the layer has no hard edge. */
+    -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 35%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 0%, #000 35%, transparent 100%);
+  }
+
+  /* A soft, slow colour band just under the header (the header is 56 px). Aurora greens, teal and purple, blurred and
+     masked at both edges. It drifts on transform only; reduced motion, Easy view and a hidden tab stop it. */
+  .aurora-band {
+    position: absolute;
+    left: -10%;
+    right: -10%;
+    top: 3.5rem;
+    height: 10rem;
+    background: linear-gradient(
+      90deg,
+      var(--aurora-1) 0%,
+      var(--aurora-4) 40%,
+      var(--aurora-2) 70%,
+      var(--aurora-3) 100%
+    );
+    filter: blur(34px);
+    opacity: 0.5;
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 35%, #000 60%, transparent 100%);
+    mask-image: linear-gradient(to bottom, transparent 0%, #000 35%, #000 60%, transparent 100%);
+    animation: aurora-band-drift 70s ease-in-out infinite alternate;
+  }
+
+  .aurora[data-paused="true"] .aurora-band {
+    animation-play-state: paused;
+  }
+
+  @keyframes aurora-band-drift {
+    from {
+      transform: translate3d(-3%, 0, 0);
+    }
+    to {
+      transform: translate3d(3%, 0, 0);
+    }
+  }
+
+  .aurora-blob {
+    position: absolute;
+    width: 80vmax;
+    height: 80vmax;
+    border-radius: 50%;
+    background: radial-gradient(
+      closest-side,
+      var(--blob-color) 0%,
+      color-mix(in srgb, var(--blob-color) 55%, transparent) 42%,
+      transparent 100%
+    );
+    will-change: transform;
+    animation: aurora-drift var(--drift, 52s) ease-in-out infinite alternate;
+  }
+  .aurora-blob[data-n="1"] {
+    --blob-color: var(--aurora-1);
+    --drift: 52s;
+    left: -18vw;
+    top: -34vh;
+  }
+  .aurora-blob[data-n="2"] {
+    --blob-color: var(--aurora-2);
+    --drift: 58s;
+    left: 22vw;
+    top: -40vh;
+  }
+  .aurora-blob[data-n="3"] {
+    --blob-color: var(--aurora-3);
+    --drift: 44s;
+    left: 56vw;
+    top: -36vh;
+  }
+  .aurora-blob[data-n="4"] {
+    --blob-color: var(--aurora-4);
+    --drift: 48s;
+    left: 84vw;
+    top: -30vh;
+  }
+
+  /* While a run is live the aurora drifts faster and shimmers in opacity. Otherwise it is calmer. */
+  .aurora[data-live="true"] .aurora-blob {
+    animation:
+      aurora-drift calc(var(--drift) * 0.6) ease-in-out infinite alternate,
+      aurora-shimmer 7s ease-in-out infinite alternate;
+  }
+
+  /* Tab hidden: the aurora stops (set by AuroraBackground on visibilitychange). */
+  .aurora[data-paused="true"] .aurora-blob {
+    animation-play-state: paused;
+  }
+
+  /* Progress fill: a Frost gradient sized to the visible part of the indicator (progress.tsx sets the size).
+     The sheen runs only while the bar is live (progress.tsx sets data-live); it crosses on transform only.
+     Reduced motion and Easy view hide it (unlayered rules below). */
+  .progress-frost {
+    background-image: linear-gradient(90deg, #8fbcbb, #88c0d0, #81a1c1);
+    background-repeat: no-repeat;
+    position: relative;
+    overflow: hidden;
+  }
+  .progress-frost::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(100deg, transparent 35%, rgba(255, 255, 255, 0.3) 50%, transparent 65%);
+    transform: translateX(-100%);
+    display: none;
+  }
+  .progress-frost[data-live="true"]::after {
+    display: block;
+    animation: progress-sheen 2.5s ease-in-out infinite;
+  }
 }
 
 @keyframes segment-settle {
@@ -200,6 +452,55 @@
   }
   to {
     color: var(--foreground);
+  }
+}
+
+/* Run switch cross-fade: opacity only. */
+@keyframes run-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* The one card entrance: fade and rise 8 px, once. App.tsx has no JS motion wrapper for it. */
+@keyframes live-card-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes progress-sheen {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes aurora-drift {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(6vw, 4vh, 0) scale(1.08);
+  }
+}
+
+@keyframes aurora-shimmer {
+  from {
+    opacity: 0.7;
+  }
+  to {
+    opacity: 1;
   }
 }
 
@@ -273,7 +574,7 @@
 }
 
 /* Reduced motion: stop CSS animations and transitions everywhere. This also
-   covers the registry's ThinkingState, which has no rule of its own. */
+   covers the registry's ThinkingState, which has no rule of its own. The aurora stays put. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -283,4 +584,54 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+
+  .aurora-blob,
+  .aurora[data-live="true"] .aurora-blob,
+  .aurora-band {
+    animation: none;
+  }
+
+  .live-card,
+  .run-fade {
+    animation: none;
+  }
+
+  .progress-frost::after {
+    display: none;
+  }
+}
+
+/* Easy view (html[data-easy="true"]): no motion at all. Hover lift and press scale are removed too. */
+html[data-easy="true"] *,
+html[data-easy="true"] *::before,
+html[data-easy="true"] *::after {
+  animation: none !important;
+  transition: none !important;
+}
+
+html[data-easy="true"] .aurora {
+  opacity: calc(var(--aurora-opacity) * 0.6);
+}
+
+html[data-easy="true"] .progress-frost::after {
+  display: none;
+}
+
+html[data-easy="true"] [data-slot="button"] {
+  translate: none !important;
+  scale: none !important;
+}
+
+/* Speaker dot glow while its turn's text streams (transcript-card sets data-speaker-dot and data-streaming).
+   The glow takes currentColor, so the dot must also set its color to the speaker colour. */
+[data-speaker-dot] {
+  transition: box-shadow 200ms ease;
+}
+[data-speaker-dot][data-streaming="true"] {
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 25%, transparent), 0 0 12px currentColor;
+}
+
+/* Frost-tinted run timestamps. Unlayered so it beats the text-ink-3 utility; --time-ink is tuned per theme. */
+[data-testid="paragraph-time"] {
+  color: var(--time-ink);
 }

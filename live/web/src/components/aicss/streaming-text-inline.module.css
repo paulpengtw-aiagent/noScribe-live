@@ -1,34 +1,56 @@
-/* Caret for StreamingTextInline, styled after AICSS StreamingText. */
+/*
+ * Soft caret at the reveal edge of a streaming segment: a small rounded Frost bar with a glow. The element itself has
+ * zero width, so it never changes where lines break; the bar is drawn by ::before, which overflows it.
+ */
 .caret {
+  position: relative;
   display: inline-block;
-  width: 8px;
-  height: 1.05em;
-  margin-left: 2px;
-  background: currentColor;
+  width: 0;
+  height: 1.1em;
   vertical-align: text-bottom;
 }
 
-.solid {
-  animation: none;
-  opacity: 1;
+.caret::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+  border-radius: 2px;
+  background: #88c0d0;
+  box-shadow: 0 0 6px 1px rgb(136 192 208 / 0.5);
 }
 
-.blink {
-  animation: caret-blink 1s step-end infinite;
+/* While text is revealing: a gentle pulse of the glow. */
+.pulse::before {
+  animation: caret-glow 1.4s ease-in-out infinite;
 }
 
-@keyframes caret-blink {
+/* Resting caret after a live run's newest segment, while nothing is revealing: dimmer and still. */
+.idle::before {
+  opacity: 0.6;
+}
+
+/* The unrevealed rest of a streaming segment: laid out so the lines are final, but neither drawn nor read. */
+.unrevealed {
+  visibility: hidden;
+}
+
+@keyframes caret-glow {
   0%,
   100% {
     opacity: 1;
+    box-shadow: 0 0 4px 0 rgb(136 192 208 / 0.4);
   }
   50% {
-    opacity: 0;
+    opacity: 0.6;
+    box-shadow: 0 0 9px 2px rgb(136 192 208 / 0.7);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .blink {
+  .pulse::before {
     animation: none;
   }
 }

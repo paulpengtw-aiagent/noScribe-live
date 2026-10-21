@@ -97,6 +97,8 @@ faster-whisper yields segments per 30 s decoding window, so they arrive in burst
 - Killed runs: a run with no `run_end` is "stale" once its CLI pid (from `run_start`) is gone and it has been quiet for 5 s. Without a pid, the 30-minute rule applies. A check every 2 s pushes status changes to open streams as `runs` messages.
 - Latest (`/api/stream?run=latest`) follows the newest run that is still live, or the newest run when none is. Summaries carry `live` (status is running), `inferred_end_t` (`last_t` for a stale run, `ended_t` for an ended one, null while running) and `output_name` (basename of `output_file` if that file exists, else null).
 - `GET /api/runs/{id}/peaks`: 404 for an unknown run, a run without audio, or a missing audio file; 422 `{"error": "audio could not be decoded", "detail": "..."}` when ffprobe or ffmpeg cannot read the file; 500 only for a server failure such as a missing ffmpeg.
+- `GET /api/runs/{id}/export.odt?lang=en|zh-TW`: the transcript as an OpenDocument text file (stdlib only, no LibreOffice). 404 for an unknown run, 409 JSON while it is still running. Paragraphs follow the page's rules. The file name is `<audio stem>_YYYY-MM-DD_HHMM.odt` (server local time at run_start). Timestamps read M:SS, or H:MM:SS from one hour, as the screen does. Segments get a space between them where the page puts one (both sides CJK, or both non-CJK).
+- Export text: Simplified Chinese is converted with OpenCC `s2tw` (`opencc-python-reimplemented`); the footer and meta do not name it. The page converts with opencc-js `cn` to `tw`. The two agree on common words (櫃台→櫃臺, 柜台→櫃檯, 台灣→臺灣, 后来→後來, 干净→乾淨), but about 40 of 61,000 random CJK inputs differ on single variant characters (托, 擡, 栗, 樑, 硷 among them). Exact parity needs the opencc-js cn-to-tw dictionary ported to the server; not done.
 - `live/web`: React, Vite, TypeScript, Tailwind v4, shadcn/ui and motion.
 
 ## UI components and licensing
@@ -109,6 +111,13 @@ faster-whisper yields segments per 30 s decoding window, so they arrive in burst
 - Built here: the canvas activity orb (`live/web/src/lib/orb-renderer.ts`), the timeline, the layout and the status chips.
 - Chinese segment text is shown in Traditional (Taiwan) through `opencc-js` (cn→tw), converted for display only and loaded lazily; the feed and the saved HTML are unchanged.
 - From the ObsidianUI shadcn registry (MIT), installed with `pnpm dlx shadcn@latest add https://www.obsidianui.dev/r/alert.json https://www.obsidianui.dev/r/skeleton.json https://www.obsidianui.dev/r/sonner.json https://www.obsidianui.dev/r/command.json https://www.obsidianui.dev/r/popover.json https://www.obsidianui.dev/r/input.json` into `live/web/src/components/ui/`: `Alert`, `Skeleton`, `Sonner` (theme passed as a prop; next-themes not used), `Command` (with its `Dialog` dependency), `Popover` and `Input`.
+
+Licence verdicts (checked 2026-10-21; evidence, install URLs and candidates in [docs/ui-libraries-nordic.md](docs/ui-libraries-nordic.md)):
+
+- AICSS (free registry): MIT for free components and the CLI, "Free components and the CLI are MIT-licensed on GitHub and npm" ([licence](https://www.aicss.dev/license); [MIT text](https://raw.githubusercontent.com/kvnkld/aicss/main/LICENSE)). Verdict: USE, free items only; Pro is excluded.
+- ObsidianUI: MIT, "Components are MIT licensed" ([terms](https://www.obsidianui.dev/terms), section 05; [repo LICENSE](https://github.com/Atharvsinh-codez/ObsidianUI/blob/main/LICENSE)). Verdict: USE.
+- AffectUI: "Items marked as free are open source under the MIT license" ([terms](https://www.affectui.com/terms), section 4; [llms.txt](https://www.affectui.com/llms.txt), "40 items are free and open source (MIT)"). Verdict: USE, free-tagged items only; Pro is excluded ([Pro licence](https://www.affectui.com/license)).
+- uiarc: "Free: MIT" ([licence](https://uiarc.dev/license); [terms](https://uiarc.dev/terms), "The free library is MIT licensed"). Verdict: USE, free items only; Pro is excluded.
 
 ## Tests
 
