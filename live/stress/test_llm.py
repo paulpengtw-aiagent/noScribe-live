@@ -6,22 +6,23 @@ Groups (--only, default all). Each group starts its own `python -m server` on th
 set used below (llm-open, llm-panel, llm-settings-open, llm-base-url, llm-api-key, llm-model, llm-remember,
 llm-save, llm-test, llm-test-result[data-ok], llm-context-text, llm-files, llm-file[data-status],
 llm-context-stats, llm-retrieval-note, llm-run, llm-cancel, llm-progress, llm-error[data-kind], llm-diff
-[data-segment-index][data-status], llm-accept, llm-reject, llm-accept-all, llm-reject-all, llm-confirm,
-llm-confirm-ok, llm-show-original, export-odt, and transcript segments with data-corrected="true").
+[data-segment-index][data-status][data-corrected-text], llm-accept, llm-reject, llm-accept-all, llm-reject-all,
+llm-confirm, llm-confirm-ok, llm-show-original, export-odt, and transcript segments with data-corrected="true").
 
   settings   save with remember OFF: key in sessionStorage 'noscribe-live-llm-key', not in localStorage;
              test connection ok. Remember ON: key in localStorage.
   upload     the 10 fixtures in live/stress/fixtures/llm go to llm-files: 10 rows with data-status "ok",
              llm-context-stats shows 10.
-  run        a correction run on the finished demo feed completes: at least 3 llm-diff rows, one of them for
-             the 吶喊自序 correction.
-  review     accept two rows, reject one: transcript shows the accepted corrections (data-corrected="true")
-             and not the originals; reload keeps them (IndexedDB); llm-show-original hides them, again shows.
+  run        a correction run on the finished demo feed completes: at least 2 llm-diff rows (the recorded feed
+             has 2 correctable segments), one of them for the 吶喊自序 correction (data-corrected-text).
+  review     accept one row and reject one (accept two and reject one when there are 3 or more rows): transcript
+             shows the accepted corrections (data-corrected="true") and not the originals; reload keeps them
+             (IndexedDB); llm-show-original hides them, again shows.
   export     Download .odt (export-odt): zip with mimetype first, content.xml holds an accepted corrected
              string and the AI-correction note.
   malformed  model "mock-malformed-once": the first answer per batch is invalid JSON; the run still completes
              and the mock log shows a malformed answer followed by a valid retry.
-  cors       mock started with --no-cors: llm-test shows llm-error[data-kind="cors"].
+  cors       mock started with --no-cors: llm-test shows llm-error[data-kind="cors"]; a correction run does too.
 
 Run from the repo root with the system Python that has Playwright:
 
@@ -63,6 +64,7 @@ GROUP_OFFSET = {"settings": 0, "upload": 1, "run": 2, "review": 3, "export": 4, 
 GROUPS = tuple(GROUP_OFFSET)
 MOCK_OFFSET = 20
 CORRECTED = '[data-corrected="true"]'
+MIN_DIFF_ROWS = 2  # the recorded demo feed has 2 correctable segments
 
 
 def T(name: str) -> str:
@@ -122,6 +124,17 @@ def open_panel(page: Any) -> None:
     page.wait_for_selector(T("llm-panel"), state="visible", timeout=15000)
 
 
+def close_panel(page: Any) -> None:
+    """Closes the LLM panel with Escape, so the transcript behind it can be clicked. Twice at most: a settings
+    dialog on top of the panel closes first."""
+    for _ in range(2):
+        if not page.is_visible(T("llm-panel")):
+            break
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(200)
+    page.wait_for_selector(T("llm-panel"), state="hidden", timeout=10000)
+
+
 def configure(page: Any, base: str, key: str, model: str, remember: bool = False) -> None:
     open_panel(page)
     page.click(T("llm-settings-open"))
@@ -141,10 +154,25 @@ def configure(page: Any, base: str, key: str, model: str, remember: bool = False
 
 
 def click_test(page: Any) -> None:
+    """Clicks the settings dialog's test button, opening the dialog first when it is closed. The dialog animates in,
+    so the button can be moving or re-mounted for a moment: let the animation settle, then click with a fresh locator
+    on each attempt, and fall back to a DOM click last."""
     if not page.is_visible(T("llm-test")):
         page.click(T("llm-settings-open"))
         page.wait_for_selector(T("llm-test"), state="visible", timeout=15000)
-    page.click(T("llm-test"))
+    page.wait_for_timeout(500)
+    last: Exception | None = None
+    for attempt in range(4):
+        try:
+            if attempt < 3:
+                page.locator(T("llm-test")).click(timeout=4000)
+            else:
+                page.locator(T("llm-test")).evaluate("el => el.click()")
+            return
+        except Exception as exc:  # not stable or detached: retry with a fresh locator
+            last = exc
+            page.wait_for_timeout(400)
+    raise RuntimeError(f"could not click llm-test: {last!r}")
 
 
 def upload_fixtures(page: Any) -> bool:
@@ -156,7 +184,7 @@ def upload_fixtures(page: Any) -> bool:
 
 def run_correction(page: Any, timeout: float = 90) -> int:
     page.click(T("llm-run"))
-    ux.wait_until(lambda: page.locator(T("llm-diff")).count() >= 3, timeout, 0.5)
+    ux.wait_until(lambda: page.locator(T("llm-diff")).count() >= MIN_DIFF_ROWS, timeout, 0.5)
     return page.locator(T("llm-diff")).count()
 
 
@@ -247,10 +275,11 @@ def group_run(h: Any, browser: Any) -> None:
         ctxs.append(ctx)
         open_run(page, h.port, st.run_id)
         count = prepare(page, st.base, "sk-llm-test-RUN-3333", "mock")
-        h.check("run: correction run completes with at least 3 llm-diff rows", count >= 3,
+        h.check("run: correction run completes with at least 2 llm-diff rows", count >= MIN_DIFF_ROWS,
                 f"llm-diff rows {count}")
-        nahan = page.locator(T("llm-diff"), has_text="自序").count()
-        h.check("run: one of the rows is the 吶喊自序 correction", nahan > 0, f"rows mentioning 自序: {nahan}")
+        nahan = page.locator(f'{T("llm-diff")}[data-corrected-text*="吶喊自序"]').count()
+        h.check("run: one of the rows is the 吶喊自序 correction", nahan > 0,
+                f"rows whose corrected text has 吶喊自序: {nahan}")
         errors = page.locator(T("llm-error")).count()
         h.check("run: no llm-error shown", errors == 0, f"llm-error elements {errors}")
         h.shot(page, "run-diffs.png")
@@ -268,37 +297,46 @@ def group_review(h: Any, browser: Any) -> None:
         ctxs.append(ctx)
         open_run(page, h.port, st.run_id)
         count = prepare(page, st.base, "sk-llm-test-REV-4444", "mock")
-        if count < 3:
-            h.check("review: run produced at least 3 rows first", False, f"llm-diff rows {count}")
+        if count < MIN_DIFF_ROWS:
+            h.check("review: run produced at least 2 rows first", False, f"llm-diff rows {count}")
             return
+        # The recorded feed has 2 rows: accept the first, reject the second. With 3 or more rows: accept the first
+        # two, reject the third.
+        accept_rows = [0, 1] if count >= 3 else [0]
+        reject_row = 2 if count >= 3 else 1
+        n_acc = len(accept_rows)
         rows = page.locator(T("llm-diff"))
-        rows.nth(0).locator(T("llm-accept")).click()
-        rows.nth(1).locator(T("llm-accept")).click()
-        rows.nth(2).locator(T("llm-reject")).click()
-        s0, s1, s2 = (rows.nth(i).get_attribute("data-status") or "" for i in range(3))
-        h.check("review: accept 2 and reject 1 mark the rows", "accept" in s0 and "accept" in s1 and "reject" in s2,
-                f"statuses {s0!r} {s1!r} {s2!r}")
-        shown = ux.wait_until(lambda: page.locator(CORRECTED).count() >= 2, 15, 0.3)
+        for i in accept_rows:
+            rows.nth(i).locator(T("llm-accept")).click()
+        rows.nth(reject_row).locator(T("llm-reject")).click()
+        statuses = [rows.nth(i).get_attribute("data-status") or "" for i in [*accept_rows, reject_row]]
+        marked = all("accept" in s for s in statuses[:-1]) and "reject" in statuses[-1]
+        h.check("review: accept and reject mark the rows", marked, f"statuses {statuses}")
+        close_panel(page)  # the transcript checks below run with the panel closed
+        shown = ux.wait_until(lambda: page.locator(CORRECTED).count() >= n_acc, 15, 0.3)
         texts = page.locator(CORRECTED).all_inner_texts()
         originals_gone = not any(("LibriVox dot org" in t) or ("吶喊自恤" in t) for t in texts)
         h.check("review: transcript shows the accepted corrections (data-corrected) and not the originals",
                 bool(shown) and originals_gone, f"corrected segments {len(texts)}; originals gone {originals_gone}")
         page.reload(wait_until="domcontentloaded", timeout=30000)
         page.wait_for_selector(T("llm-open"), timeout=30000)
-        after = ux.wait_until(lambda: page.locator(CORRECTED).count() >= 2, 20, 0.3)
+        after = ux.wait_until(lambda: page.locator(CORRECTED).count() >= n_acc, 20, 0.3)
         open_panel(page)
         rows2 = page.locator(T("llm-diff"))
-        p0 = rows2.nth(0).get_attribute("data-status") or ""
-        p2 = rows2.nth(2).get_attribute("data-status") or ""
+        p_acc = rows2.nth(accept_rows[0]).get_attribute("data-status") or ""
+        p_rej = rows2.nth(reject_row).get_attribute("data-status") or ""
         h.check("review: corrections persist after reload (IndexedDB)",
-                bool(after) and "accept" in p0 and "reject" in p2,
-                f"corrected after reload {page.locator(CORRECTED).count()}; statuses {p0!r} {p2!r}")
-        page.click(T("llm-show-original"))
+                bool(after) and "accept" in p_acc and "reject" in p_rej,
+                f"corrected after reload {page.locator(CORRECTED).count()}; statuses {p_acc!r} {p_rej!r}")
+        page.click(T("llm-show-original"))  # inside the panel
+        close_panel(page)
         hidden = ux.wait_until(lambda: page.locator(CORRECTED).count() == 0, 10, 0.3)
         h.check("review: llm-show-original shows the original text", bool(hidden),
                 f"corrected segments while original shown {page.locator(CORRECTED).count()}")
+        open_panel(page)
         page.click(T("llm-show-original"))
-        back = ux.wait_until(lambda: page.locator(CORRECTED).count() >= 2, 10, 0.3)
+        close_panel(page)
+        back = ux.wait_until(lambda: page.locator(CORRECTED).count() >= n_acc, 10, 0.3)
         h.check("review: toggling again shows the corrections", bool(back),
                 f"corrected segments {page.locator(CORRECTED).count()}")
         h.shot(page, "review-accepted.png")
@@ -320,6 +358,7 @@ def group_export(h: Any, browser: Any) -> None:
         libri = next((i for i in range(rows.count()) if "LibriVox" in rows.nth(i).inner_text()), 0)
         rows.nth(libri).locator(T("llm-accept")).click()
         ux.wait_until(lambda: page.locator(CORRECTED).count() >= 1, 15, 0.3)
+        close_panel(page)  # the open panel covers the transcript, and export-odt is in the transcript view
         target = h.work / "downloads" / f"export-{ux.STAMP}.odt"
         target.parent.mkdir(parents=True, exist_ok=True)
         with page.expect_download(timeout=60000) as dl_info:
@@ -351,7 +390,7 @@ def group_malformed(h: Any, browser: Any) -> None:
         ctxs.append(ctx)
         open_run(page, h.port, st.run_id)
         count = prepare(page, st.base, "sk-llm-test-MAL-5555", "mock-malformed-once")
-        h.check("malformed: run still completes after an invalid JSON answer (retry)", count >= 3,
+        h.check("malformed: run still completes after an invalid JSON answer (retry)", count >= MIN_DIFF_ROWS,
                 f"llm-diff rows {count}")
         log = st.mock_log.read_text(encoding="utf-8") if st.mock_log.exists() else ""
         mal, retry = log.count("response=malformed"), log.count("response=valid-retry")
@@ -379,6 +418,18 @@ def group_cors(h: Any, browser: Any) -> None:
         h.check("cors: a mock without CORS headers shows llm-error[data-kind=cors]", bool(seen),
                 f"cors error elements {cors.count()}")
         h.shot(page, "cors-error.png")
+        # The same failure from a correction run. Reload first, so the settings test result is gone and only the
+        # run's error can match; the saved settings survive the reload.
+        page.reload(wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_selector(T("llm-open"), timeout=30000)
+        open_panel(page)
+        try:
+            page.click(T("llm-run"), timeout=10000)
+            run_seen = ux.wait_until(lambda: cors.count() > 0 and cors.first.is_visible(), 30, 0.3)
+            run_detail = f"cors error elements {cors.count()}"
+        except Exception as exc:  # the run could not start: a failed check, not a crash of the group
+            run_seen, run_detail = False, f"run not started: {exc!r}"[:200]
+        h.check("cors: a correction run shows llm-error[data-kind=cors] too", bool(run_seen), run_detail)
     finally:
         for ctx in ctxs:
             ctx.close()

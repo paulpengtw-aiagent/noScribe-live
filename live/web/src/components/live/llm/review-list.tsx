@@ -153,6 +153,7 @@ function CorrectionRow({
       data-testid="llm-diff"
       data-segment-index={item.segmentIndex}
       data-status={item.status}
+      data-corrected-text={item.corrected}
       className={cn(
         "flex flex-col gap-2 rounded-[14px] border bg-card p-3",
         accepted ? "border-primary/60" : "border-border",

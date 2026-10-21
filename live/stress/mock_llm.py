@@ -12,9 +12,12 @@ Endpoints
   OPTIONS *                  -> 204 (CORS preflight)
 
 Behaviour
-  * Last user message contains the word "ping" and no segment lines: content "pong" (connection test).
-  * Otherwise the segment lines of the last user message, `[#<index>] [m:ss] <speaker>: <text>`, are
-    corrected deterministically. Only segment_ids present in that batch can appear in the answer:
+  * No segment lines in any user message and the last user message contains the word "ping": content "pong"
+    (connection test).
+  * Otherwise the segment lines of the batch prompt, `[#<index>] [m:ss] <speaker>: <text>`, are corrected
+    deterministically. The batch prompt is every user message read from its "Segments to correct:" header on
+    (a repair retry resends the batch, so its key and corrections are the same). Only segment_ids present in
+    that batch can appear in the answer:
       - "LibriVox dot org"                          -> "LibriVox.org"           reason "URL"
       - "吶喊自恤"                                   -> "吶喊自序"                 reason "書名（依參考文件）"
       - text starting with "訓 "                     -> prefix removed           reason "誤辨識"
@@ -112,14 +115,37 @@ def corrections_for(segments: list[tuple[int, str]]) -> list[dict[str, Any]]:
     return out
 
 
-def last_user_text(messages: list[Any]) -> str:
-    for message in reversed(messages):
+BATCH_HEADER = "Segments to correct:"  # the batch prompt's section header (the read-only context is above it)
+
+
+def user_texts(messages: list[Any]) -> list[str]:
+    """The text of every user message, in order (OpenAI content may also be a list of parts)."""
+    texts: list[str] = []
+    for message in messages:
         if isinstance(message, dict) and message.get("role") == "user":
             content = message.get("content", "")
             if isinstance(content, list):  # OpenAI content parts
-                return "\n".join(str(p.get("text", "")) for p in content if isinstance(p, dict))
-            return str(content)
-    return ""
+                texts.append("\n".join(str(p.get("text", "")) for p in content if isinstance(p, dict)))
+            else:
+                texts.append(str(content))
+    return texts
+
+
+def last_user_text(messages: list[Any]) -> str:
+    texts = user_texts(messages)
+    return texts[-1] if texts else ""
+
+
+def batch_segments(messages: list[Any]) -> list[tuple[int, str]]:
+    """The segment lines of the batch prompt. The app's repair retry is [system, user(batch), assistant(bad reply),
+    user(repair instruction)]; a real model reads the whole conversation, so every user message is read, and the
+    batch lines are those below BATCH_HEADER."""
+    segments: list[tuple[int, str]] = []
+    for text in user_texts(messages):
+        if BATCH_HEADER in text:
+            text = text.split(BATCH_HEADER, 1)[1]
+        segments.extend(parse_segments(text))
+    return segments
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -174,8 +200,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, {"error": {"message": "request body is not JSON", "type": "invalid_request_error"}})
             return
         model = str(body.get("model") or "mock")
-        user = last_user_text(body.get("messages") or [])
-        segments = parse_segments(user)
+        messages = body.get("messages") or []
+        user = last_user_text(messages)
+        segments = batch_segments(messages)
         seg_ids = tuple(sorted({sid for sid, _ in segments}))
 
         if model == "mock-error-500":
