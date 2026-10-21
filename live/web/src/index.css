@@ -142,9 +142,10 @@
   --ink-2: #d8dee9;
   --ink-3: #b4bfcf;
   --ink-4: #4c566a;
-  /* Status dots use the Nord aurora and frost hues; the -ink variants are the text-safe lighter tones. */
+  /* Status dots use the Nord aurora and frost hues; the -ink variants are the text-safe lighter tones.
+     The failed dot is a lighter Aurora red (#D98A91, was #BF616A) so it reaches 3:1 on the raised chip. */
   --status-live: #a3be8c;
-  --status-failed: #bf616a;
+  --status-failed: #d98a91;
   --status-stopped: #d08770;
   --status-finished: #88c0d0;
   --status-live-ink: #abc496;
@@ -233,6 +234,12 @@
     padding: 0 0.15em;
     margin: 0 -0.15em;
     transition: background-color 200ms ease;
+  }
+
+  /* Run switch: the transcript body fades in over 200 ms when the run id changes (keyed in transcript-card).
+     Opacity only; off under reduced motion and Easy view. */
+  .run-fade {
+    animation: run-fade 200ms ease-out both;
   }
 
   /* Fresh text settles from tertiary to ink over 600 ms. */
@@ -331,7 +338,17 @@
   }
 }
 
-/* One gentle entrance for the frosted cards: fade and rise 8 px, once. */
+/* Run switch cross-fade: opacity only. */
+@keyframes run-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* The one card entrance: fade and rise 8 px, once. App.tsx has no JS motion wrapper for it. */
 @keyframes live-card-rise {
   from {
     opacity: 0;
@@ -443,6 +460,11 @@
   }
 
   .aurora-blob {
+    animation: none;
+  }
+
+  .live-card,
+  .run-fade {
     animation: none;
   }
 }

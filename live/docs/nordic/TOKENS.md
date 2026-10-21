@@ -35,7 +35,7 @@ Foreground on fills:
 |---|---|---|---|---|---|
 | `--ring` (focus) | `#88C0D0` | 6.24:1 (bg) | `#5E81AC` | 3.31:1 (bg) | focus ring, 3:1 |
 | `--status-live` dot | `#A3BE8C` | 4.23:1 (raised) | `#4D683F` | 5.12:1 (bg) | live dot |
-| `--status-failed` dot | `#BF616A` | 2.11:1 (raised) | `#984A52` | 5.02:1 (bg) | failed dot (dark: below 3:1, see notes) |
+| `--status-failed` dot | `#D98A91` | 3.28:1 (raised) | `#984A52` | 5.02:1 (bg) | failed dot (dark: lighter Aurora red, see notes) |
 | `--status-stopped` dot | `#D08770` | 3.03:1 (raised) | `#865541` | 5.09:1 (bg) | stopped dot |
 | `--status-finished` dot | `#88C0D0` | 4.31:1 (raised) | `#486488` | 4.99:1 (bg) | finished dot |
 
@@ -55,6 +55,7 @@ Foreground on fills:
 
 - Glass cards (`.live-card`) are translucent: 78% of the card colour in dark, 80% in light, with a 14 px backdrop blur. Text is checked against the opaque card colour, not against the blurred aurora behind it.
 - The aurora (opacity 0.25 dark, 0.18 light) sits behind page text in the top 40vh. It is not part of the ratios above.
-- Known gap: the dark failed dot `#BF616A` reads 2.11:1 on the raised chip and 2.46:1 on the card. The boss-specified hex is kept; the text variant `#DFB0B5` passes.
+- Changed (Nordic round): the dark failed dot is `#D98A91`, a lighter Aurora red, not `#BF616A`. `#BF616A` read 2.11:1 on the raised chip and 2.46:1 on the card, below the 3:1 target. `#D98A91` reads 3.28:1 on the raised chip and 3.83:1 on the card. The light dot and both dark and light `-ink` text tokens are unchanged.
 - Known gap: the dark stopped dot `#D08770` reads 3.03:1 on the raised chip (just above the 3:1 non-text target, with no margin).
-- Components that still use hard-coded Tailwind palette classes (for example `bg-red-500`, `bg-emerald-500`, `bg-amber-500`, `text-amber-700`, `dark:text-amber-400` in `top-bar.tsx`) do not follow these tokens yet. The `--color-status-*` and `--color-status-*-ink` theme mappings are ready for them to adopt.
+- Adopted: `top-bar.tsx` and `run-picker.tsx` use the status utilities (`bg-status-*` for dots, `text-status-*-ink` for text). No palette classes (`-red-`, `-emerald-`, `-amber-` and the like) remain in `live/web/src`. `header-menu.tsx`, `stage-card.tsx` and `conn-banner.tsx` had none.
+- Motion: the card entrance is the `.live-card` CSS keyframe only. The run-switch cross-fade is `.run-fade` (opacity, 200 ms). Both are off under reduced motion and Easy view, and no animation touches height, width or top.

@@ -48,6 +48,24 @@ html[data-easy="true"] header .text-\[14px\] {
   line-height: 1.5;
 }
 
+/* Transcript header meta line (output name and model) at the card label size. */
+html[data-easy="true"] [data-testid="run-title"] ~ div {
+  font-size: 17px;
+  line-height: 1.6;
+}
+
+/* Transcript timestamps are labels too. */
+html[data-easy="true"] [data-testid="paragraph-time"] {
+  font-size: 17px;
+}
+
+/* Phones: the stat tiles stack one per row, so the 20 px values never squeeze or overflow a 390 px screen. */
+@media (max-width: 480px) {
+  html[data-easy="true"] [data-testid="stage-card"] .grid-cols-2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* Header toggles and the compact header menu (the menu is portaled, so it is matched by its popover slot). */
 html[data-easy="true"] [data-testid="easy-toggle"],
 html[data-easy="true"] [data-testid="locale-toggle"],

@@ -1,24 +1,35 @@
 #!/usr/bin/env python3
 """UX measurements for noScribe Live: axe-core on a finished run, CLS during a replay, the initial
-bundle, and screenshots. Prints one JSON summary and writes it to OUTDIR/summary.json.
+bundle, and screenshots. Prints one JSON summary (or a table with --matrix) and writes it to
+OUTDIR/summary.json.
 
     /usr/bin/python3 -I live/stress/measure_ux.py --static DIR --out OUTDIR [--axe PATH] [--port 8775]
-        [--python PY] [--work DIR] [--locale en|zh-TW]
+        [--python PY] [--work DIR] [--locale en|zh-TW] [--theme dark|light|both] [--easy] [--widths 1440,390]
+    /usr/bin/python3 -I live/stress/measure_ux.py --matrix --static DIR --out OUTDIR [--axe PATH] [--port P]
 
   --locale  sets localStorage key noscribe-live-locale (src/i18n) before the app loads, so axe and the
            shots run in that UI language and the html lang is checked. Default: no key is set (the
            browser language decides, en-US in Playwright). Run once per locale with its own --out.
+  --theme   dark, light or both (default both). The theme is set through the localStorage key read by
+           src/hooks/use-theme.ts before load (axe configs only).
+  --easy    easy view on: localStorage noscribe-live-easy = "1" before load (axe configs only). Off by
+           default: the key is not set, and the app reads anything but "1" as off.
+  --widths  comma list of 1440 and/or 390 (default 1440,390). 1440 is 1440x900, 390 is 390x844.
+  --matrix  bundle and axe over theme(dark,light) x locale(en,zh-TW) x easy(off,on) x width(1440,390):
+           16 configs on one finished run. Prints a compact table; summary.json holds every config.
+           No CLS and no shots in this mode. --theme, --widths, --easy and --locale are rejected with it.
 
-  axe      axe-core (violations only) on a FINISHED run, replayed at speed 8 first. Three configs:
-           1440x900 dark, 1440x900 light, 390x844 dark. The theme is set through the localStorage key
-           read by src/hooks/use-theme.ts before the app loads. Per config: violation counts by impact
-           (rules and nodes) and the color-contrast nodes, lowest ratio first (top 10 listed).
+  axe      axe-core (violations only) on a FINISHED run, replayed at speed 8 first. One config per
+           theme x width (default: dark and light at 1440x900 and 390x844), each with --easy and --locale
+           as given. Per config: violation counts by impact (rules and nodes) and the color-contrast
+           nodes, lowest ratio first (top 10 listed). Serious and critical are also listed by rule id.
   cls      Cumulative layout shift at 1440x900. The page is opened before a replay starts (speed 2,
            max-gap 2). CLS is the plain sum of layout-shift entries without hadRecentInput, read until
            run_end + 2 s. Also reports the largest shift and its source nodes.
   bundle   Bytes of the initial JS and CSS named by STATIC/index.html (entry script, modulepreload,
-           stylesheet), read from disk.
-  shots    Dark screenshots of the finished run at 390x844 and 430x932, viewport and full page.
+           stylesheet), read from disk. JS also gets gzip level 6 sizes per file and in total.
+  shots    Dark screenshots of the finished run at 390x844 and 430x932, viewport and full page
+           (default mode only).
 
 The script starts its own server (`python -m server`, cwd live/) and its own replays, on --port only.
 It signals only processes it started and aborts when the port is already in use. WORK (default
@@ -29,6 +40,7 @@ OUTDIR/work) holds the copied source feed, the feeds dirs and the logs. The sour
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import os
 import shutil
@@ -49,17 +61,15 @@ DEFAULT_AXE = "/tmp/nslive-r5/axe.min.js"
 FEEDS_SRC = Path("/workspace/noScribe-live/live/feeds")  # read only
 DEMO_NAME = "20261020-052449-demo-en-zh.ndjson"          # 50 segments, 2 speakers, EN + ZH
 THEME_KEY = "noscribe-live-theme"                        # src/hooks/use-theme.ts
+EASY_KEY = "noscribe-live-easy"                          # src/hooks/use-easy-view.ts ("1" on; unset or "0" off)
 LOCALE_KEY = "noscribe-live-locale"                      # src/i18n (values: en | zh-TW)
 LOCALES = ("en", "zh-TW")
+THEMES = ("dark", "light")
 DEFAULT_PORT = 8775
 DESKTOP = {"width": 1440, "height": 900}
 PHONE = {"width": 390, "height": 844}
 PHONE_LARGE = {"width": 430, "height": 932}
-AXE_CONFIGS = (
-    ("dark_1440x900", DESKTOP, "dark"),
-    ("light_1440x900", DESKTOP, "light"),
-    ("dark_390x844", PHONE, "dark"),
-)
+WIDTHS = {1440: DESKTOP, 390: PHONE}                     # --widths values -> viewport
 SHOT_VIEWPORTS = (PHONE, PHONE_LARGE)
 IMPACTS = ("critical", "serious", "moderate", "minor")
 
@@ -133,6 +143,7 @@ CLS_JS = r"""
 AXE_JS = "async () => (await axe.run(document, { resultTypes: ['violations'] })).violations"
 SEG_COUNT_JS = "() => document.querySelectorAll('[data-segment-seq]').length"
 THEME_READ_JS = "() => document.documentElement.dataset.theme || null"
+EASY_READ_JS = "() => document.documentElement.getAttribute('data-easy')"
 ENDED_JS = "() => (window.__nsObs ? window.__nsObs.feeds : [])"
 CLS_READ_JS = "() => window.__nsCLS || null"
 
@@ -145,11 +156,16 @@ def locale_script(locale: str) -> str:
     return "(() => { try { localStorage.setItem('%s', '%s'); } catch (e) {} })();" % (LOCALE_KEY, locale)
 
 
+def easy_script() -> str:
+    return "(() => { try { localStorage.setItem('%s', '1'); } catch (e) {} })();" % EASY_KEY
+
+
 LANG_JS = "() => document.documentElement.getAttribute('lang')"
 
 
-def page_scripts(base: list[str], locale: str | None) -> list[str]:
-    return base + ([locale_script(locale)] if locale else [])
+def page_scripts(base: list[str], locale: str | None, easy: bool = False) -> list[str]:
+    extra = ([locale_script(locale)] if locale else []) + ([easy_script()] if easy else [])
+    return base + extra
 
 
 def _exit_on_term(signum: int, _frame: Any) -> None:
@@ -320,22 +336,54 @@ def measure_bundle(static: Path) -> dict[str, Any]:
         path = static / rel
         exists = path.is_file()
         is_css = role == "stylesheet" or path.suffix.lower() == ".css"
+        data = path.read_bytes() if exists else None
         files.append({
             "role": role,
             "file": rel,
             "kind": "css" if is_css else "js",
-            "bytes": path.stat().st_size if exists else None,
+            "bytes": len(data) if data is not None else None,
+            "gzip6_bytes": len(gzip.compress(data, compresslevel=6, mtime=0)) if data is not None else None,
         })
-    js = sum(f["bytes"] or 0 for f in files if f["kind"] == "js")
-    css = sum(f["bytes"] or 0 for f in files if f["kind"] == "css")
+
+    def total(kind: str, key: str) -> int:
+        return sum(f[key] or 0 for f in files if f["kind"] == kind)
+
+    js, css = total("js", "bytes"), total("css", "bytes")
+    js_gz, css_gz = total("js", "gzip6_bytes"), total("css", "gzip6_bytes")
     return {
         "index": str(static / "index.html"),
         "files": files,
         "initial_js_bytes": js,
+        "initial_js_gzip6_bytes": js_gz,
         "initial_css_bytes": css,
+        "initial_css_gzip6_bytes": css_gz,
         "initial_total_bytes": js + css,
+        "initial_total_gzip6_bytes": js_gz + css_gz,
         "missing": [f["file"] for f in files if f["bytes"] is None],
     }
+
+
+def default_combos(themes: tuple[str, ...], widths: list[int], locale: str | None, easy: bool) -> list[dict[str, Any]]:
+    """One axe config per theme x width, with the given locale and easy flag."""
+    combos: list[dict[str, Any]] = []
+    for theme in themes:
+        for width in widths:
+            vp = WIDTHS[width]
+            label = f"{theme}_{vp['width']}x{vp['height']}" + ("_easy" if easy else "")
+            combos.append({"label": label, "theme": theme, "locale": locale, "easy": easy, "viewport": vp})
+    return combos
+
+
+def matrix_combos() -> list[dict[str, Any]]:
+    """theme x locale x easy x width: 16 axe configs."""
+    combos: list[dict[str, Any]] = []
+    for theme in THEMES:
+        for locale in LOCALES:
+            for easy in (False, True):
+                for width, vp in WIDTHS.items():
+                    label = f"{theme}-{locale}-{'easy' if easy else 'off'}-{width}"
+                    combos.append({"label": label, "theme": theme, "locale": locale, "easy": easy, "viewport": vp})
+    return combos
 
 
 # ---- own server and replays ------------------------------------------------------------------------
@@ -431,10 +479,38 @@ class Rig:
 
 
 # ---- measures --------------------------------------------------------------------------------------
+def axe_config(browser: Any, rig: Rig, run_id: str, expected: int, axe_path: Path, combo: dict[str, Any]) -> dict[str, Any]:
+    errs: list[str] = []
+    vp = combo["viewport"]
+    scripts = page_scripts([INIT_JS, theme_script(combo["theme"])], combo["locale"], combo["easy"])
+    ctx, page = open_page(browser, vp, scripts, errs)
+    try:
+        page.goto(rig.base, wait_until="domcontentloaded", timeout=30000)
+        state = wait_finished(page, run_id, expected)
+        page.add_script_tag(path=str(axe_path))
+        violations = page.evaluate(AXE_JS) or []
+        return {
+            "viewport": f"{vp['width']}x{vp['height']}",
+            "theme": combo["theme"],
+            "theme_applied": page.evaluate(THEME_READ_JS),
+            "locale": combo["locale"] or "default",
+            "html_lang": page.evaluate(LANG_JS),
+            "easy": combo["easy"],
+            "easy_applied": page.evaluate(EASY_READ_JS) == "true",
+            **state,
+            **summarize_axe(violations),
+            "page_errors": errs[:3],
+        }
+    finally:
+        ctx.close()
+
+
 def measure_finished(rig: Rig, browser: Any, src: Path, axe_path: Path, out: Path,
-                     summary: dict[str, Any], locale: str | None = None) -> None:
-    """axe-core on the finished run (three configs), then dark screenshots at two phone sizes."""
-    print("== finished run: axe-core and screenshots", flush=True)
+                     summary: dict[str, Any], combos: list[dict[str, Any]], locale: str | None,
+                     with_shots: bool) -> None:
+    """axe-core on the finished run for each config; with with_shots, dark screenshots at two phone sizes."""
+    print(f"== finished run: axe-core on {len(combos)} config(s)" + (" and screenshots" if with_shots else ""),
+          flush=True)
     feeds = rig.feeds_dir("finished")
     expected = summary["source_segments"]
     server = rig.start_server(feeds, "finished")
@@ -447,33 +523,17 @@ def measure_finished(rig: Rig, browser: Any, src: Path, axe_path: Path, out: Pat
         summary["axe_run"]["run_id"] = run_id
 
         axe: dict[str, Any] = {}
-        for label, viewport, theme in AXE_CONFIGS:
-            errs: list[str] = []
-            ctx, page = open_page(browser, viewport, page_scripts([INIT_JS, theme_script(theme)], locale), errs)
+        for combo in combos:
+            label = combo["label"]
             try:
-                page.goto(rig.base, wait_until="domcontentloaded", timeout=30000)
-                state = wait_finished(page, run_id, expected)
-                page.add_script_tag(path=str(axe_path))
-                violations = page.evaluate(AXE_JS) or []
-                axe[label] = {
-                    "viewport": f"{viewport['width']}x{viewport['height']}",
-                    "theme": theme,
-                    "theme_applied": page.evaluate(THEME_READ_JS),
-                    "locale": locale or "default",
-                    "html_lang": page.evaluate(LANG_JS),
-                    **state,
-                    **summarize_axe(violations),
-                    "page_errors": errs[:3],
-                }
+                axe[label] = axe_config(browser, rig, run_id, expected, axe_path, combo)
             except Exception as exc:
                 axe[label] = {"error": f"{type(exc).__name__}: {str(exc).strip()[:300]}"}
                 print(f"FAIL axe {label}: {axe[label]['error']}", flush=True)
-            finally:
-                ctx.close()
         summary["axe"] = axe
 
         shots: list[str] = []
-        for viewport in SHOT_VIEWPORTS:
+        for viewport in (SHOT_VIEWPORTS if with_shots else ()):
             ctx, page = open_page(browser, viewport, page_scripts([INIT_JS, theme_script("dark")], locale), [])
             try:
                 page.goto(rig.base, wait_until="domcontentloaded", timeout=30000)
@@ -541,6 +601,39 @@ def record(errors: list[dict[str, str]], name: str, exc: BaseException) -> None:
     print(f"FAIL {name}: {text}", flush=True)
 
 
+def matrix_lines(axe: dict[str, Any]) -> list[str]:
+    """Compact table: serious and critical as rules/nodes, then the rule ids of both (impact, nodes)."""
+    head = f"{'theme':<6} {'locale':<6} {'easy':<4} {'width':<5} {'serious':>9} {'critical':>9}  rule ids (impact, nodes)"
+    lines = [head, "-" * len(head)]
+    for entry in axe.values():
+        if "error" in entry:
+            lines.append(f"ERROR {entry['error']}")
+            continue
+        ri, ni = entry["rules_by_impact"], entry["nodes_by_impact"]
+        ser = f"{ri.get('serious', 0)}/{ni.get('serious', 0)}"
+        crit = f"{ri.get('critical', 0)}/{ni.get('critical', 0)}"
+        bad = sorted((r for r in entry["rules"] if r["impact"] in ("critical", "serious")),
+                     key=lambda r: (r["impact"] != "critical", str(r["id"])))
+        ids = ", ".join(f"{r['id']}({r['impact'][0]},{r['nodes']})" for r in bad) or "-"
+        lines.append(f"{entry['theme']:<6} {entry['locale']:<6} {'on' if entry['easy'] else 'off':<4} "
+                     f"{entry['viewport'].split('x')[0]:<5} {ser:>9} {crit:>9}  {ids}")
+    return lines
+
+
+def print_matrix(summary: dict[str, Any], out: Path) -> None:
+    bundle = summary.get("bundle") or {}
+    for f in bundle.get("files", []):
+        if f["kind"] == "js":
+            print(f"bundle {f['role']:<13} {f['file']}: raw {f['bytes']} B, gzip-6 {f['gzip6_bytes']} B")
+    print(f"bundle initial JS total: raw {bundle.get('initial_js_bytes')} B, "
+          f"gzip-6 {bundle.get('initial_js_gzip6_bytes')} B; "
+          f"CSS raw {bundle.get('initial_css_bytes')} B, gzip-6 {bundle.get('initial_css_gzip6_bytes')} B")
+    print()
+    print("\n".join(matrix_lines(summary.get("axe") or {})))
+    print()
+    print(f"summary: {out / 'summary.json'}  errors: {len(summary.get('errors') or [])}")
+
+
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="UX measurements for noScribe Live: axe, CLS, bundle, shots.")
     parser.add_argument("--static", required=True, help="built frontend dir (has index.html), e.g. a dist dir")
@@ -553,7 +646,28 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
                                                      "(default: OUTDIR/work)")
     parser.add_argument("--locale", choices=LOCALES, default=None,
                         help="UI locale set in localStorage before load (default: none, browser language decides)")
-    return parser.parse_args(argv)
+    parser.add_argument("--theme", choices=(*THEMES, "both"), default=None,
+                        help="axe themes (default: both)")
+    parser.add_argument("--easy", action="store_true",
+                        help="easy view on for the axe configs (localStorage noscribe-live-easy = 1)")
+    parser.add_argument("--widths", default=None,
+                        help="comma list of 1440 and/or 390 for the axe configs (default: 1440,390)")
+    parser.add_argument("--matrix", action="store_true",
+                        help="bundle and axe over theme x locale x easy x width (16 configs); no CLS or shots")
+    args = parser.parse_args(argv)
+    if args.matrix:
+        given = [flag for flag, val in (("--theme", args.theme), ("--widths", args.widths),
+                                        ("--easy", args.easy), ("--locale", args.locale)) if val]
+        if given:
+            parser.error("--matrix enumerates theme, locale, easy and width; drop " + ", ".join(given))
+    try:
+        args.width_list = [int(w) for w in (args.widths or "1440,390").split(",") if w.strip()]
+    except ValueError:
+        parser.error(f"--widths takes a comma list of 1440 and 390, got {args.widths!r}")
+    if not args.width_list or any(w not in WIDTHS for w in args.width_list):
+        parser.error(f"--widths takes a comma list of 1440 and 390, got {args.widths!r}")
+    args.theme_list = THEMES if args.theme in (None, "both") else (args.theme,)
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -585,12 +699,16 @@ def main(argv: list[str] | None = None) -> int:
 
     summary: dict[str, Any] = {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "mode": "matrix" if args.matrix else "default",
         "static": str(static),
         "port": args.port,
         "work": str(work),
         "source": str(FEEDS_SRC / DEMO_NAME),
         "source_segments": expected,
-        "locale": args.locale or "default",
+        "locale": "matrix" if args.matrix else (args.locale or "default"),
+        "theme": "matrix" if args.matrix else (args.theme or "both"),
+        "widths": None if args.matrix else args.width_list,
+        "easy": None if args.matrix else args.easy,
     }
     errors: list[dict[str, str]] = []
     rig = Rig(args.python, args.port, static, work)
@@ -604,13 +722,18 @@ def main(argv: list[str] | None = None) -> int:
             browser = pw.chromium.launch()
             try:
                 try:
-                    measure_finished(rig, browser, src, axe_path, out, summary, args.locale)
+                    if args.matrix:
+                        measure_finished(rig, browser, src, axe_path, out, summary, matrix_combos(), None, False)
+                    else:
+                        combos = default_combos(args.theme_list, args.width_list, args.locale, args.easy)
+                        measure_finished(rig, browser, src, axe_path, out, summary, combos, args.locale, True)
                 except Exception as exc:
                     record(errors, "finished", exc)
-                try:
-                    measure_cls(rig, browser, src, summary, args.locale)
-                except Exception as exc:
-                    record(errors, "cls", exc)
+                if not args.matrix:
+                    try:
+                        measure_cls(rig, browser, src, summary, args.locale)
+                    except Exception as exc:
+                        record(errors, "cls", exc)
             finally:
                 browser.close()
     finally:
@@ -619,7 +742,10 @@ def main(argv: list[str] | None = None) -> int:
     summary["errors"] = errors
     text = json.dumps(summary, indent=2, ensure_ascii=False)
     out.joinpath("summary.json").write_text(text + "\n", encoding="utf-8")
-    print(text, flush=True)
+    if args.matrix:
+        print_matrix(summary, out)
+    else:
+        print(text, flush=True)
     return 0 if not errors else 1
 
 

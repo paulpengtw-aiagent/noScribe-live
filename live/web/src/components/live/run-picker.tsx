@@ -23,10 +23,10 @@ const PICKER_STATUS: Record<RunStatus, PickerStatus> = {
 
 /** Dot and label colours per status. Live pulses; canceled is a hollow grey dot. */
 const STATUS_STYLE: Record<PickerStatus, { dot: string; text: string }> = {
-  live: { dot: "bg-emerald-500 animate-pulse", text: "text-emerald-700 dark:text-emerald-400" },
+  live: { dot: "bg-status-live animate-pulse", text: "text-status-live-ink" },
   finished: { dot: "bg-foreground/60", text: "text-ink-2" },
-  failed: { dot: "bg-red-500", text: "text-red-600 dark:text-red-400" },
-  stopped: { dot: "bg-amber-500", text: "text-amber-700 dark:text-amber-400" },
+  failed: { dot: "bg-status-failed", text: "text-status-failed-ink" },
+  stopped: { dot: "bg-status-stopped", text: "text-status-stopped-ink" },
   canceled: { dot: "border border-ink-2 bg-transparent", text: "text-ink-2" },
 };
 

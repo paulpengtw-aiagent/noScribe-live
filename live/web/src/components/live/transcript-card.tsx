@@ -150,12 +150,11 @@ function pumpReveal(engine: RevealEngine, loop: RevealLoop, publish: (view: Reve
 }
 
 
-/** One-shot highlight that fades out over 1.2 s. Under reduced motion it holds, then drops. */
-function flashSegment(el: HTMLElement, reduce: boolean) {
+/** One-shot highlight that fades out over 1.2 s. Callers skip it under reduced motion and Easy view (no JS motion). */
+function flashSegment(el: HTMLElement) {
   const lit = { backgroundColor: "rgb(128 128 128 / 0.22)", boxShadow: "0 0 0 0.5px rgb(128 128 128 / 0.8)" };
   const clear = { backgroundColor: "rgb(128 128 128 / 0)", boxShadow: "0 0 0 0.5px rgb(128 128 128 / 0)" };
-  const frames: Keyframe[] = reduce ? [lit, { ...lit, offset: 0.85 }, { ...clear, offset: 1 }] : [lit, clear];
-  el.animate(frames, { duration: 1200, easing: "ease-out" });
+  el.animate([lit, clear], { duration: 1200, easing: "ease-out" });
 }
 
 interface SegmentSpanProps {
@@ -446,10 +445,10 @@ export function TranscriptCard({
         holdRef.current = performance.now() + HOLD_MS;
         setFollow(false);
         target.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
-        flashSegment(target, reduce);
+        if (!reduce && !easy) flashSegment(target);
       },
     }),
-    [reduce],
+    [reduce, easy],
   );
 
   const onScroll = () => {
@@ -550,6 +549,7 @@ export function TranscriptCard({
           </div>
         ) : hasBlocks ? (
           <div ref={contentRef} className="shrink-0">
+            <div key={runId ?? ""} className="run-fade">
             {visibleBlocks.map(({ block, paragraphs }) => (
               <section key={block.id} data-testid="turn" className="mt-[18px] first:mt-0">
                 <header
@@ -614,6 +614,7 @@ export function TranscriptCard({
                 ))}
               </section>
             ))}
+            </div>
           </div>
         ) : active ? (
           <p className="m-auto px-2 py-10 text-[15px] text-ink-2">
@@ -637,9 +638,9 @@ export function TranscriptCard({
             type="button"
             data-testid="jump-to-live"
             onClick={jumpToLive}
-            initial={reduce ? false : { opacity: 0, y: 6 }}
+            initial={reduce || easy ? false : { opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={reduce ? { opacity: 0 } : { opacity: 0, y: 6 }}
+            exit={reduce || easy ? undefined : { opacity: 0, y: 6 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
             className="absolute right-6 bottom-5 inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3.5 text-[13px] font-medium text-secondary-foreground shadow-ring hover:bg-raised"
           >

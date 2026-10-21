@@ -8,13 +8,23 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>noScribe Live</title>
     <script>
-      // Apply the stored theme before first paint (dark when nothing is stored).
+      // Apply the stored theme, Easy view and language before first paint, so nothing flashes.
+      // Same keys and defaults as use-theme.ts, use-easy-view.ts and i18n/core.ts (dark, Easy off, detected language).
       (function () {
+        var el = document.documentElement;
         try {
           var theme = localStorage.getItem("noscribe-live-theme") === "light" ? "light" : "dark";
-          var el = document.documentElement;
           el.classList.toggle("dark", theme === "dark");
           el.dataset.theme = theme;
+        } catch (e) {}
+        try {
+          if (localStorage.getItem("noscribe-live-easy") === "1") el.dataset.easy = "true";
+        } catch (e) {}
+        try {
+          var saved = localStorage.getItem("noscribe-live-locale");
+          var first = (navigator.languages && navigator.languages[0]) || navigator.language || "";
+          var zh = saved === "zh-TW" || (saved !== "en" && /^zh/i.test(first));
+          el.lang = zh ? "zh-Hant-TW" : "en";
         } catch (e) {}
       })();
     </script>

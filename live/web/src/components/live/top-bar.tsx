@@ -41,9 +41,9 @@ function useCompactHeader(): boolean {
 type Tone = "red" | "amber" | "green" | "neutral";
 
 const TONE_DOT: Record<Tone, string> = {
-  red: "bg-red-500",
-  amber: "bg-amber-500",
-  green: "bg-emerald-500",
+  red: "bg-status-failed",
+  amber: "bg-status-stopped",
+  green: "bg-status-live",
   neutral: "bg-foreground/60",
 };
 
@@ -165,7 +165,7 @@ export function TopBar({
                 data-state={badge.status}
                 className={cn(
                   "flex min-w-0 shrink items-center gap-2 rounded-full bg-raised px-2.5 py-0.5 text-[12px] font-medium shadow-ring",
-                  cutOff ? "text-amber-700 dark:text-amber-400" : "text-foreground",
+                  cutOff ? "text-status-stopped-ink" : "text-foreground",
                 )}
               >
                 <span
