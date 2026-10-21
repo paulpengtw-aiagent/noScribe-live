@@ -1,14 +1,75 @@
 import type { Locale } from "../core";
 
-// LLM correction review strings. Only the title exists so far; feature work adds keys to `en` and the typed zh-TW object follows.
+// AI correction strings: the panel, the review list, the transcript and the .odt note. zh-TW follows the en shape.
 const en = {
   title: "Review corrections",
+  open: "AI correction",
+  settings: "Model settings",
+  privacy: "Segments and reference documents are sent only to the endpoint you set, and only when you start a correction.",
+  run: "Start correction",
+  preparing: "Preparing…",
+  cancel: "Cancel",
+  needConfig: "Set the endpoint and model first.",
+  progress: (done: number, total: number) => `Batch ${done} of ${total}`,
+  noChanges: "No corrections were suggested.",
+  pending: (n: number) => `${n} pending`,
+  accept: "Accept",
+  reject: "Reject",
+  acceptAll: "Accept all",
+  rejectAll: "Reject all",
+  confirmAcceptTitle: "Accept all pending suggestions?",
+  confirmRejectTitle: "Reject all pending suggestions?",
+  confirmBody: (n: number) =>
+    `This sets ${n} pending suggestion${n === 1 ? "" : "s"}. You can still change each one afterwards.`,
+  confirmOk: "Confirm",
+  confirmCancel: "Cancel",
+  showOriginal: "Show original",
+  appliedNote: (n: number) => `AI corrections applied (${n} segments)`,
+  errorCors:
+    "The browser could not reach the endpoint. It must allow browser requests (CORS), for example a local LiteLLM, vLLM or Ollama with CORS enabled.",
+  errorNetwork: "The endpoint could not be reached. Check the address and that the server is running.",
+  errorHttp: (status: number) => `The endpoint answered with HTTP ${status}.`,
+  errorAuth: "The endpoint rejected the API key. Check it in model settings.",
+  errorJson: "The model did not return usable corrections. Try again, or use another model.",
+  errorAborted: "Correction was cancelled.",
+  errorGeneric: "Something went wrong. Try again.",
+  saveFailed: "The changes could not be saved in this browser.",
 };
 
 export type LlmReviewMessages = typeof en;
 
 const zhTW: LlmReviewMessages = {
   title: "審閱修正",
+  open: "AI 校正",
+  settings: "模型設定",
+  privacy: "只有在你開始校正時，逐字稿片段與參考文件才會送到你設定的端點。",
+  run: "開始校正",
+  preparing: "準備中…",
+  cancel: "取消",
+  needConfig: "請先設定端點與模型。",
+  progress: (done, total) => `第 ${done} / ${total} 批`,
+  noChanges: "沒有建議的修正。",
+  pending: (n) => `待審 ${n} 筆`,
+  accept: "接受",
+  reject: "捨棄",
+  acceptAll: "全部接受",
+  rejectAll: "全部捨棄",
+  confirmAcceptTitle: "接受所有待審建議？",
+  confirmRejectTitle: "捨棄所有待審建議？",
+  confirmBody: (n) => `這會處理 ${n} 筆待審建議。之後仍可逐筆更改。`,
+  confirmOk: "確認",
+  confirmCancel: "取消",
+  showOriginal: "顯示原文",
+  appliedNote: (n) => `本文件已套用 AI 校正（${n} 處）`,
+  errorCors:
+    "瀏覽器無法連到此端點。端點必須允許瀏覽器跨來源請求（CORS），例如啟用 CORS 的本機 LiteLLM、vLLM 或 Ollama。",
+  errorNetwork: "無法連到此端點。請檢查位址，並確認伺服器已啟動。",
+  errorHttp: (status) => `端點回應 HTTP ${status}。`,
+  errorAuth: "端點拒絕了 API 金鑰。請到模型設定檢查。",
+  errorJson: "模型沒有回傳可用的修正。請再試一次，或換一個模型。",
+  errorAborted: "已取消校正。",
+  errorGeneric: "發生錯誤，請再試一次。",
+  saveFailed: "無法在此瀏覽器儲存變更。",
 };
 
 export const llmReview = { en, "zh-TW": zhTW } satisfies Record<Locale, unknown>;
