@@ -144,3 +144,7 @@ cd live && .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m 
 
 - Chinese is converted to Traditional (Taiwan) for display only (opencc-js cn→tw); Whisper output carries no punctuation, and none is added.
 - There are no automated frontend tests.
+
+---
+
+Built on [noScribe](https://github.com/kaixxx/noScribe) by Kai Dröge (GPL-3.0).

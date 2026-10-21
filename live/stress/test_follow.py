@@ -7,7 +7,7 @@ Run from the repo root with the system Python that has Playwright:
 
 It starts `python -m server` on --port with a fresh feeds dir and replays the recorded demo feed twice:
 replay A (`--speed 0.2 --max-gap 5`, about 94 s, so it is still live through scenarios 1 and 2; scenario 3
-kills it) and replay B (`--speed 6 --max-gap 1`, about 6 s). Scenarios:
+kills it) and replay B (`--speed 1 --max-gap 30`, about 50 s). Scenarios:
 
   1. The page is opened in follow mode while A runs; B starts 4 s later. The page must show B while B
      runs (run-state running), and follow A again after B's run_end (the server's run=latest prefers live runs).
@@ -43,6 +43,7 @@ from typing import Any
 HERE = Path(__file__).resolve().parent            # live/stress
 sys.path.insert(0, str(HERE))                     # reuse test_reconnect helpers, also under `python -I`
 from test_reconnect import INIT_JS, feed_info, port_busy, wait_until  # noqa: E402
+from test_ux import wait_full_ui  # noqa: E402  (pre-roll wait; same directory)
 
 LIVE_DIR = HERE.parent                            # cwd for `python -m server` and `python -m server.replay`
 DEFAULT_STATIC = LIVE_DIR / "web" / "dist"
@@ -305,7 +306,8 @@ def scenario_2(lab: Lab, page: Any, path_a: Path, run_a: str, run_b: str) -> Non
 
     if offered:
         other.click(timeout=5000)
-    switched = wait_until(lambda: shown_run(page) == run_a and state(page) == "running", 10)
+    wait_until(lambda: shown_run(page) == run_a, 10)
+    switched = wait_full_ui(page, 30) and bool(wait_until(lambda: state(page) == "running", 5))
     lab.check("2 switch button: page now shows A with run-state running", bool(offered) and bool(switched),
               f"button offered={bool(offered)}, shown run is A={shown_run(page) == run_a}, "
               f"run-state {run_info(page)}, button visible now={other.is_visible()}")
@@ -313,6 +315,7 @@ def scenario_2(lab: Lab, page: Any, path_a: Path, run_a: str, run_b: str) -> Non
 
 
 def scenario_3(lab: Lab, page: Any, replay_a: subprocess.Popen) -> None:
+    wait_full_ui(page, 30)
     e0 = elapsed(page)
     time.sleep(2)
     e1 = elapsed(page)
@@ -345,25 +348,28 @@ def run_checks(lab: Lab, browser: Any) -> None:
     path_a, run_a = lab.new_run(before, "A")
     ctx, page = new_page(browser)
     page.goto(lab.url, wait_until="domcontentloaded", timeout=30000)
-    on_a = wait_until(lambda: shown_run(page) == run_a and state(page) == "running", 15)
+    wait_until(lambda: shown_run(page) == run_a, 15)
+    on_a = wait_full_ui(page, 30) and bool(wait_until(lambda: state(page) == "running", 5))
     lab.check("setup: follow page shows A (run-state running) before B starts", bool(on_a),
               f"run-state {run_info(page)}")
     time.sleep(4)  # B starts 4 s after A
 
     before_b = lab.feeds_now()
-    replay_b = lab.start_replay(6, 1, "B")
+    replay_b = lab.start_replay(1, 30, "B")
     path_b, run_b = lab.new_run(before_b, "B")
-    on_b = wait_until(lambda: shown_run(page) == run_b and state(page) == "running", 15)
+    wait_until(lambda: shown_run(page) == run_b, 15)
+    on_b = wait_full_ui(page, 30) and bool(wait_until(lambda: state(page) == "running", 5))
     lab.check("1 follow newest: page shows B while B runs", bool(on_b),
               f"shown run is B={shown_run(page) == run_b}, run-state {run_info(page)}")
     lab.shot(page, "01-follow-b-running.png")
 
     # The server switches to A as soon as B ends and sends A's snapshot instead of B's run_end, so the
     # page need not receive B's run_end. Time the switch from B's feed file, not from the page's feed.
-    ended_b = wait_until(lambda: "run_end" in path_b.read_text(encoding="utf-8"), 40)
+    ended_b = wait_until(lambda: "run_end" in path_b.read_text(encoding="utf-8"), 90)
     t_end = time.monotonic()
     back = wait_until(lambda: shown_run(page) == run_a, 15)
     delay = time.monotonic() - t_end
+    wait_full_ui(page, 30)
     lab.check("1 follow newest: page follows A again after B's run_end",
               bool(ended_b) and bool(back) and state(page) == "running",
               f"B run_end in its feed={bool(ended_b)}, seen by page={ended(page, run_b)}; "

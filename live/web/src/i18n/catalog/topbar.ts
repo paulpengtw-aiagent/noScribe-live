@@ -1,9 +1,9 @@
 import type { Locale } from "../core";
 
 // Header strings: product name, run and connection state, the other-live switch, the theme and language
-// toggles, and the latency and clock hints that live-view.ts builds.
+// toggles, the CLI log panel's labels, and the latency and clock hints that live-view.ts builds.
 const en = {
-  appName: "noScribe Live",
+  appName: "Live Speech-to-Text",
   languageLabel: "Language",
   switchLanguage: "Switch language to Chinese (Traditional)",
   /** Button label on the English page; it names the language the button switches to. */
@@ -15,8 +15,12 @@ const en = {
   processing: "Processing…",
   /** Icon menu (compact header) that holds the theme and language switches. */
   menuLabel: "Theme and language",
-  /** The CLI log button in the run's stage header, and the title of the dialog it opens. */
+  /** The CLI log panel's header title. */
   cliLog: "CLI log",
+  /** Switch in the CLI log panel that shows the CLI's transcript echo lines (hidden by default). */
+  cliLogTranscripts: "Show transcript lines",
+  /** Dim count of the transcript echo lines the CLI log panel hides. */
+  cliLogHidden: (count: number) => `${count} hidden`,
   /** Run state words. "loading" is a running run with no segment yet. */
   runStatus: { running: "Live", loading: "Loading", finished: "Finished", error: "Failed", canceled: "Canceled", stale: "Stopped" },
   runDisconnected: "Disconnected",
@@ -39,7 +43,7 @@ const en = {
 export type TopbarMessages = typeof en;
 
 const zhTW: TopbarMessages = {
-  appName: "noScribe Live",
+  appName: "即時語音轉文字",
   languageLabel: "語言",
   switchLanguage: "切換語言為英文",
   languageShort: "EN",
@@ -48,6 +52,8 @@ const zhTW: TopbarMessages = {
   processing: "處理中…",
   menuLabel: "主題與語言",
   cliLog: "CLI 紀錄",
+  cliLogTranscripts: "顯示轉錄行",
+  cliLogHidden: (count) => `已隱藏 ${count} 行`,
   runStatus: { running: "即時", loading: "載入中", finished: "已完成", error: "失敗", canceled: "已取消", stale: "意外停止" },
   runDisconnected: "連線中斷",
   connConnected: "已連線",

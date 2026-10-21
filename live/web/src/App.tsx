@@ -212,6 +212,9 @@ export default function App() {
   const pre = usePrerollMode(run, easy, reduce, now);
   // The pre-roll composition is on screen (the pre-roll or its morph): the header keeps only the logo and the toggles.
   const prerollOnScreen = run !== null && pre.mode !== "full";
+  // The full UI is mounted in its final layout from the start. While the pre-roll is shown it stays hidden
+  // (visibility, inert, opacity), so the switch changes no box in normal flow.
+  const fullHidden = pre.mode === "pre";
   const segments = run?.segments;
   const lastSegment = segments && segments.length > 0 ? segments[segments.length - 1] : undefined;
   const speakers = run?.speakers ?? NO_SPEAKERS;
@@ -295,20 +298,35 @@ export default function App() {
             minimal={prerollOnScreen}
           />
           <ConnBanner connection={connection} retry={retry} lastUpdateT={lastUpdateT} />
+          {/* Below the header, one box: the full UI in normal flow, and the pre-roll as an absolute overlay on top of it. */}
+          <div className="relative flex min-h-0 flex-1 flex-col">
           {run && prerollOnScreen ? (
-            <Suspense fallback={null}>
-              <Preroll run={run} morphing={pre.mode === "morph"} easy={easy} reduce={reduce} />
-            </Suspense>
+            <div
+              className={pre.mode === "morph" ? "pointer-events-none absolute inset-x-0 top-0 z-10" : "absolute inset-x-0 top-0 z-10"}
+            >
+              <Suspense fallback={null}>
+                <Preroll run={run} morphing={pre.mode === "morph"} easy={easy} reduce={reduce} />
+              </Suspense>
+            </div>
           ) : null}
-          {pre.mode === "pre" ? null : (
-          <main className="live-page">
+          <motion.main
+            className="live-page"
+            aria-hidden={fullHidden || undefined}
+            inert={fullHidden}
+            style={{ visibility: fullHidden ? "hidden" : "visible" }}
+            initial={false}
+            animate={{ opacity: fullHidden ? 0 : 1, y: fullHidden ? 12 : 0 }}
+            transition={{ duration: reduce ? 0.3 : 0.6, ease: [0.22, 1, 0.36, 1] }}
+          >
             {!state.helloed ? (
               <LoadingSkeleton />
             ) : (
             <div className="live-grid">
               <div className="live-stage">
-                {/* A row above the stage card. flex-none! keeps it from sharing the column's flex space (.live-stage > *). */}
-                {run && !prerollOnScreen && run.logs.length > 0 ? (
+                {/* A row above the stage card. flex-none! keeps it from sharing the column's flex space (.live-stage > *).
+                    It mounts with the log lines even during the pre-roll (the full UI is hidden then), so the switch
+                    does not insert it into the column and push the stage card and transcript down. */}
+                {run && run.logs.length > 0 ? (
                   <div className="flex flex-none! justify-end">
                     <CliLogDisclosure logs={run.logs} startedT={run.startedT} easy={easy} />
                   </div>
@@ -384,8 +402,8 @@ export default function App() {
               </div>
             </div>
             )}
-          </main>
-          )}
+          </motion.main>
+          </div>
         </div>
         </MotionConfig>
       </SpeakerOrderContext.Provider>

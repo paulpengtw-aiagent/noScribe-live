@@ -7,7 +7,7 @@ const en = {
   connAttemptRetry: (attempt: number, seconds: number) => `Attempt ${attempt} · retrying in ${seconds} s`,
   connLastUpdate: (time: string) => `Last update ${time}`,
   /** Tab title: "<status> – <file>". The product name is the title when no run is shown. */
-  titleIdle: "noScribe Live",
+  titleIdle: "Live Speech-to-Text",
   titleReconnecting: (name: string) => `⚠ Reconnecting – ${name}`,
   titleLive: (name: string) => `● Live – ${name}`,
   titleStopped: (name: string) => `■ Stopped – ${name}`,
@@ -43,7 +43,7 @@ const zhTW: AppMessages = {
   connAttempt: (attempt) => `第 ${attempt} 次重新連線`,
   connAttemptRetry: (attempt, seconds) => `第 ${attempt} 次重新連線 · ${seconds} 秒後重試`,
   connLastUpdate: (time) => `最後更新 ${time}`,
-  titleIdle: "noScribe Live",
+  titleIdle: "即時語音轉文字",
   titleReconnecting: (name) => `⚠ 重新連線中 – ${name}`,
   titleLive: (name) => `● 即時 – ${name}`,
   titleStopped: (name) => `■ 意外停止 – ${name}`,

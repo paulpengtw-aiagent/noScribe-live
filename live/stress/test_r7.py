@@ -95,6 +95,9 @@ RING_JS = r"""() => { const e = document.querySelector('[data-testid="transcript
   const cs = getComputedStyle(e);
   return { shadow: cs.boxShadow, outlineOffset: cs.outlineOffset, outlineStyle: cs.outlineStyle }; }"""
 STAT_COUNT_JS = r"""() => document.querySelectorAll('[data-testid="stat-card"]').length"""
+# Stat-card count plus whether the pre-roll overlay of a live run is still up (window.__nslivePreroll.active).
+STAT_PREROLL_JS = r"""() => { const p = window.__nslivePreroll; return {
+  pre: !!(p && p.active === true), n: document.querySelectorAll('[data-testid="stat-card"]').length }; }"""
 BODY_JS = r"""() => document.body.innerText"""
 # Runs before the app: records every layout-shift entry (page-clock start time, value, hadRecentInput). The
 # session-window CLS is computed from these in Python (session_max, copied from test_nordic.py).
@@ -555,12 +558,16 @@ def group_cls(h: ux.Harness, browser: Any, port: int) -> None:
         before = h.feeds_now(feeds)
         h.start_replay(h.demo_src, feeds, 2, 2, "cls")
         path, _ = h.new_run(feeds, before, "cls")
-        ux.wait_until(lambda: page.evaluate(STAT_COUNT_JS) > 0, 3, 0.2)     # short cap: the replay must not end first
-        counts: list[int] = []
+        counts: list[int] = []        # stat-card counts of the samples taken after the pre-roll switch only
+        pre_samples = 0
         end = time.monotonic() + 240
         while time.monotonic() < end:
             try:
-                counts.append(page.evaluate(STAT_COUNT_JS))
+                sample = page.evaluate(STAT_PREROLL_JS)
+                if sample["pre"]:
+                    pre_samples += 1          # pre-roll: stat cards are not rendered by design, not counted
+                else:
+                    counts.append(int(sample["n"]))
             except Exception:
                 counts.append(-1)
             if ux.feed_info(path)["ended"]:
@@ -572,9 +579,10 @@ def group_cls(h: ux.Harness, browser: Any, port: int) -> None:
         raw_sum = sum(float(s["v"]) for s in raw)
         bad = [c for c in counts if c != 8]
         note = absent_note(page, ['[data-testid="stat-card"]'])
-        h.check("cls: stat-card count is 8 at every 250 ms sample of a speed-2 replay",
+        h.check("cls: stat-card count is 8 at every 250 ms sample after the pre-roll of a speed-2 replay",
                 bool(counts) and not bad,
-                f"{len(counts)} samples, values {sorted(set(counts))}{note}")
+                f"{len(counts)} post-switch samples ({pre_samples} pre-roll samples not counted), "
+                f"values {sorted(set(counts))}{note}")
         print(f"INFO cls: session-window max {cls_max:.4f}, raw sum {raw_sum:.4f} over {len(raw)} non-input "
               f"shifts ({len(shifts) - len(raw)} input-caused excluded)", flush=True)
         h.check("cls: layout-shift CLS (session-window max, Chrome definition) <= 0.1", cls_max <= 0.1,

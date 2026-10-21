@@ -89,6 +89,8 @@ Press Ctrl-C in each terminal. Past runs stay in the picker. To clear them, dele
 
 More detail (all viewer options, the feed format, measurements, how it works and the tests) is in [live/README.md](live/README.md).
 
+noScribe Live is built on [noScribe](https://github.com/kaixxx/noScribe) by Kai Dröge (GPL-3.0).
+
 ---
 
 # noScribe
