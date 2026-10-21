@@ -2,7 +2,6 @@ import { useId, useRef, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { Orb } from "@/components/aicss/Orb";
 import { ActivityOrb, type ActivityOrbProps, type OrbMode } from "@/components/live/activity-orb";
-import { EasyStatus, type EasyStatusKind } from "@/components/live/easy-toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatClock, useI18n, type Messages } from "@/i18n";
 import { useEasyView } from "@/hooks/use-easy-view";
@@ -75,7 +74,6 @@ export function StageCard({
   const [moreOpen, setMoreOpen] = useState(false);
   // Easy view: the orb draws its still frame, the same as a frozen run.
   const orbFrozen = frozen || easy;
-  const easyKind = easy ? easyStatusKind(phase, run, frozen) : null;
 
   // The bar and the number share one value: the bar is drawn at exactly the whole percentage shown.
   // A phase with no measured percentage (pct 0) shows no number at all, so the bar never reads "0%".
@@ -83,14 +81,13 @@ export function StageCard({
   const showPercent = pctValue > 0;
 
   const phaseName = phaseText(s, run, phase);
-  const orbLabel = orbLabelFor(s, run, phase);
   const timed = hasTimeline(run, phase);
   // An ended run with no clock has no progress reading: its line stays empty, so the card keeps its height.
   const clockHidden = !timed && (phase === "finished" || phase === "error" || phase === "canceled");
 
   // The same eight tiles in every phase, so the grid never gains or loses a row. A value not known yet reads as a dash.
   const stats: Stat[] = [
-    { label: s.stats.model, value: run?.model ?? DASH, hint: s.hints.model },
+    { label: s.stats.model, value: run?.model ?? DASH, hint: s.hints.model, hiddenInEasy: true },
     { label: s.stats.device, value: deviceText(run) ?? DASH, hint: s.hints.device, secondary: true },
     {
       label: s.stats.latency,
@@ -125,7 +122,15 @@ export function StageCard({
       data-frozen={frozen ? "true" : "false"}
       className={cn("live-card flex min-h-0 flex-1 flex-col gap-3 p-5", phone && "gap-2.5 p-4")}
     >
-      {phone ? (
+      {/* Easy view: no orb. The status sentence leads the card on every width. */}
+      {easy ? (
+        <p
+          data-testid="easy-status-sentence"
+          className="text-center text-[22px] leading-snug font-medium break-words text-foreground"
+        >
+          {easySentence(s, run, phase, frozen, pctValue)}
+        </p>
+      ) : phone ? (
         <div className="flex min-w-0 items-center gap-2.5 text-[13px]" data-testid="stage-summary">
           <ActivityOrb
             mode={orbMode}
@@ -136,21 +141,19 @@ export function StageCard({
             activeColor={activeColor}
             size={PHONE_SUMMARY_ORB_PX}
             frozen={orbFrozen}
-            label={orbLabel}
           />
-          {easyKind ? (
-            <EasyStatus kind={easyKind} className="text-foreground" />
-          ) : (
-            <span className="min-w-0 truncate font-medium text-foreground">{phaseName}</span>
-          )}
-          <span className="min-w-0 truncate font-mono tabular-nums text-ink-3">{summary}</span>
+          {/* Wraps onto a second line instead of truncating: the phase, then the elapsed time and segment count. */}
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="font-medium break-words text-foreground">{phaseName}</span>
+            <span className="font-mono break-words tabular-nums text-ink-3">{summary}</span>
+          </div>
           <button
             type="button"
             data-testid="stats-toggle"
             aria-expanded={statsOpen}
             aria-controls={statsId}
             onClick={() => setStatsOpen((open) => !open)}
-            className="ml-auto shrink-0 rounded-md px-2 py-1 text-[12px] text-ink-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="shrink-0 rounded-md px-2 py-1 text-[12px] text-ink-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {statsOpen ? s.hideDetails : s.showDetails}
           </button>
@@ -165,18 +168,13 @@ export function StageCard({
           speakerColors={speakerColors}
           activeColor={activeColor}
           frozen={orbFrozen}
-          label={orbLabel}
         />
       )}
 
       {/* The phase is named once: in the phone strip above, or in this row on wider screens. */}
-      {phone ? null : (
+      {phone || easy ? null : (
         <div className={phaseRowClass}>
-          {easyKind ? (
-            <EasyStatus kind={easyKind} className="text-[22px] text-foreground" />
-          ) : (
-            <PhaseRow run={run} phase={phase} elapsed={elapsed} s={s} loading={loading} />
-          )}
+          <PhaseRow run={run} phase={phase} elapsed={elapsed} s={s} loading={loading} />
         </div>
       )}
 
@@ -202,8 +200,8 @@ export function StageCard({
       </p>
 
       {/* A plain grid, never a horizontal scroller: the stat tiles are read-only and are not tab stops. */}
-      <div id={statsId} className={cn("grid grid-cols-2 gap-1.5", phone && !statsOpen && "hidden")}>
-        {stats.filter((stat) => !(easy && stat.secondary)).map((stat) => (
+      <div id={statsId} className={cn("grid grid-cols-2 gap-1.5", phone && !easy && !statsOpen && "hidden")}>
+        {stats.filter((stat) => !(easy && (stat.secondary || stat.hiddenInEasy))).map((stat) => (
           <StatTile key={stat.label} label={stat.label} value={stat.value} hint={stat.hint} />
         ))}
         {easy ? (
@@ -256,8 +254,10 @@ interface Stat {
   label: string;
   value: string;
   hint: string;
-  /** Easy view folds these behind the "More info" disclosure. */
+  /** Easy view folds these behind the "Show details" disclosure. */
   secondary?: boolean;
+  /** Easy view drops this tile altogether (the model name). */
+  hiddenInEasy?: boolean;
 }
 
 /**
@@ -315,23 +315,38 @@ function latencyHintText(s: StageText, stats: LatencyStats): string {
   return s.hints.latencyMeasured(msText(stats.last), msText(stats.median), split);
 }
 
-/**
- * Easy view's status word for the phase (with its icon), or null when the phase keeps its own pill.
- * A frozen run that has not ended means the connection is lost, so it reads Reconnecting.
- */
-function easyStatusKind(phase: DisplayPhase, run: RunState | null, frozen: boolean): EasyStatusKind | null {
-  const ended = phase === "finished" || phase === "error" || phase === "canceled";
-  if (frozen && !ended) return "reconnecting";
-  if (phase === "transcribing") return "live";
-  if (phase === "finished") return "finished";
-  if (phase === "error") return stoppedRun(run) ? "stopped" : "failed";
-  if (phase === "canceled") return "stopped";
-  return null;
-}
-
 /** A run the viewer found stale with no end status: the process stopped without reporting why. */
 function stoppedRun(run: RunState | null): boolean {
   return Boolean(run?.stale && !run.endStatus);
+}
+
+/**
+ * Easy view's one plain status sentence, which leads the stage card on every width (no truncation). A transcribing
+ * run with no measured percent reads without one; a frozen run that has not ended reads as reconnecting.
+ */
+function easySentence(s: StageText, run: RunState | null, phase: DisplayPhase, frozen: boolean, pct: number): string {
+  const ended = phase === "finished" || phase === "error" || phase === "canceled";
+  if (frozen && !ended) return s.sentence.reconnecting;
+  switch (phase) {
+    case "transcribing":
+      return pct > 0 ? s.sentence.transcribing(pct) : s.sentence.transcribingPlain;
+    case "diarizing":
+      return s.sentence.diarizing;
+    case "loading":
+      return s.sentence.loading;
+    case "listening":
+      return s.sentence.listening;
+    case "converting":
+      return s.sentence.converting;
+    case "waiting":
+      return s.sentence.waiting;
+    case "finished":
+      return run?.duration ? s.sentence.finished(formatElapsed(run.duration)) : s.sentence.finishedPlain;
+    case "error":
+      return stoppedRun(run) ? s.sentence.stopped : s.sentence.failed;
+    case "canceled":
+      return s.sentence.canceled;
+  }
 }
 
 /** The phase's name, with the diarization detail (segmenting, comparing voices) when the CLI reports one. */
@@ -340,13 +355,6 @@ function phaseText(s: StageText, run: RunState | null, phase: DisplayPhase): str
   if (phase === "diarizing" && run?.progress?.detail === "embeddings") return s.phase.comparingVoices;
   if (phase === "error" && stoppedRun(run)) return s.phase.stopped;
   return s.phase[phase];
-}
-
-/** The orb's accessible name says the same state as the title: Failed, Stopped or Canceled. Other phases keep the mode's name. */
-function orbLabelFor(s: StageText, run: RunState | null, phase: DisplayPhase): string | undefined {
-  if (phase === "error") return stoppedRun(run) ? s.orbAria.stopped : s.orbAria.failed;
-  if (phase === "canceled") return s.orbAria.canceled;
-  return undefined;
 }
 
 /**

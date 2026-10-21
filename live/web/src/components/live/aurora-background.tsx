@@ -6,9 +6,10 @@ export interface AuroraBackgroundProps {
 }
 
 /**
- * A fixed, decorative strip behind the header and hero. Three blurred radial blobs in Nord Frost and
- * Aurora drift on transform only. The CSS (index.css) makes it static under prefers-reduced-motion
- * and html[data-easy="true"]. Pointer events pass through it.
+ * A fixed, decorative layer behind the header and the glass cards, full width and fading out toward the
+ * bottom (index.css masks it). Four soft radial blobs in Aurora green, teal and purple with a touch of
+ * Frost drift on transform only. The CSS makes it static under prefers-reduced-motion and
+ * html[data-easy="true"]. Pointer events pass through it.
  */
 export function AuroraBackground({ live = false }: AuroraBackgroundProps) {
   const ref = useRef<HTMLDivElement>(null);
@@ -39,6 +40,7 @@ export function AuroraBackground({ live = false }: AuroraBackgroundProps) {
       <span className="aurora-blob" data-n="1" />
       <span className="aurora-blob" data-n="2" />
       <span className="aurora-blob" data-n="3" />
+      <span className="aurora-blob" data-n="4" />
     </div>
   );
 }

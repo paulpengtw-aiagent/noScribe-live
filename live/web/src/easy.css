@@ -7,9 +7,15 @@
 html[data-easy="true"][data-theme="dark"] {
   --foreground: #ffffff;
   --card-foreground: #ffffff;
-  --muted-foreground: #d6d6d6;
-  --ink-2: #d6d6d6;
-  --ink-3: #c2c2c2;
+  --muted-foreground: #f2f4f8;
+  --ink-2: #f2f4f8;
+  --ink-3: #eceff4;
+  /* Status words at 7:1 or better on the raised tiles (#434c5e) and the card (#3b4252). */
+  --status-live-ink: #e6ede0;
+  --status-failed-ink: #f7e8e9;
+  --status-stopped-ink: #f6e8e4;
+  --status-finished-ink: #deedf2;
+  --status-loading-ink: #f7eacf;
 }
 
 html[data-easy="true"][data-theme="light"] {
@@ -18,6 +24,12 @@ html[data-easy="true"][data-theme="light"] {
   --muted-foreground: #3d3d3d;
   --ink-2: #3d3d3d;
   --ink-3: #3d3d3d;
+  /* Status words at 7:1 or better on the light card (#eceff4) and raised tiles (#e5e9f0). */
+  --status-live-ink: #3b5031;
+  --status-failed-ink: #74383e;
+  --status-stopped-ink: #674132;
+  --status-finished-ink: #374c67;
+  --status-loading-ink: #5c470e;
 }
 
 /* Weight: body text 500 by default. */
@@ -59,6 +71,12 @@ html[data-easy="true"] [data-testid="paragraph-time"] {
   html[data-easy="true"] [data-testid="stage-card"] .grid-cols-2 {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* Jump-to-live button label (transcript card) at the easy-view label size. */
+html[data-easy="true"] [data-testid="jump-to-live"] {
+  font-size: 20px;
+  line-height: 1.5;
 }
 
 /* Header toggles (the menu is portaled, so it is matched by its popover slot in the generic rule above). */

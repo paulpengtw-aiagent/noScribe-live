@@ -376,10 +376,13 @@ export function TranscriptCard({
 
   // Turns whose text has not started yet are not drawn at all, so a speaker header never shows without words under it.
   const visibleBlocks = blocks
-    .map((block) => ({
-      block,
-      paragraphs: block.paragraphs.filter((paragraph) => paragraph.items.some((item) => !view.waiting.has(item.seg.index))),
-    }))
+    .map((block) => {
+      const paragraphs = block.paragraphs.filter((paragraph) => paragraph.items.some((item) => !view.waiting.has(item.seg.index)));
+      // The turn whose text is being revealed now: its speaker dot glows (data-streaming).
+      const streaming =
+        view.head !== null && paragraphs.some((paragraph) => paragraph.items.some(({ seg }) => seg.index === view.head));
+      return { block, paragraphs, streaming };
+    })
     .filter((entry) => entry.paragraphs.length > 0);
 
   // What the screen reader announces: one line per segment, appended when the segment's data arrives. The feed text
@@ -503,25 +506,28 @@ export function TranscriptCard({
             <h2
               data-testid="run-title"
               title={name ?? undefined}
-              className="min-w-0 truncate text-[22px] leading-tight font-medium tracking-[-0.02em]"
+              className="min-w-0 truncate text-[22px] leading-tight font-semibold tracking-[-0.02em] sm:text-[26px]/[28px]"
             >
               {name}
             </h2>
             <ExportButton run={run} />
           </div>
-          <div className="mt-1.5 flex min-w-0 items-center gap-2 text-[13px] leading-5 text-ink-2">
-            {run.outputName ? (
-              <span title={run.outputName} className="min-w-0 truncate">
-                {run.outputName}
-              </span>
-            ) : null}
-            {run.model ? (
-              <>
-                {run.outputName ? <span aria-hidden="true" className="text-ink-3">·</span> : null}
-                <span className="shrink-0 whitespace-nowrap">{t.transcript.model(run.model)}</span>
-              </>
-            ) : null}
-          </div>
+          {/* Easy view drops the file path and the model: the title is enough to say which run this is. */}
+          {easy ? null : (
+            <div className="mt-1.5 flex min-w-0 items-center gap-2 text-[13px] leading-5 text-ink-2">
+              {run.outputName ? (
+                <span title={run.outputName} className="min-w-0 truncate">
+                  {run.outputName}
+                </span>
+              ) : null}
+              {run.model ? (
+                <>
+                  {run.outputName ? <span aria-hidden="true" className="text-ink-3">·</span> : null}
+                  <span className="shrink-0 whitespace-nowrap">{t.transcript.model(run.model)}</span>
+                </>
+              ) : null}
+            </div>
+          )}
         </header>
       ) : null}
 
@@ -555,20 +561,22 @@ export function TranscriptCard({
         ) : hasBlocks ? (
           <div ref={contentRef} className="shrink-0">
             <div key={runId ?? ""} className="run-fade">
-            {visibleBlocks.map(({ block, paragraphs }) => (
+            {visibleBlocks.map(({ block, paragraphs, streaming }) => (
               <section key={block.id} data-testid="turn" className="mt-[18px] first:mt-0">
                 <header
                   data-testid="speaker-header"
                   title={block.speaker || undefined}
-                  className="flex min-w-0 items-center gap-2 text-[13px] leading-5"
+                  className={cn("flex min-w-0 items-center gap-2", easy ? "text-[20px] leading-7" : "text-[13px] leading-5")}
                 >
                   <span
                     aria-hidden="true"
+                    data-speaker-dot
+                    data-streaming={streaming ? "true" : undefined}
                     className="size-2 shrink-0 rounded-full"
                     style={{ backgroundColor: speakerColor(speakers, block.speaker) }}
                   />
                   {block.speaker ? (
-                    <span className="truncate font-medium text-ink-2">{speakerName(block.speaker)}</span>
+                    <span className={cn("truncate text-ink-2", easy ? "font-bold" : "font-medium")}>{speakerName(block.speaker)}</span>
                   ) : null}
                   {formatElapsed(paragraphs[0].start) !== formatElapsed(block.start) ? (
                     <>

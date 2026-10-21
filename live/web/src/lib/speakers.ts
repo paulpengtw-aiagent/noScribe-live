@@ -2,16 +2,18 @@
 // speakers first appear; "//" marks overlapping speech and is stripped before the lookup.
 
 /**
- * Dark theme palette, also used for the waveform bars on both themes: Nord Aurora and Frost hues,
- * each at least 3:1 against the dark card (#3b4252).
+ * Dark theme palette: Nord Aurora and Frost hues, each at least 3:1 against the dark card (#3b4252).
+ * Timeline blocks and waveform bars use these fills on both themes; on the light theme the pale fills
+ * get a Frost-deep edge instead of a darkening filter (index.css, `.timeline-block[data-timeline-index]`).
  */
 export const SPEAKER_PALETTE = ["#88c0d0", "#ebcb8b", "#a3be8c", "#b48ead", "#81a1c1", "#d08770"] as const;
 
 /**
- * Light theme variant for text and legend dots: each hue darkened toward the Nord ink until it is at
- * least 3.2:1 against the light card (#eceff4) and the light background (#e5e9f0).
+ * Light theme variant for text and legend dots: the Frost and Aurora hues, deepened so each is at least
+ * 3:1 against the light card (#ebeef3) and the light page (#e5e9f0), and none reads as brown or slate.
+ * Same slot order as SPEAKER_PALETTE: Frost, ochre, green, purple, blue, rust.
  */
-export const SPEAKER_PALETTE_LIGHT = ["#5d8598", "#897f68", "#6f866f", "#927895", "#6883a1", "#aa7366"] as const;
+export const SPEAKER_PALETTE_LIGHT = ["#4a7f96", "#a67c00", "#5b7f45", "#7e5a86", "#5e81ac", "#a4532b"] as const;
 
 /** Unknown speaker on the dark theme: 4:1 against the dark card. */
 export const UNKNOWN_SPEAKER_COLOR = "#9aa5b6";

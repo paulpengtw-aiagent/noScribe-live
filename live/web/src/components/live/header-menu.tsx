@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Moon, Settings, Sun } from "lucide-react";
-import { EasyMenuItem } from "@/components/live/easy-toggle";
 import { LocaleMenuItem } from "@/components/live/locale-toggle";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -12,7 +11,7 @@ export interface HeaderMenuProps {
   onToggleTheme: () => void;
 }
 
-/** Compact header only (below sm): the theme and language switches, in one icon menu. */
+/** Compact header only (below sm): the theme and language switches, in one icon menu. Easy view has its own header button. */
 export function HeaderMenu({ theme, onToggleTheme }: HeaderMenuProps) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -48,7 +47,6 @@ export function HeaderMenu({ theme, onToggleTheme }: HeaderMenuProps) {
             {theme === "dark" ? t.topbar.switchTheme.light : t.topbar.switchTheme.dark}
           </span>
         </button>
-        <EasyMenuItem onDone={done} />
         <LocaleMenuItem onDone={done} />
       </PopoverContent>
     </Popover>

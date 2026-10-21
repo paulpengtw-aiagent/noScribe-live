@@ -18,8 +18,13 @@ function Progress({
     >
       <ProgressPrimitive.Indicator
         data-slot="progress-indicator"
-        className="size-full flex-1 bg-primary transition-all"
-        style={{ transform: `translateX(-${100 - (value || 0)}%)` }}
+        className="progress-frost size-full flex-1 transition-all"
+        style={{
+          transform: `translateX(-${100 - (value || 0)}%)`,
+          // The Frost gradient fills the visible part of the indicator, its right-hand value% of the width.
+          backgroundSize: `${value || 0}% 100%`,
+          backgroundPosition: "100% 0",
+        }}
       />
     </ProgressPrimitive.Root>
   )

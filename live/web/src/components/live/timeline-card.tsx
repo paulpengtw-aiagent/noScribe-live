@@ -1,4 +1,5 @@
 import { WaveformTimeline, type WaveformTimelineProps } from "@/components/live/waveform-timeline";
+import { useEasyView } from "@/hooks/use-easy-view";
 import type { PeaksError } from "@/hooks/use-run-peaks";
 import { useI18n } from "@/i18n";
 import { DASH } from "@/lib/format";
@@ -39,6 +40,7 @@ export function TimelineCard({
 }: TimelineCardProps) {
   const { t } = useI18n();
   const speakerName = useSpeakerName();
+  const { easy } = useEasyView();
   const note = peaksError ? t.timeline.peaks[peaksError] : undefined;
   // loaded | loading | missing | undecodable | failed: the waveform state, on the card root.
   const peaksState = waveform.peaks ? "loaded" : (peaksError ?? "loading");
@@ -78,12 +80,15 @@ export function TimelineCard({
         <span className={cn("max-w-full shrink-0 text-[12px] tabular-nums text-ink-3", timed && "font-mono")}>{status}</span>
       </header>
       <div className="relative min-h-0 flex-1">
-        <WaveformTimeline {...waveform} />
+        {/* Easy view keeps only the speaker blocks: no loudness bars, and no waveform note. */}
+        <WaveformTimeline {...waveform} showWaveform={!easy} />
       </div>
-      {/* Always reserves its line, so a note appearing does not move the card. */}
-      <p data-testid={note ? "waveform-note" : undefined} className="min-h-[20px] shrink-0 text-[12px] leading-5 text-ink-3">
-        {note}
-      </p>
+      {/* Always reserves its line, so a note appearing does not move the card. Easy view has no waveform to explain. */}
+      {easy ? null : (
+        <p data-testid={note ? "waveform-note" : undefined} className="min-h-[20px] shrink-0 text-[12px] leading-5 text-ink-3">
+          {note}
+        </p>
+      )}
     </section>
   );
 }

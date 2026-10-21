@@ -44,7 +44,7 @@ const zhTW: AppMessages = {
   titleIdle: "noScribe Live",
   titleReconnecting: (name) => `⚠ 重新連線中 – ${name}`,
   titleLive: (name) => `● 即時 – ${name}`,
-  titleStopped: (name) => `■ 已停止 – ${name}`,
+  titleStopped: (name) => `■ 意外停止 – ${name}`,
   titleFinished: (name) => `✓ 已完成 – ${name}`,
   titleFailed: (name) => `✕ 失敗 – ${name}`,
   titleCanceled: (name) => `○ 已取消 – ${name}`,

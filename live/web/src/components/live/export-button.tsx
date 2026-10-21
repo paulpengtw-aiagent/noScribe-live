@@ -8,6 +8,14 @@ import { cn } from "@/lib/utils";
 
 type Phase = "idle" | "working" | "done" | "error";
 
+/** The button's state for tests and styling: data-state="idle | loading | success | error". */
+const EXPORT_STATE: Record<Phase, "idle" | "loading" | "success" | "error"> = {
+  idle: "idle",
+  working: "loading",
+  done: "success",
+  error: "error",
+};
+
 /** How long the success or error state stays before the button returns to idle. */
 const FEEDBACK_MS = 2000;
 
@@ -76,6 +84,7 @@ export function ExportButton({ run }: { run: RunState }) {
       variant="outline"
       size="sm"
       data-testid="export-odt"
+      data-state={EXPORT_STATE[phase]}
       data-phase={phase}
       disabled={live || phase === "working"}
       onClick={download}

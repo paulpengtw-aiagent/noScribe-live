@@ -25,6 +25,8 @@ export interface WaveformTimelineProps {
   onSelect: (index: number) => void;
   live: boolean;
   className?: string;
+  /** False in Easy view: the speaker blocks stay, the loudness bars (canvas) are not drawn. */
+  showWaveform?: boolean;
 }
 
 // Waveform bars are 2 px wide with a 1 px gap, so one bar every 3 CSS px.
@@ -108,6 +110,7 @@ export function WaveformTimeline({
   onHover,
   onSelect,
   className,
+  showWaveform = true,
 }: WaveformTimelineProps): JSX.Element {
   const { t } = useI18n();
   const speakerName = useSpeakerName();
@@ -178,9 +181,11 @@ export function WaveformTimeline({
   const span = duration && duration > 0 ? duration : Math.max(1, frontier ?? 1);
   const pct = (seconds: number) => Math.min(100, Math.max(0, ((seconds - startOffset) / span) * 100));
   // A block's left edge and width, in percent of the track. Drawing and hit testing both use this.
+  // Clamped to the track: left + width never passes 100%, so a block cannot reach past the card's content box.
   const blockBox = (seg: TimelineSegment) => {
-    const left = pct(seg.start);
-    return { left, width: Math.max(MIN_BLOCK_PERCENT, pct(seg.end) - left) };
+    const left = Math.min(100 - MIN_BLOCK_PERCENT, pct(seg.start));
+    const width = Math.min(100 - left, Math.max(MIN_BLOCK_PERCENT, pct(seg.end) - left));
+    return { left, width };
   };
 
   // The block whose centre is nearest the pointer's x. The one hit layer covers the gaps between blocks too,
@@ -203,7 +208,9 @@ export function WaveformTimeline({
 
   return (
     <div ref={rootRef} onKeyDown={onKeyDown} className={cn("relative h-full w-full", className)}>
-      <canvas ref={canvasRef} aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full" />
+      {showWaveform ? (
+        <canvas ref={canvasRef} aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full" />
+      ) : null}
       <div className="pointer-events-none absolute inset-x-0 top-1/2 h-px bg-hairline" />
       {/* Keyboard stops only: pointer input goes to the hit layer below, which picks the nearest block. */}
       {segments.map((seg) => {

@@ -1,5 +1,4 @@
 import { useLayoutEffect, useRef, type JSX } from "react";
-import { useI18n } from "@/i18n";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useInkPalette } from "@/hooks/use-ink-palette";
 import { OrbRenderer, type OrbMode } from "@/lib/orb-renderer";
@@ -18,7 +17,7 @@ export interface ActivityOrbProps {
   className?: string;
   /** The run has ended or the connection is lost: the orb stops and keeps one static frame. */
   frozen?: boolean;
-  /** Accessible name. Defaults to the mode's name; the stage card passes the exact state (failed, stopped). */
+  /** Not read out: the orb is hidden from assistive tech, and the phase text names the state. */
   label?: string;
 }
 
@@ -40,7 +39,6 @@ export function ActivityOrb({
   frozen = false,
   label,
 }: ActivityOrbProps): JSX.Element {
-  const { t } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<OrbRenderer | null>(null);
   // Follows the OS setting live. Reduced motion and a frozen run both draw the static frame, not the loop.
@@ -72,9 +70,8 @@ export function ActivityOrb({
   return (
     <canvas
       ref={canvasRef}
-      role="img"
+      aria-hidden="true"
       data-testid="activity-orb"
-      aria-label={label ?? t.stage.orbAria[mode]}
       data-frozen={frozen ? "true" : undefined}
       className={cn("block shrink-0", className)}
       style={{ width: size, height: size }}

@@ -9,7 +9,7 @@ import { useEasyView } from "@/hooks/use-easy-view";
 import type { Connection } from "@/hooks/use-live-feed";
 import type { Theme } from "@/hooks/use-theme";
 import { useI18n } from "@/i18n";
-import type { RunState } from "@/lib/live-state";
+import { displayPhase, type RunState } from "@/lib/live-state";
 import { runStateBadge } from "@/lib/live-view";
 import type { RunSummary } from "@/lib/live-types";
 import { cn } from "@/lib/utils";
@@ -37,14 +37,16 @@ function useCompactHeader(): boolean {
   );
 }
 
-/** Status dot colours, the same as the run picker's: failed red, stopped amber, live green, the rest neutral. */
-type Tone = "red" | "amber" | "green" | "neutral";
+/** Status colours, the same as the run picker's: failed red, stopped orange, live green, loading yellow, else neutral. */
+type Tone = "red" | "amber" | "green" | "yellow" | "neutral";
 
-const TONE_DOT: Record<Tone, string> = {
-  red: "bg-status-failed",
-  amber: "bg-status-stopped",
-  green: "bg-status-live",
-  neutral: "bg-foreground/60",
+/** Icon glyph per tone; the glyph and the word carry the state, so colour is never the only cue. */
+const TONE_TEXT: Record<Tone, string> = {
+  red: "text-status-failed-ink",
+  amber: "text-status-stopped-ink",
+  green: "text-status-live-ink",
+  yellow: "text-status-loading-ink",
+  neutral: "text-foreground",
 };
 
 export interface TopBarProps {
@@ -81,12 +83,16 @@ export function TopBar({
   // connection text is kept for screen readers only. data-state keeps the raw link state either way.
   const feedDown = live && link !== "live";
   const cutOff = feedDown && link === "reconnecting";
+  // A running run with no segment yet (or still diarizing / loading the model) reads Loading, not Live.
+  const loading = live && displayPhase(run) !== "transcribing";
   const badgeText = badge
     ? feedDown
       ? cutOff
         ? t.topbar.runDisconnected
         : t.topbar.connConnecting
-      : t.topbar.runStatus[badge.status]
+      : loading
+        ? t.topbar.runStatus.loading
+        : t.topbar.runStatus[badge.status]
     : null;
   // A live run whose feed is cut off reads amber (connection trouble), whatever the run's own status.
   const tone: Tone = cutOff
@@ -96,20 +102,27 @@ export function TopBar({
       : badge?.status === "stale"
         ? "amber"
         : badge?.status === "running"
-          ? "green"
+          ? loading
+            ? "yellow"
+            : "green"
           : "neutral";
+  const GLYPH: Record<Tone, string> = { red: "✕", amber: cutOff ? "⟳" : "■", green: "●", yellow: "◐", neutral: badge?.status === "canceled" ? "○" : "✓" };
   // Easy view names the run's state with an icon and a word (EasyStatus) instead of the run badge text.
   const easyKind: EasyStatusKind | null = !badge
     ? null
     : feedDown
       ? "reconnecting"
       : badge.status === "running"
-        ? "live"
+        ? loading
+          ? "loading"
+          : "live"
         : badge.status === "finished"
           ? "finished"
           : badge.status === "error"
             ? "failed"
-            : "stopped";
+            : badge.status === "canceled"
+              ? "canceled"
+              : "stopped";
   const connText =
     link === "live"
       ? t.topbar.connConnected
@@ -164,16 +177,18 @@ export function TopBar({
                 data-testid="run-state"
                 data-state={badge.status}
                 className={cn(
-                  "flex min-w-0 shrink items-center gap-2 rounded-full bg-raised px-2.5 py-0.5 text-[12px] font-medium shadow-ring",
-                  cutOff ? "text-status-stopped-ink" : "text-foreground",
+                  "flex min-w-0 shrink items-center gap-1.5 rounded-full bg-raised px-2.5 py-0.5 text-[12px] font-medium shadow-ring",
+                  TONE_TEXT[tone],
                 )}
               >
                 <span
                   aria-hidden="true"
                   data-testid="run-state-dot"
                   data-tone={tone}
-                  className={cn("size-1.5 shrink-0 rounded-full", TONE_DOT[tone], live && "animate-pulse")}
-                />
+                  className="shrink-0 text-[11px] leading-none"
+                >
+                  {GLYPH[tone]}
+                </span>
                 <span className="min-w-0 truncate max-[359px]:sr-only">
                   {easy && easyKind ? <EasyStatus kind={easyKind} /> : badgeText}
                 </span>
@@ -181,11 +196,12 @@ export function TopBar({
             )}
           </div>
 
+          {/* Easy view is always one visible header button (the short label on phones); the gear menu holds the rest. */}
+          <EasyToggle compact={compact} />
           {compact ? (
             <HeaderMenu theme={theme} onToggleTheme={onToggleTheme} />
           ) : (
             <>
-              <EasyToggle />
               <LocaleToggle />
 
               <Button

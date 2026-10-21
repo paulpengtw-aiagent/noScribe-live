@@ -11,8 +11,11 @@ export function EasyViewProvider({ children }: { children: ReactNode }) {
   return <EasyViewContext.Provider value={value}>{children}</EasyViewContext.Provider>;
 }
 
-/** Easy view switch for the desktop header. aria-pressed carries the state; the label names the mode. */
-export function EasyToggle() {
+/**
+ * Easy view switch in the header, rendered on every width (data-testid stays unique). The phone header uses
+ * `compact`: the same icon with a short label. aria-pressed carries the state; the label names the mode.
+ */
+export function EasyToggle({ compact = false }: { compact?: boolean }) {
   const { t } = useI18n();
   const { easy, setEasy } = useEasyView();
   return (
@@ -24,50 +27,27 @@ export function EasyToggle() {
       aria-pressed={easy}
       onClick={() => setEasy(!easy)}
       className={cn(
-        "h-9 shrink-0 gap-1.5 rounded-full px-3 font-medium shadow-ring hover:bg-raised dark:hover:bg-raised",
+        "h-9 shrink-0 gap-1.5 rounded-full font-medium shadow-ring hover:bg-raised dark:hover:bg-raised",
+        compact ? "px-2.5" : "px-3",
         easy && "bg-foreground text-background hover:bg-foreground dark:hover:bg-foreground",
       )}
     >
       <Type aria-hidden="true" className="size-4" />
-      <span>{t.easy.toggle}</span>
+      <span>{compact ? t.easy.toggleShort : t.easy.toggle}</span>
     </Button>
   );
 }
 
-/** The same switch as a row in the compact header menu. `onDone` runs after the switch, to close the menu. */
-export function EasyMenuItem({ onDone }: { onDone?: () => void }) {
-  const { t } = useI18n();
-  const { easy, setEasy } = useEasyView();
-  return (
-    <button
-      type="button"
-      data-testid="easy-toggle"
-      aria-pressed={easy}
-      className={cn(
-        "flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left text-[14px] hover:bg-raised",
-        easy && "bg-raised font-medium",
-      )}
-      onClick={() => {
-        setEasy(!easy);
-        onDone?.();
-      }}
-    >
-      <span aria-hidden="true" className="flex w-5 shrink-0 justify-center">
-        <Type className="size-4" />
-      </span>
-      <span className="min-w-0 truncate">{t.easy.toggle}</span>
-    </button>
-  );
-}
-
 /** The status kinds that easy view names with an icon and a word. */
-export type EasyStatusKind = "live" | "finished" | "failed" | "stopped" | "reconnecting";
+export type EasyStatusKind = "live" | "loading" | "finished" | "failed" | "stopped" | "canceled" | "reconnecting";
 
 const GLYPH: Record<EasyStatusKind, string> = {
   live: "●",
+  loading: "◐",
   finished: "✓",
   failed: "✕",
   stopped: "■",
+  canceled: "○",
   reconnecting: "⟳",
 };
 

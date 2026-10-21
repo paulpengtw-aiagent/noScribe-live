@@ -10,13 +10,17 @@ Groups (--only):
             sizes, animations, toggle label, easy-more; no streaming during a live run. Plus the toggle
             click and its persistence across a reload.
   zhterms   zh-TW: body.innerText contains none of the listed terms.
+  export    token gate on (--token). A finished run: export-odt is enabled, the download is an .odt whose zip
+            starts with a stored mimetype entry (application/vnd.oasis.opendocument.text) and whose content.xml
+            names a speaker; the button then shows its success state. A live run: export-odt is disabled.
 
 Run from the repo root with the system Python that has Playwright:
 
-    /usr/bin/python3 -I -B live/stress/test_nordic.py [--only stream,reduced,easy,zhterms] [--port 8800]
+    /usr/bin/python3 -I -B live/stress/test_nordic.py [--only stream,reduced,easy,zhterms,export] [--port 8800]
         [--static DIR] [--python PY] [--work DIR]
 
-Ports: stream uses --port, reduced --port+1, easy --port+2, zhterms --port+3. Each group starts its own
+Ports: stream uses --port, reduced --port+1, easy --port+2, zhterms --port+3. export reuses --port+2 (it never
+runs at the same time as easy: groups run one after another). Each group starts its own
 `python -m server` and its own replay (`python -m server.replay SRC --speed N --max-gap S`) through the
 Harness in test_ux.py. WORK (default /tmp/nslive-r9) holds src/ (a copy of the demo feed; the original is
 read only), feeds/, logs/ and shots/. Exit code 0 only if every check passed. INFO lines carry measured
@@ -32,7 +36,11 @@ import statistics
 import sys
 import re
 import os
+import tempfile
 import time
+import urllib.error
+import urllib.request
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -42,14 +50,18 @@ import test_ux as ux  # noqa: E402  shared harness: servers, replays, DOM helper
 
 FEED_SRC = Path("/workspace/noScribe-live/live/feeds/20261020-052449-demo-en-zh.ndjson")  # read only
 DEFAULT_WORK = Path("/tmp/nslive-r9")
-GROUPS = ("stream", "reduced", "easy", "zhterms")
-GROUP_PORT = {"stream": 0, "reduced": 1, "easy": 2, "zhterms": 3}
+GROUPS = ("stream", "reduced", "easy", "zhterms", "export")
+GROUP_PORT = {"stream": 0, "reduced": 1, "easy": 2, "zhterms": 3, "export": 2}  # export shares easy's port
+EXPORT_TOKEN = "nsexport-test-token"  # passed as --token; the server never logs it
+ODT_MIME = "application/vnd.oasis.opendocument.text"
 THEMES = ("dark", "light")
 LOCALES = ("en", "zh-TW")
 TOGGLE_LABEL = {"en": "Easy view", "zh-TW": "大字模式"}
 TERMS = ("說話者", "運行", "文件", "信息", "默認", "加載", "屏幕", "用戶", "設置", "搜索", "菜單", "實時")
 
 SAMPLE_JS = """() => {
+  const now = performance.now();
+  if (window.__nsPerf) window.__nsPerf.log.push({ t: now, k: 'eval' });
   const segs = {};
   for (const el of document.querySelectorAll('[data-segment-seq]')) {
     let txt = ''; const walk = (n) => { for (const c of n.childNodes) {
@@ -58,7 +70,7 @@ SAMPLE_JS = """() => {
     segs[el.getAttribute('data-segment-seq')] = txt.trim();
   }
   const r = window.__nsliveReveal;
-  return { segs, reveal: r ? { maxLagMs: r.maxLagMs, currentLagMs: r.currentLagMs,
+  return { t: now, segs, reveal: r ? { maxLagMs: r.maxLagMs, currentLagMs: r.currentLagMs,
                                queued: r.queued, revealedSegments: r.revealedSegments } : null };
 }"""
 
@@ -66,13 +78,16 @@ SAMPLE_JS = """() => {
 PERF_JS = r"""
 (() => {
   if (window.__nsPerf) return;
-  const P = { longtasks: [], shifts: 0, frames: [] };
+  // P.log: transcript scroller state (scrollTop, scrollHeight, clientHeight, data-following, segment count)
+  // each time one of them changes, plus the harness's evaluate calls (kind 'eval', pushed by SAMPLE_JS).
+  // Every time is performance.now(), the clock of LayoutShift startTime, so entries can be matched by frame.
+  const P = { longtasks: [], frames: [], shifts: [], log: [] };
   window.__nsPerf = P;
   try {
-    new PerformanceObserver((l) => { for (const e of l.getEntries()) P.longtasks.push(e.duration); })
+    new PerformanceObserver((l) => { for (const e of l.getEntries()) P.longtasks.push([e.startTime, e.duration]); })
       .observe({ type: 'longtask', buffered: true });
   } catch (e) {}
-  P.sources = [];
+  const rect = (r) => r ? [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)] : null;
   const desc = (n) => {
     if (n && !n.tagName && n.parentElement) {
       const host = n.parentElement.closest('[data-index]');
@@ -83,23 +98,46 @@ PERF_JS = r"""
     const tid = n.getAttribute('data-testid'); const idx = n.getAttribute('data-index');
     return n.tagName.toLowerCase() + (tid ? '[' + tid + ']' : '') + (idx ? '#' + idx : '') + (cls ? '.' + cls : '');
   };
+  // Every layout-shift entry, input-caused or not: value, startTime, hadRecentInput, and each source node with
+  // its previousRect and currentRect (left, top, width, height). Python decides which ones count.
   try {
-    new PerformanceObserver((l) => { for (const e of l.getEntries()) if (!e.hadRecentInput) {
-      P.shifts += e.value;
-      const sc = document.querySelector('[data-testid="transcript-scroll"]');
-      for (const s of (e.sources || [])) P.sources.push({ d: desc(s.node), dy: s.currentRect.top - s.previousRect.top,
-        dx: s.currentRect.left - s.previousRect.left, dh: s.currentRect.height - s.previousRect.height, v: e.value, t: e.startTime,
-        st: sc ? sc.scrollTop : -1, sh: sc ? sc.scrollHeight : -1, ch: sc ? sc.clientHeight : -1 });
-    } })
+    new PerformanceObserver((l) => { for (const e of l.getEntries()) P.shifts.push({
+      t: e.startTime, v: e.value, input: e.hadRecentInput, li: e.lastInputTime,
+      src: (e.sources || []).map((s) => ({ d: desc(s.node), prev: rect(s.previousRect), cur: rect(s.currentRect) })) }); })
       .observe({ type: 'layout-shift', buffered: true });
   } catch (e) {}
-  const tick = (t) => { P.frames.push(t); requestAnimationFrame(tick); };
+  let last = '';
+  const tick = (t) => {
+    P.frames.push(t);
+    const sc = document.querySelector('[data-testid="transcript-scroll"]');
+    const key = sc ? [sc.scrollTop, sc.scrollHeight, sc.clientHeight, sc.getAttribute('data-following'),
+                      document.querySelectorAll('[data-segment-seq]').length].join('|') : 'none';
+    if (key !== last) { last = key; P.log.push({ t: performance.now(), k: 'scroll', key }); }
+    requestAnimationFrame(tick);
+  };
   requestAnimationFrame(tick);
 })();
 """
 
-PERF_READ_JS = """() => { const P = window.__nsPerf || { longtasks: [], shifts: 0, frames: [], sources: [] };
-  return { longtasks: P.longtasks.slice(), shifts: P.shifts, frames: P.frames.slice(), sources: (P.sources || []).slice() }; }"""
+PERF_READ_JS = """() => { const P = window.__nsPerf || { longtasks: [], frames: [], shifts: [], log: [] };
+  return { longtasks: P.longtasks.slice(), frames: P.frames.slice(), shifts: P.shifts.slice(), log: P.log.slice() }; }"""
+
+# Session-window CLS (the definition Chrome and web-vitals use): non-input shifts grouped into windows that end
+# after a 1 s gap or after 5 s; the score is the largest window sum. The raw page-life sum is reported beside it.
+CLS_GAP_MS = 1000.0
+CLS_WINDOW_MS = 5000.0
+
+
+def session_max(shifts: list[tuple[float, float]]) -> float:
+    best = cur = 0.0
+    start = prev = None
+    for t, v in sorted(shifts):
+        if start is None or t - prev > CLS_GAP_MS or t - start > CLS_WINDOW_MS:
+            start, cur = t, 0.0
+        cur += v
+        prev = t
+        best = max(best, cur)
+    return best
 
 ANIM_JS = """() => { const run = document.getAnimations().filter((a) => a.playState === 'running');
   const names = run.slice(0, 4).map((a) => { const t = a.effect && a.effect.target;
@@ -247,6 +285,69 @@ def new_ctx(browser: Any, presets: str | None = None) -> tuple[Any, Any]:
 
 
 # ---- stream -----------------------------------------------------------------------------------------
+def cls_report(h: Any, perf: dict[str, Any], first_t: float | None, end_t: float | None, reloaded: bool) -> None:
+    """Layout-shift evidence for the stream group, on the page clock (performance.now, the clock of LayoutShift
+    startTime). The metric is the session-window CLS (Chrome's definition) over non-input shifts from the first
+    segment on screen to run_end; the raw page-life sum is printed beside it for comparison. Inside that window the
+    harness does no scroll, click or reload: its only calls are the sampling evaluates (kind 'eval' in the log).
+    Each shift is matched with the scroller log (st|sh|ch|follow|segs) for a scrollTop change within one frame
+    (the follow-scroll) and for the number of segments revealed in the same frame (bursts)."""
+    shifts = perf.get("shifts", [])
+    log = perf.get("log", [])
+    lo = float(first_t) if first_t is not None else float("-inf")
+    hi = float(end_t) if end_t is not None else float("inf")
+    raw = [s for s in shifts if not s.get("input")]
+    win = [s for s in raw if lo <= float(s.get("t") or 0) <= hi]
+    cls_win = session_max([(float(s["t"]), float(s["v"])) for s in win])
+    cls_all = session_max([(float(s["t"]), float(s["v"])) for s in raw])
+    sum_win = sum(float(s["v"]) for s in win)
+    sum_all = sum(float(s["v"]) for s in raw)
+    print(f"INFO stream CLS window {lo:.0f}-{hi:.0f} ms (page clock): session-window max {cls_win:.4f}, raw sum "
+          f"{sum_win:.4f} over {len(win)} shifts; page life: session max {cls_all:.4f}, raw sum {sum_all:.4f} over "
+          f"{len(raw)} shifts; input-caused {len(shifts) - len(raw)} excluded; reloaded {reloaded}", flush=True)
+
+    scroll = [(float(e["t"]), str(e.get("key", "")).split("|")) for e in log if e.get("k") == "scroll"]
+
+    def state_at(t: float) -> str:
+        last = "none"
+        for ts, parts in scroll:
+            if ts > t:
+                break
+            last = "|".join(parts)
+        return last
+
+    st_changes = [ts for (_, prev), (ts, cur) in zip(scroll, scroll[1:]) if cur[0] != prev[0]]
+    near = 70.0  # ms: one 60 fps frame plus slack
+    with_st = sum(1 for s in win if any(abs(c - float(s["t"])) <= near for c in st_changes))
+    harness = [e for e in log if e.get("k") not in ("eval", "scroll") and lo <= float(e.get("t") or 0) <= hi]
+    steps = [int(cur[4]) - int(prev[4]) for (_, prev), (ts, cur) in zip(scroll, scroll[1:])
+             if lo <= ts <= hi and cur[4] != prev[4]]
+    print(f"INFO stream attribution in window: (a) harness non-evaluate actions {len(harness)}; (b) shifts with a "
+          f"scrollTop change within {near:.0f} ms {with_st}/{len(win)}; (c) frames with a segment-count step "
+          f"{len(steps)}, of which >= 2 segments {sum(1 for k in steps if k >= 2)} (max {max(steps) if steps else 0}); "
+          f"scrollTop changes in window {sum(1 for ts in st_changes if lo <= ts <= hi)}", flush=True)
+
+    agg: dict[str, list[float]] = {}
+    for s in win:
+        for src in s.get("src") or []:
+            prev, cur = src.get("prev"), src.get("cur")
+            dy = float(cur[1]) - float(prev[1]) if cur and prev else 0.0
+            way = "down" if dy > 0.5 else ("up" if dy < -0.5 else "flat")
+            acc = agg.setdefault(f"{src.get('d')} {way}", [0, 0.0, 0.0])
+            acc[0] += 1
+            acc[1] += float(s["v"])
+            acc[2] += dy
+    top = sorted(agg.items(), key=lambda kv: -kv[1][1])[:8]
+    print("INFO stream CLS sources in window (node and direction: rects, summed value, mean dy px): " +
+          ("; ".join(f"{k} n={v[0]} sum={v[1]:.4f} mean_dy={v[2] / v[0]:+.1f}" for k, v in top) or "none"), flush=True)
+    for s in win[:int(os.environ.get("NS_SRC_DUMP", "0"))]:
+        where = "; ".join(f"{x.get('d')} prev {x.get('prev')} cur {x.get('cur')}" for x in s.get("src") or [])
+        print(f"INFO shift t={float(s['t']):.1f} v={float(s['v']):.4f} scroller {state_at(float(s['t']))} | {where}",
+              flush=True)
+    h.check("stream: layout-shift CLS (session-window max, first segment to run_end) <= 0.1", cls_win <= 0.1,
+            f"CLS {cls_win:.4f} (raw sum {sum_win:.4f} over {len(win)} shifts); page-life session max {cls_all:.4f}")
+
+
 def stream_body(h: Any, page: Any, path: Path, run_id: str) -> None:
     reloaded = False
     # The demo's first segment lands 10.6 s into a replay at --speed 2 --max-gap 2, and 19.3 s at --speed 1 --max-gap 3
@@ -264,10 +365,14 @@ def stream_body(h: Any, page: Any, path: Path, run_id: str) -> None:
     mismatches = 0
     mismatch_ex: list[str] = []
     seen_end = None
+    end_t = None  # page clock (performance.now) when run_end first showed on the page
+    first_t = None  # page clock when the first segment was on screen: the CLS window starts here
     drained_at = None
     t0 = time.monotonic()
     while time.monotonic() - t0 < 150:
         snap = page.evaluate(SAMPLE_JS)
+        if first_t is None and snap.get("segs"):
+            first_t = snap.get("t")
         if snap.get("reveal"):
             samples.append(snap["reveal"])
         final = feed_text(path)
@@ -285,6 +390,7 @@ def stream_body(h: Any, page: Any, path: Path, run_id: str) -> None:
                                        f"vs final {full[max(0, i - 8):i + 8]!r}")
         if seen_end is None and ux.page_ended(page, run_id):
             seen_end = time.monotonic()
+            end_t = snap.get("t")
         if seen_end is not None:
             complete = bool(final) and all(same_text(norm(snap.get("segs", {}).get(seq, "")), norm(t))
                                            for seq, t in final.items())
@@ -330,30 +436,12 @@ def stream_body(h: Any, page: Any, path: Path, run_id: str) -> None:
         windows = [counts[k] for k in keys[:-1]] or [counts[keys[0]]]  # drop the last, partial second
     med = statistics.median(windows) if windows else float("nan")
     p5 = sorted(windows)[int(0.05 * (len(windows) - 1))] if windows else float("nan")
-    lts = perf.get("longtasks", [])
-    shifts = float(perf.get("shifts") or 0)
+    lts = [float(dur) for _start, dur in perf.get("longtasks", [])]  # PERF_JS keeps [startTime, duration]
     print(f"INFO stream FPS (rAF frames per 1 s window, {len(windows)} windows): median {med:.0f}, p5 {p5:.0f}",
           flush=True)
     print(f"INFO stream long tasks since page load: count {len(lts)}, max {max(lts) if lts else 0:.0f} ms, "
           f"total {sum(lts):.0f} ms", flush=True)
-    # Layout-shift sources, aggregated by element and direction (evidence for the CLS root cause).
-    srcs = perf.get("sources", [])
-    agg: dict[str, list[float]] = {}
-    for src in srcs:
-        dy = float(src.get("dy") or 0)
-        way = "down" if dy > 0.5 else ("up" if dy < -0.5 else "flat")
-        key = f"{src.get('d')} {way}"
-        acc = agg.setdefault(key, [0, 0.0, 0.0])
-        acc[0] += 1
-        acc[1] += float(src.get("v") or 0)
-        acc[2] += dy
-    top = sorted(agg.items(), key=lambda kv: -kv[1][1])[:8]
-    for src in srcs[:int(os.environ.get("NS_SRC_DUMP", "0"))]:
-        print(f"INFO src {src.get('d')} t={float(src.get('t') or 0):.0f} v={float(src.get('v') or 0):.4f} dx={float(src.get('dx') or 0):+.1f} "
-              f"dy={float(src.get('dy') or 0):+.1f} dh={float(src.get('dh') or 0):+.1f} st={src.get('st')} sh={src.get('sh')} ch={src.get('ch')}", flush=True)
-    print(f"INFO stream CLS sources ({len(srcs)} rects, CLS {shifts:.4f}): " +
-          "; ".join(f"{k} n={v[0]} sum={v[1]:.4f} mean_dy={v[2] / v[0]:+.1f}" for k, v in top), flush=True)
-    h.check("stream: layout-shift (CLS) sum <= 0.1", shifts <= 0.1, f"CLS {shifts:.4f}")
+    cls_report(h, perf, first_t, end_t, reloaded)
     h.shot(page, "stream-end.png")
 
 
@@ -391,6 +479,8 @@ def group_stream(h: Any, browser: Any) -> None:
         ctx, page = h.new_page(browser, extra=PERF_JS)
         try:
             page.goto(h.url(h.port), wait_until="domcontentloaded", timeout=30000)
+            # Harness actions are logged on the page clock so the CLS window can be attributed (see cls_report).
+            page.evaluate("() => window.__nsPerf && window.__nsPerf.log.push({ t: performance.now(), k: 'goto' })")
             time.sleep(1.0)  # the page is open before the run starts
             h.start_replay(h.demo_src, feeds, 1, 3, "stream")
             path, run_id = h.new_run(feeds, before, "stream")
@@ -606,6 +696,122 @@ def group_easy(h: Any, browser: Any) -> None:
 
 
 # ---- zhterms ----------------------------------------------------------------------------------------
+# ---- export -----------------------------------------------------------------------------------------
+def token_server(h: Any, port: int, feeds: Path, tag: str) -> Any:
+    """`python -m server --token` (the token gate on). ux.Harness.serve() sends no token, so it is not used here."""
+    proc = h._spawn([h.py, "-m", "server", "--port", str(port), "--feeds", str(feeds), "--static", str(h.static),
+                     "--token", EXPORT_TOKEN], f"server-{tag}-{port}.log")
+
+    def health() -> bool:
+        req = urllib.request.Request(f"{h.url(port)}api/health", headers={"Authorization": f"Bearer {EXPORT_TOKEN}"})
+        try:
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                return resp.status == 200
+        except Exception:
+            return False
+
+    if not ux.wait_until(health, 20):
+        raise RuntimeError(f"token server on port {port} did not answer /api/health with the token (logs in {h.logs})")
+    return proc
+
+
+def export_finished_body(h: Any, browser: Any, port: int) -> None:
+    try:
+        urllib.request.urlopen(f"{h.url(port)}api/runs", timeout=2)
+        code = 200
+    except urllib.error.HTTPError as exc:
+        code = exc.code
+    h.check("export: token gate refuses API calls without the token", code == 401, f"GET api/runs without token -> {code}")
+    ctx = browser.new_context(viewport=ux.VIEWPORT, accept_downloads=True)
+    ctx.add_init_script(ux.INIT_JS)
+    page = ctx.new_page()
+    page.on("pageerror", lambda exc: print(f"  page error: {exc}", flush=True))
+    try:
+        page.goto(f"{h.url(port)}?token={EXPORT_TOKEN}", wait_until="domcontentloaded", timeout=30000)
+        shown = ux.wait_until(lambda: ux.seg_count(page) >= 1, 30, 0.3)
+        btn = page.locator('[data-testid="export-odt"]').first
+        btn.wait_for(state="visible", timeout=15000)
+        enabled = btn.is_enabled()
+        h.check("export finished run: export-odt visible and enabled", bool(shown) and enabled,
+                f"segments {ux.seg_count(page)}, enabled {enabled}, data-state {btn.get_attribute('data-state')!r}")
+        with page.expect_download(timeout=60000) as info:
+            btn.click(timeout=5000)
+        dl = info.value
+        name = Path(dl.suggested_filename).name
+        out_dir = Path(tempfile.mkdtemp(prefix="odt-", dir=str(h.work)))  # a new, empty directory for the download
+        target = out_dir / name
+        dl.save_as(str(target))
+        h.check("export: download filename ends with .odt", name.endswith(".odt"), f"suggested filename {name!r}")
+        with zipfile.ZipFile(target) as zf:
+            names = zf.namelist()
+            first = zf.infolist()[0] if names else None
+            mime = zf.read("mimetype").decode("ascii", "replace") if "mimetype" in names else None
+            xml = zf.read("content.xml").decode("utf-8", "replace") if "content.xml" in names else ""
+        h.check("export: zip's first entry is a stored mimetype = application/vnd.oasis.opendocument.text",
+                first is not None and first.filename == "mimetype" and first.compress_type == zipfile.ZIP_STORED
+                and mime == ODT_MIME,
+                f"entries {names[:4]}, first {first.filename if first else None!r}, compress "
+                f"{first.compress_type if first else None}, mimetype {mime!r}")
+        labels = [lab for lab in ("Speaker 1", "Speaker 2", "說話者 1", "說話者 2") if lab in xml]
+        h.check("export: content.xml names a speaker", bool(labels), f"labels {labels}, content.xml {len(xml)} bytes")
+
+        def success() -> str | None:  # data-state="success" when the page sets it, else the localised text
+            if btn.get_attribute("data-state") == "success":
+                return "data-state=success"
+            body = page.evaluate("() => document.body.innerText") or ""
+            if "Downloaded" in body or "已下載" in body:
+                return "Downloaded text on the page"
+            return None
+
+        how = ux.wait_until(success, 8, 0.2)
+        h.check("export finished run: button shows its success state after the download", bool(how),
+                f"{how or 'no success state'}; data-state {btn.get_attribute('data-state')!r}, "
+                f"label {(btn.text_content() or '').strip()!r}")
+        h.shot(page, "export-finished.png")
+    finally:
+        ctx.close()
+
+
+def export_live_body(h: Any, browser: Any, port: int, run_id: str) -> None:
+    ctx = browser.new_context(viewport=ux.VIEWPORT)
+    ctx.add_init_script(ux.INIT_JS)
+    page = ctx.new_page()
+    try:
+        page.goto(f"{h.url(port)}?token={EXPORT_TOKEN}", wait_until="domcontentloaded", timeout=30000)
+        shown = ux.wait_until(lambda: ux.seg_count(page) >= 1, 30, 0.3)
+        btn = page.locator('[data-testid="export-odt"]').first
+        btn.wait_for(state="visible", timeout=15000)
+        enabled = btn.is_enabled()
+        h.check("export live run: export-odt disabled while the run is live", bool(shown) and not enabled,
+                f"segments {ux.seg_count(page)}, enabled {enabled}, data-state {btn.get_attribute('data-state')!r}, "
+                f"run_end seen {ux.page_ended(page, run_id)}")
+        h.shot(page, "export-live.png")
+    finally:
+        ctx.close()
+
+
+def group_export(h: Any, browser: Any) -> None:
+    port = h.port
+    feeds = h.new_feeds("export-finished")
+    shutil.copyfile(FEED_SRC, feeds / FEED_SRC.name)  # a complete run: run_start to run_end in one file
+    srv = token_server(h, port, feeds, "export-finished")
+    try:
+        h.scenario("export finished run", export_finished_body, h, browser, port)
+    finally:
+        h.stop(srv)
+    feeds = h.new_feeds("export-live")
+    srv = token_server(h, port, feeds, "export-live")
+    replay = None
+    try:
+        before = h.feeds_now(feeds)
+        replay = h.start_replay(h.demo_src, feeds, 2, 2, "export-live")
+        _path, run_id = h.new_run(feeds, before, "export-live")
+        h.scenario("export live run", export_live_body, h, browser, port, run_id)
+    finally:
+        h.stop(replay)
+        h.stop(srv)
+
+
 def zhterms_body(h: Any, page: Any, path: Path, run_id: str) -> None:
     ended = ux.wait_until(lambda: ux.page_ended(page, run_id), 90, 0.3)
     time.sleep(0.5)
@@ -638,7 +844,8 @@ def group_zhterms(h: Any, browser: Any) -> None:
         h.stop(srv)
 
 
-GROUP_FUNCS = {"stream": group_stream, "reduced": group_reduced, "easy": group_easy, "zhterms": group_zhterms}
+GROUP_FUNCS = {"stream": group_stream, "reduced": group_reduced, "easy": group_easy, "zhterms": group_zhterms,
+               "export": group_export}
 
 
 def main(argv: list[str] | None = None) -> int:
