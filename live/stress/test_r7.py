@@ -72,6 +72,9 @@ HEADER_JS = r"""() => {
            toggles: tog.length ? tog.every(inside) : null }; }"""
 RECT_JS = r"""(sel) => { const e = document.querySelector(sel); if (!e) return null;
   const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom, w: r.width, h: r.height }; }"""
+TEXT_RECT_JS = r"""(sel) => { const e = document.querySelector(sel); if (!e) return null;
+  const r = document.createRange(); r.selectNodeContents(e); const b = r.getBoundingClientRect();
+  return { l: b.left, r: b.right, t: b.top, b: b.bottom, w: b.width, h: b.height }; }"""  # union of the rendered text
 INNER_JS = r"""(sel) => { const e = document.querySelector(sel); return e ? e.innerText : null; }"""
 TOAST_LABELS_JS = r"""() => Array.from(document.querySelectorAll('section[aria-label]'))
   .filter((s) => s.querySelector('[data-sonner-toast]') || /notif|通知/i.test(s.getAttribute('aria-label') || ''))
@@ -447,10 +450,12 @@ def group_toast(h: ux.Harness, browser: Any, port: int) -> None:
             h.new_run(feeds, before, f"toast-{width}")
             shown = ux.wait_until(lambda: page.locator('[data-testid="new-run-notice"]').is_visible(), 15, 0.2)
             rect_n = page.evaluate(RECT_JS, '[data-testid="new-run-notice"]')
-            rect_t = page.evaluate(RECT_JS, '[data-testid="run-title"]')
-            ok = bool(shown) and visible_rect(rect_n) and visible_rect(rect_t) and not i18n.overlaps(rect_n, rect_t)
+            rect_t = page.evaluate(RECT_JS, '[data-testid="run-title"]')          # h2 element box (block, full card width)
+            text_t = page.evaluate(TEXT_RECT_JS, '[data-testid="run-title"]')    # union of the h2's rendered text
+            ok = (bool(shown) and visible_rect(rect_n) and visible_rect(rect_t) and visible_rect(text_t)
+                  and not i18n.overlaps(rect_n, text_t))
             h.check(f"toast vs run-title at {width}px: new-run-notice does not intersect run-title", ok,
-                    f"shown {bool(shown)}, notice {rect_n}, title {rect_t}")
+                    f"shown {bool(shown)}, notice {rect_n}, title element {rect_t}, title text {text_t}")
             h.shot(page, f"r7-toast-{width}.png")
         finally:
             ctx.close()
