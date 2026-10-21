@@ -128,3 +128,36 @@ export function barText(pct: number, cells = 8): string {
   const filled = Math.round((clamped / 100) * cells);
   return `▕${"█".repeat(filled)}${"░".repeat(cells - filled)}▏`;
 }
+
+/** Seconds as mm:ss, minutes padded to two digits. */
+export function clockText(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/** The percentage a progress message carries (e.g. "Transcribing 42%"), or null when it carries none. */
+export function progressPct(msg: string): number | null {
+  const match = /(\d+(?:\.\d+)?)\s*%/.exec(msg);
+  return match ? Math.min(100, Math.max(0, Number(match[1]))) : null;
+}
+
+/** An item with the sort key it takes in the merged terminal. */
+export interface Keyed<T> {
+  item: T;
+  key: number;
+}
+
+/**
+ * Merges two lists that are each in time order. The steps keep their order; a log line goes before the first step
+ * whose key is above the line's key, so a line that arrived before a step shows above it.
+ */
+export function interleave<T>(steps: readonly Keyed<T>[], logs: readonly Keyed<T>[]): T[] {
+  const out: T[] = [];
+  let j = 0;
+  for (const step of steps) {
+    while (j < logs.length && logs[j].key < step.key) out.push(logs[j++].item);
+    out.push(step.item);
+  }
+  while (j < logs.length) out.push(logs[j++].item);
+  return out;
+}

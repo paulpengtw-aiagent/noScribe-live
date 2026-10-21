@@ -2,10 +2,31 @@
 // feed it events and read the derived values. `now` is always passed in so
 // the reducer stays deterministic.
 
-import type { FeedEvent, RunStatus, RunSummary } from "@/lib/live-types";
+import type { FeedEvent, LogEvent, LogLevel, RunStatus, RunSummary } from "@/lib/live-types";
 import { speakerKey } from "@/lib/speakers";
 
 export type EndStatus = "finished" | "error" | "canceled";
+
+/** Most CLI log lines kept per run; the oldest are dropped first. */
+export const LOG_CAP = 500;
+
+/** One CLI log line. `first` is the seq of the line that created it; `seq` is the newest update to it. */
+export interface LogLine {
+  seq: number;
+  first: number;
+  t: number;
+  level: LogLevel;
+  source: string;
+  msg: string;
+  /** True when the newest update was a carriage-return progress update (replace). */
+  replace: boolean;
+}
+
+/** The configured language when it is a fixed choice; null for auto-detect ("Auto") or when none was given. */
+export function fixedLanguage(configured: string | null | undefined): string | null {
+  const v = configured?.trim() ?? "";
+  return v === "" || v.toLowerCase() === "auto" ? null : v;
+}
 
 export type DisplayPhase =
   | "waiting"
@@ -80,6 +101,8 @@ export interface RunState {
   lastT: number | null;
   /** Highest feed `seq` applied so far (-1 before any). Lines at or below it are duplicates. */
   lastSeq: number;
+  /** CLI log lines, oldest first, capped at LOG_CAP. A replace line updates the previous line from its source. */
+  logs: LogLine[];
 }
 
 export interface LiveState {
@@ -114,7 +137,9 @@ function emptyRun(runId: string, summary: RunSummary | null): RunState {
     outputFile: null,
     model: summary?.model ?? null,
     languageName: null,
-    language: summary?.language ?? null,
+    // `language` is the language the run is known to use: a fixed setting, else the detected one. The summary's
+    // `language` is the configured setting ("Auto" when auto-detecting), so it is not a detection.
+    language: fixedLanguage(summary?.language) ?? summary?.detected_language ?? null,
     languageProbability: null,
     speakerDetection: null,
     phase: null,
@@ -139,7 +164,31 @@ function emptyRun(runId: string, summary: RunSummary | null): RunState {
     outputName: summary?.output_name ?? null,
     lastT: null,
     lastSeq: -1,
+    logs: [],
   };
+}
+
+/** Adds a CLI log line. A replace line updates the most recent line from the same source in place. */
+function appendLog(logs: readonly LogLine[], ev: LogEvent): LogLine[] {
+  if (ev.replace) {
+    for (let i = logs.length - 1; i >= 0; i--) {
+      if (logs[i].source !== ev.source) continue;
+      const next = logs.slice();
+      next[i] = { ...logs[i], seq: ev.seq, t: ev.t, level: ev.level, msg: ev.msg, replace: true };
+      return next;
+    }
+  }
+  const line: LogLine = {
+    seq: ev.seq,
+    first: ev.seq,
+    t: ev.t,
+    level: ev.level,
+    source: ev.source,
+    msg: ev.msg,
+    replace: ev.replace === true,
+  };
+  const next = [...logs, line];
+  return next.length > LOG_CAP ? next.slice(next.length - LOG_CAP) : next;
 }
 
 function mergeSpeakers(current: string[], incoming: readonly string[]): string[] {
@@ -161,6 +210,8 @@ function applyEvent(run: RunState, ev: FeedEvent, ctx: { now: number; live: bool
         outputFile: ev.output_file ?? run.outputFile,
         model: ev.model ?? run.model,
         languageName: ev.language ?? run.languageName,
+        // A fixed setting is the language; "Auto" leaves `language` to the detected one (the language event).
+        language: fixedLanguage(ev.language) ?? run.language,
         speakerDetection: ev.speaker_detection ?? run.speakerDetection,
         startedT: ev.t,
       };
@@ -187,6 +238,8 @@ function applyEvent(run: RunState, ev: FeedEvent, ctx: { now: number; live: bool
       };
     case "language":
       return { ...run, language: ev.language ?? run.language, languageProbability: ev.probability ?? null };
+    case "log":
+      return { ...run, logs: appendLog(run.logs, ev) };
     case "segment": {
       const seg: Segment = {
         index: ev.index,

@@ -118,6 +118,7 @@ Licence verdicts (checked 2026-10-21; evidence, install URLs and candidates in [
 - ObsidianUI: MIT, "Components are MIT licensed" ([terms](https://www.obsidianui.dev/terms), section 05; [repo LICENSE](https://github.com/Atharvsinh-codez/ObsidianUI/blob/main/LICENSE)). Verdict: USE.
 - AffectUI: "Items marked as free are open source under the MIT license" ([terms](https://www.affectui.com/terms), section 4; [llms.txt](https://www.affectui.com/llms.txt), "40 items are free and open source (MIT)"). Verdict: USE, free-tagged items only; Pro is excluded ([Pro licence](https://www.affectui.com/license)).
 - uiarc: "Free: MIT" ([licence](https://uiarc.dev/license); [terms](https://uiarc.dev/terms), "The free library is MIT licensed"). Verdict: USE, free items only; Pro is excluded.
+- animate-ui — MIT + Commons Clause; approved by the owner for consulting use (2026-10-22). The Commons Clause bars selling or redistributing the components in their original form ([LICENSE.md](https://raw.githubusercontent.com/imskyleen/animate-ui/main/LICENSE.md)).
 
 Showreel round, checked 2026-10-21. Details, evidence URLs and install commands are in [docs/ui-libraries-showreel.md](docs/ui-libraries-showreel.md).
 

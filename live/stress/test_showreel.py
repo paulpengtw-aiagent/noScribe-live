@@ -4,9 +4,10 @@ reduced motion, and the pre-roll at phone widths.
 
 Groups (--only, default all):
   flow     desktop 1440x900, page open before a real-speed replay (speed 1, max-gap 30). A page-side sampler
-           counts the revealed graphemes every 50 ms. Idle = time with no character appearing between the first
-           segment and run_end; largest gap between visible additions; lag from run_end to an empty queue; rAF
-           FPS; long tasks in the live window.
+           counts the revealed graphemes every 50 ms, and every rAF frame records the count too. Idle = frames on
+           which no grapheme was added since the previous frame, between the first segment and run_end (share of
+           frames, and the longest idle run in ms); largest gap between visible additions; lag from run_end to an
+           empty queue; rAF FPS; long tasks in the live window.
   preroll  page open before a real-speed replay: desktop 1440 and phone 390, en and zh-TW, dark. The pre-roll
            shows after run_start with terminal rows (audio, model, device, language, speakers). At the moment
            window.__nslivePreroll.active flips false the four stats must all be known. Afterwards the full UI
@@ -36,6 +37,7 @@ import re
 import shutil
 import signal
 import statistics
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -61,7 +63,7 @@ NEED_STATS = {"model", "device", "language", "speakers"}
 FLOW_JS = r"""
 (() => {
   if (window.__nsFlow) return;
-  const F = { samples: [], frames: [], longtasks: [] };
+  const F = { samples: [], frames: [], fr: [], longtasks: [] };
   window.__nsFlow = F;
   const text = (el) => { let t = '';
     const walk = (n) => { for (const c of n.childNodes) {
@@ -74,7 +76,10 @@ FLOW_JS = r"""
     const r = window.__nsliveReveal;
     F.samples.push({ t: Date.now(), n, segs, q: r ? r.queued : -1, bk: r ? r.backlogChars : -1 });
   }, 50);
-  const frame = () => { if (F.frames.length < 60000) F.frames.push(Date.now()); requestAnimationFrame(frame); };
+  // Per frame: [Date.now(), graphemes shown]. Python marks a frame idle when its count did not grow since the previous one.
+  const count = () => { let n = 0; for (const el of document.querySelectorAll('[data-segment-seq]')) n += text(el).trim().length; return n; };
+  const frame = () => { if (F.frames.length < 60000) { const t = Date.now(); F.frames.push(t); F.fr.push([t, count()]); }
+    requestAnimationFrame(frame); };
   requestAnimationFrame(frame);
   try { new PerformanceObserver((l) => { for (const e of l.getEntries()) F.longtasks.push([Date.now(), e.duration]); })
     .observe({ type: 'longtask', buffered: true }); } catch (e) {}
@@ -213,26 +218,58 @@ def feed_seg_texts(path: Path) -> dict[str, str]:
     return out
 
 
+OPENCC_SCRIPT = r"""
+import json, sys
+from opencc import OpenCC
+cc = OpenCC('s2tw')
+sys.stdout.buffer.write(json.dumps([cc.convert(s) for s in json.loads(sys.stdin.buffer.read())],
+                                   ensure_ascii=False).encode('utf-8'))
+"""
+
+
+def to_zh_tw(py: str, texts: list[str]) -> list[str] | None:
+    """Simplified -> Traditional (Taiwan) with OpenCC('s2tw'), the conversion the page displays. This script runs under
+    /usr/bin/python3, which has no opencc, so the conversion runs in the live venv (the harness's python, `py`).
+    None when that python cannot convert (no opencc, or the call fails)."""
+    try:
+        out = subprocess.run([py, "-I", "-B", "-c", OPENCC_SCRIPT], input=json.dumps(texts, ensure_ascii=False).encode("utf-8"),
+                             capture_output=True, timeout=60, check=True).stdout
+        conv = json.loads(out.decode("utf-8"))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    return conv if isinstance(conv, list) and len(conv) == len(texts) else None
+
+
 def flow_analysis(F: dict[str, Any], run_end_ms: float | None) -> dict[str, Any] | None:
     samples = F.get("samples") or []
     first = next((s for s in samples if s["segs"] >= 1), None)
     if first is None or run_end_ms is None:
         return None
     live = [s for s in samples if first["t"] <= s["t"] <= run_end_ms]
-    if len(live) < 3:
+    # Per frame (F["fr"] = [t, graphemes shown], recorded in rAF): a frame is idle when its count did not grow since the
+    # previous frame. Idle share is over frames; the longest idle run is from the last addition to the run's last idle frame.
+    fr = [f for f in (F.get("fr") or []) if first["t"] <= f[0] <= run_end_ms]
+    if len(live) < 3 or len(fr) < 3:
         return None
-    span = idle = longest_idle = run_idle = 0.0
+    span = 0.0
     adds: list[float] = []
     for a, b in zip(live, live[1:]):
-        dt = b["t"] - a["t"]
-        span += dt
+        span += b["t"] - a["t"]
         if b["n"] > a["n"]:
             adds.append(b["t"])
-            run_idle = 0.0
-        else:
-            idle += dt
-            run_idle += dt
-            longest_idle = max(longest_idle, run_idle)
+    pairs = list(zip(fr, fr[1:]))
+    idle_frames = longest_frames = run_frames = 0
+    longest_ms = run_t0 = 0.0
+    for a, b in pairs:
+        if b[1] > a[1]:
+            run_frames = 0
+            continue
+        if run_frames == 0:
+            run_t0 = a[0]  # the frame where the last grapheme was added, before this idle run
+        run_frames += 1
+        idle_frames += 1
+        if b[0] - run_t0 > longest_ms:
+            longest_ms, longest_frames = b[0] - run_t0, run_frames
     gaps = [y - x for x, y in zip(adds, adds[1:])]
     empty = next((s for s in samples if s["t"] >= run_end_ms and s["q"] == 0 and s["bk"] == 0), None)
     frames = F.get("frames") or []
@@ -241,9 +278,11 @@ def flow_analysis(F: dict[str, Any], run_end_ms: float | None) -> dict[str, Any]
     long_in = [d for t, d in (F.get("longtasks") or []) if first["t"] <= t <= run_end_ms]
     return {
         "span": span,
-        "idle": idle,
-        "idle_pct": 100.0 * idle / span if span else 0.0,
-        "longest_idle": longest_idle,
+        "idle_frames": idle_frames,
+        "frames_live": len(pairs),
+        "idle_pct": 100.0 * idle_frames / len(pairs) if pairs else 0.0,
+        "longest_idle_ms": longest_ms,
+        "longest_idle_frames": longest_frames,
         "max_gap": max(gaps) if gaps else float("nan"),
         "gaps_250": sum(1 for g in gaps if g >= 250),
         "adds": len(adds),
@@ -280,9 +319,10 @@ def group_flow(h: Any, browser: Any) -> None:
         if an is None:
             h.check("flow: live window measured", False, f"no samples (run_end seen: {run_end_ms is not None})")
             return
-        h.check("flow: idle time <= 5% of live time (first segment -> run_end)", an["idle_pct"] <= 5.0,
-                f"idle {an['idle_pct']:.1f}% ({an['idle']:.0f} of {an['span']:.0f} ms), "
-                f"longest idle run {an['longest_idle']:.0f} ms")
+        h.check("flow: idle frames <= 5% of live frames (first segment -> run_end)", an["idle_pct"] <= 5.0,
+                f"idle {an['idle_pct']:.1f}% ({an['idle_frames']} of {an['frames_live']} frames with no grapheme "
+                f"added since the previous frame); longest idle run {an['longest_idle_ms']:.0f} ms over "
+                f"{an['longest_idle_frames']} frames")
         h.check("flow: largest gap between visible additions < 250 ms", an["max_gap"] < 250,
                 f"largest gap {an['max_gap']:.0f} ms; gaps >= 250 ms: {an['gaps_250']} of {max(an['adds'] - 1, 0)}")
         h.check("flow: queue empties after run_end", an["lag_end"] is not None and bool(empty),
@@ -461,7 +501,12 @@ def seen_body(h: Any, page: Any, path: Path, label: str) -> None:
     ended = run_end_at(path, 90) is not None
     time.sleep(1.5)
     seen = page.evaluate("() => window.__nsSeen || {}")
-    exp = feed_seg_texts(path)
+    feed = feed_seg_texts(path)
+    # The page shows zh-TW (OpenCC s2tw) where the feed is Simplified, so the expected text is the feed text converted
+    # the same way, in the live venv. Without that conversion nothing can be compared and the check fails.
+    keys = list(feed)
+    conv = to_zh_tw(h.py, [feed[k] for k in keys])
+    exp = dict(zip(keys, conv)) if conv is not None else {}
     full: list[str] = []
     partial: list[str] = []
     missing: list[str] = []
@@ -474,7 +519,9 @@ def seen_body(h: Any, page: Any, path: Path, label: str) -> None:
             partial.append(key)
     h.check(f"{label}: new segments show their full text at first sight",
             bool(exp) and not partial and not missing,
-            f"feed {len(exp)} segments; seen {len(seen)}; full at first sight {len(full)}; "
+            f"feed {len(feed)} segments (expected = feed text through OpenCC s2tw in {h.py}"
+            f"{'' if conv is not None else ': conversion unavailable'}); "
+            f"seen {len(seen)}; full at first sight {len(full)}; "
             f"partial {len(partial)} {[(k, ' '.join(str(seen[k]['text']).split())[:70], exp[k][:70]) for k in partial[:2]]}; "
             f"never seen {len(missing)}; run_end seen {ended}")
 

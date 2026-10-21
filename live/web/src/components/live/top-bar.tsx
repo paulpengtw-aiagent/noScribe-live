@@ -227,7 +227,8 @@ export function TopBar({
 
           {/* Easy view is always one visible header button (the short label on phones); the gear menu holds the rest. */}
           <EasyToggle compact={compact} />
-          {compact ? (
+          {/* The pre-roll header keeps the one menu on desktop too; the phone header always has it. */}
+          {compact || minimal ? (
             <HeaderMenu theme={theme} onToggleTheme={onToggleTheme} />
           ) : (
             <>

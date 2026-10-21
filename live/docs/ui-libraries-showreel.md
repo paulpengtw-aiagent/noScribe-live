@@ -20,7 +20,11 @@ Each installed shadcn file has a header comment with its source URL and licence.
 
 ## Not used
 
-### animate-ui: DON'T (not plain MIT)
+### animate-ui: DON'T (not plain MIT), then approved by the owner for consulting use
+
+animate-ui — MIT + Commons Clause; approved by the owner for consulting use (2026-10-22).
+
+The 2026-10-21 verdict below is kept as the record of the rule that applied then.
 
 - Docs: https://animate-ui.com/docs. Relevant items: `sliding-number`, `typing-text`, `rolling-text`, `morphing-text`, `sliding-text` (https://animate-ui.com/docs/primitives/animate-ui/sliding-number and siblings); slider in Radix, Base UI and React Aria (https://animate-ui.com/docs/primitives/radix-ui/slider).
 - Repo: https://github.com/imskyleen/animate-ui. GitHub API reports `license` = NOASSERTION ("Other").

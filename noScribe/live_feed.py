@@ -7,14 +7,20 @@ is created and nothing is printed.
 The event format is documented in ``live/FEED.md``. This module is stdlib only,
 and every ``JobFeed`` method swallows its own exceptions (the first one is logged
 as a warning), so a feed problem can never change or stop a transcription.
+
+While a job's feed is open, the CLI's own log records and stdout/stderr text are
+also forwarded as ``log`` events (see the section above ``_run_start_fields``).
+The terminal output does not change: every write reaches the original stream first.
 """
 
+import contextlib
 import functools
 import json
 import logging
 import math
 import os
 import re
+import sys
 import threading
 import time
 from pathlib import Path
@@ -149,6 +155,11 @@ class JobFeed:
         self._last_progress = None
         self._warned = False
         self._lock = threading.Lock()
+        # Log forwarding, installed by _start_capture() and removed by _stop_capture().
+        self._forwarder = None
+        self._log_handler = None
+        self._tee_out = self._orig_out = None
+        self._tee_err = self._orig_err = None
 
     @classmethod
     def disabled(cls):
@@ -159,8 +170,9 @@ class JobFeed:
         if self._warned:
             return
         self._warned = True
-        _log.warning("live feed error in run %s (later errors in this run are not logged): %s",
-                     self.run_id, exc)
+        with _feed_code():   # the feed's own warning is not forwarded back into the feed
+            _log.warning("live feed error in run %s (later errors in this run are not logged): %s",
+                         self.run_id, exc)
 
     def _write(self, event_type, fields):
         """Write one event line and flush it. The caller holds self._lock."""
@@ -246,6 +258,7 @@ class JobFeed:
 
     def end(self, status, error=None, output_file=None):
         """Write run_end and close the file. Only the first call has any effect."""
+        self._stop_capture()   # first, so the held-back log lines go out before run_end
         with self._lock:
             if self._closed:
                 return
@@ -260,6 +273,315 @@ class JobFeed:
                 self._warn(exc)
             finally:
                 self._close_handle()
+
+    def _start_capture(self):
+        """Forward the CLI's log records and stdout/stderr text to this feed until end()."""
+        if self._closed or self._forwarder is not None:
+            return
+        try:
+            self._forwarder = _LogForwarder(self)
+            self._log_handler = _FeedLogHandler(self._forwarder)
+            logging.getLogger().addHandler(self._log_handler)
+            if sys.stdout is not None:
+                self._orig_out = sys.stdout
+                self._tee_out = _TeeStream(sys.stdout, "stdout", self._forwarder)
+                sys.stdout = self._tee_out
+            if sys.stderr is not None:
+                self._orig_err = sys.stderr
+                self._tee_err = _TeeStream(sys.stderr, "stderr", self._forwarder)
+                sys.stderr = self._tee_err
+            _live_captures.append(self)
+        except Exception as exc:
+            self._stop_capture()
+            self._warn(exc)
+
+    def _stop_capture(self):
+        """Put back the streams and the logging handler. Safe to call more than once."""
+        forwarder, self._forwarder = self._forwarder, None
+        if forwarder is None:
+            return
+        try:
+            if self in _live_captures:
+                _live_captures.remove(self)
+            for name, tee, original in (("stdout", self._tee_out, self._orig_out),
+                                        ("stderr", self._tee_err, self._orig_err)):
+                if tee is None:
+                    continue
+                tee._done = True
+                if getattr(sys, name) is tee:
+                    setattr(sys, name, _unwound(original))
+            handler, self._log_handler = self._log_handler, None
+            if handler is not None:
+                logging.getLogger().removeHandler(handler)
+        except Exception as exc:
+            self._warn(exc)
+        finally:
+            forwarder.close()
+
+
+# ---------------------------------------------------------------------------
+# Log forwarding. While a job's feed is open, the CLI's log records and its
+# stdout/stderr text are written as "log" events too. Only JobFeed._start_capture
+# installs any of this, and only when the feed is on.
+# ---------------------------------------------------------------------------
+
+LOG_RATE_PER_S = 20        # at most this many log events per second (a token bucket of the same size)
+LOG_MAX_CHARS = 300        # longer messages are cut and end with "..."
+_PENDING_LIMIT = 4096      # text this long without a line break is sent in pieces
+_KNOWN_SOURCES = ("faster_whisper", "pyannote", "ctranslate2", "speechbrain", "torch")
+
+_BREAK_RE = re.compile(r"(\r\n|\r|\n)")
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_SECRET_RE = re.compile(r"(?i)token\s*=|authorization|bearer\s|api[_-]?key|secret|passw"
+                        r"|\bhf_\w{8,}|\bsk-[\w-]{8,}")
+# A /path/to/name or C:\path\to\name, trimmed to its last component.
+_PATH_RE = re.compile(r"(?<![\w.:/\\])(?:[A-Za-z]:)?[\\/](?=[^\\/\s])(?:[^\\/\r\n]+[\\/])*([^\\/\r\n]+)")
+_ERROR_START_RE = re.compile(r"\s*(error|fatal|critical)\b", re.IGNORECASE)
+
+_monotonic = time.monotonic    # tests replace this to make the rate limit deterministic
+_feed_local = threading.local()
+_live_captures = []            # JobFeeds that are forwarding right now
+
+
+@contextlib.contextmanager
+def _feed_code():
+    """Code that acts for the feed. Log records and writes made inside it are not forwarded."""
+    previous = getattr(_feed_local, "active", False)
+    _feed_local.active = True
+    try:
+        yield
+    finally:
+        _feed_local.active = previous
+
+
+def _in_feed_code():
+    return getattr(_feed_local, "active", False)
+
+
+def _clean(text):
+    """The text to send for one line, or None when there is nothing to send."""
+    text = _ANSI_RE.sub("", text).strip()
+    if not text:
+        return None
+    if _SECRET_RE.search(text):
+        return "[redacted]"
+    text = _PATH_RE.sub(lambda m: m.group(1), text)
+    if len(text) > LOG_MAX_CHARS:
+        text = text[:LOG_MAX_CHARS - 3] + "..."
+    return text
+
+
+def _source_for(name):
+    top = str(name or "").split(".", 1)[0]
+    if top in _KNOWN_SOURCES:
+        return top
+    if top in ("", "root", "__main__", "noScribe"):
+        return "noScribe"
+    return re.sub(r"[^\w-]", "_", top)[:40] or "other"
+
+
+def _level_for(levelno):
+    if levelno >= logging.ERROR:
+        return "error"
+    if levelno >= logging.WARNING:
+        return "warning"
+    if levelno >= logging.INFO:
+        return "info"
+    return "debug"
+
+
+def _unwound(stream):
+    """The stream to put back. Tees that were stopped already (out of order) are skipped."""
+    while isinstance(stream, _TeeStream) and stream._done:
+        stream = stream._original
+    return stream
+
+
+class _LogForwarder:
+    """Turns stdout/stderr text and log records into "log" events of one JobFeed.
+
+    Safe to call from any thread. A failure disables forwarding for the run (the
+    feed logs the first one) and never reaches the code that wrote the text.
+    """
+
+    def __init__(self, feed):
+        self._feed = feed
+        self._pid = os.getpid()    # a forked child inherits this object; only the owner process forwards
+        self._mutex = threading.Lock()
+        self._tokens = float(LOG_RATE_PER_S)
+        self._stamp = _monotonic()
+        self._skipped = 0          # lines held back by the rate limit since the last note
+        self._last_key = None      # (source, level, msg, replace) of the newest event sent
+        self._pending = None       # the newest progress line the rate limit held back
+        self._partial = {"stdout": "", "stderr": ""}          # text after the last line break
+        self._progress = {"stdout": False, "stderr": False}   # the last break was a \r update
+        self.disabled = False
+        self._closed = False
+
+    def feed_text(self, stream, text):
+        if self.disabled or self._closed or _in_feed_code() or os.getpid() != self._pid:
+            return
+        try:
+            with self._mutex:
+                if not self._closed:
+                    self._split(stream, text)
+        except Exception as exc:
+            self.disable(exc)
+
+    def log_record(self, record):
+        if self.disabled or self._closed or os.getpid() != self._pid:
+            return
+        try:
+            message = record.getMessage()
+        except Exception:
+            message = str(record.msg)
+        text = " | ".join(part for part in message.splitlines() if part.strip())
+        with self._mutex:
+            if not self._closed:
+                self._offer(_source_for(record.name), _level_for(record.levelno), text, False)
+
+    def disable(self, exc):
+        """Stop forwarding for this run. The feed logs the first error once."""
+        if not self.disabled:
+            self.disabled = True
+            self._feed._warn(exc)
+
+    def close(self):
+        """Send what the rate limit held back: a partial line, the skipped count, the last progress."""
+        try:
+            with self._mutex:
+                if self._closed:
+                    return
+                for stream in ("stdout", "stderr"):
+                    rest, self._partial[stream] = self._partial[stream], ""
+                    if rest:
+                        self._line(stream, rest, "")
+                pending, self._pending = self._pending, None
+                resend = pending is not None and pending != self._last_key
+                if self._skipped:
+                    self._note()
+                if resend:
+                    self._send(pending)
+        except Exception as exc:
+            self.disable(exc)
+        finally:
+            self._closed = True
+
+    def _split(self, stream, text):
+        buf = self._partial[stream] + text
+        hold = ""
+        if buf.endswith("\r"):     # a \r may be the first half of \r\n: wait for the next write
+            buf, hold = buf[:-1], "\r"
+        pieces = _BREAK_RE.split(buf)      # text, break, text, break, ..., text
+        for i in range(0, len(pieces) - 1, 2):
+            self._line(stream, pieces[i], pieces[i + 1])
+        rest = pieces[-1] + hold
+        if len(rest) > _PENDING_LIMIT:
+            self._line(stream, rest, "\n")
+            rest = ""
+        self._partial[stream] = rest
+
+    def _line(self, stream, text, brk):
+        if brk == "\r":            # a progress update: the viewer replaces its line in place
+            self._progress[stream] = True
+            replace = True
+        else:                      # a finished line replaces the progress line before it, if any
+            replace = self._progress[stream]
+            self._progress[stream] = False
+        if _ERROR_START_RE.match(text):
+            level = "error"
+        elif stream == "stderr" and not replace:
+            level = "warning"
+        else:
+            level = "info"
+        self._offer(stream, level, text, replace)
+
+    def _offer(self, source, level, text, replace):
+        msg = _clean(text[:_PENDING_LIMIT])
+        if msg is None:
+            return
+        key = (source, level, msg, replace)
+        if key == self._last_key:  # the same line as the one just sent: coalesced
+            return
+        if self._take_token():
+            if self._skipped:
+                self._note()
+            self._pending = None
+            self._send(key)
+        else:
+            self._skipped += 1
+            if replace:
+                self._pending = key    # only the newest progress state is worth keeping
+
+    def _take_token(self):
+        now = _monotonic()
+        self._tokens = min(float(LOG_RATE_PER_S), self._tokens + (now - self._stamp) * LOG_RATE_PER_S)
+        self._stamp = now
+        if self._tokens < 1.0:
+            return False
+        self._tokens -= 1.0
+        return True
+
+    def _note(self):
+        count, self._skipped = self._skipped, 0
+        self._send(("live_feed", "info", f"({count} lines skipped)", False))
+
+    def _send(self, key):
+        source, level, msg, replace = key
+        self._last_key = key
+        fields = {"level": level, "source": source, "msg": msg}
+        if replace:
+            fields["replace"] = True
+        self._feed._emit("log", fields)
+
+
+class _FeedLogHandler(logging.Handler):
+    """Root-logger handler for the feed. It only filters: no existing handler or level changes."""
+
+    def __init__(self, forwarder):
+        super().__init__(level=logging.INFO)
+        self._forwarder = forwarder
+
+    def emit(self, record):
+        if _in_feed_code():
+            return
+        try:
+            self._forwarder.log_record(record)
+        except Exception as exc:
+            self._forwarder.disable(exc)
+
+
+class _TeeStream:
+    """Stands in for sys.stdout or sys.stderr. Each write goes to the original stream unchanged, then to the feed."""
+
+    def __init__(self, original, name, forwarder):
+        self._original = original
+        self._name = name
+        self._forwarder = forwarder
+        self._done = False
+
+    def write(self, text):
+        result = self._original.write(text)
+        if not self._done:
+            self._forwarder.feed_text(self._name, text)
+        return result
+
+    def writelines(self, lines):
+        for line in lines:
+            self.write(line)
+
+    def __getattr__(self, name):
+        # flush, isatty, encoding, fileno, buffer and the rest belong to the original stream
+        original = self.__dict__.get("_original")
+        if original is None:
+            raise AttributeError(name)
+        return getattr(original, name)
+
+
+def _stop_all_captures():
+    """Stop every forwarding that is still installed. For tests and cleanup."""
+    for feed in list(_live_captures):
+        feed._stop_capture()
 
 
 def _run_start_fields(job, model_name, noscribe_version):
@@ -297,6 +619,7 @@ def _open_feed(target, job, model_name, noscribe_version):
     except BaseException:
         feed._close_handle()
         raise
+    feed._start_capture()
     return feed
 
 

@@ -34,6 +34,27 @@ While a job runs, the CLI can write one JSON object per line (NDJSON) to a feed.
 | `language` | the language is detected or set | `language`, `probability` (may be null) |
 | `segment` | a segment is finished | `index` (0-based, restarts per attempt), `start`, `end` (s, original audio timeline), `speaker`, `text` |
 | `run_end` | the job ends; written once, then the file closes | `status` (`finished`, `canceled` or `error`), `error`, `output_file`, `elapsed` (s) |
+| `log` | while the feed is open: a logging record (INFO and up, see below) or a line the CLI prints to stdout or stderr | `level` (`debug`, `info`, `warning`, `error`), `source`, `msg`, `replace` (present only when true) |
+
+### `log` events
+
+- Only while the feed is on. With the feed off, no logging handler is attached and the streams are not touched.
+- **What is forwarded.** A handler on the root logger passes records at INFO and up. It does not change any logger level or existing handler, so a record appears only when its logger already emits it. In `main.py`, `faster_whisper` is at DEBUG, so its INFO records show; most other libraries show WARNING and up. Text written to `sys.stdout` and `sys.stderr` is forwarded too. The terminal output is unchanged: each write reaches the original stream first, unchanged.
+- **`source`.** For log records: `faster_whisper`, `pyannote`, `ctranslate2`, `speechbrain` or `torch` (by logger name), `noScribe` for `noScribe.*` and the root logger, and otherwise the top-level package name. For text: `stdout` or `stderr`. The feed's own note (see the rate limit) has source `live_feed`.
+- **`level`.** Records map from their logging level. Stdout lines are `info`. Stderr lines are `warning`, unless they start with `ERROR`, `FATAL` or `CRITICAL`, which makes them `error`. Progress updates are `info`.
+- **`replace`.** A carriage-return update (for example a progress bar) is sent with `"replace": true`. So is the line that finishes it, the one that ends with a newline. The viewer replaces its last progress line in place. Lines without the flag are appended.
+- **Rate limit.** At most 20 log events per second, as a token bucket. Lines over the limit are dropped and counted. The next event sent is preceded by `(n lines skipped)` (source `live_feed`, level `info`). At the end of the run, the last progress state and the final count are sent before `run_end`. An identical line directly after the same line is sent once.
+- **Hygiene.** ANSI colour codes are removed. Messages are cut to 300 characters and end with `...`. A path such as `/a/b/name.mp3` or `C:\a\b\name.mp3` becomes `name.mp3`. URLs are not trimmed.
+- **Privacy.** A line that contains `token=`, `Authorization`, `Bearer`, `api_key`, `secret`, `password`, a Hugging Face token (`hf_...`) or an `sk-...` key is replaced by `[redacted]`. This is pattern matching only. Other text the CLI prints can still reach the feed, and the file may contain transcript text from log lines, so treat it as sensitive.
+- **Failure.** If forwarding raises, forwarding stops for the run, the feed logs one warning, and the transcription and the terminal output go on unchanged.
+
+Examples, verbatim from `live/` code run on a sample (the `run_start`, `phase` and `segment` lines are omitted):
+
+```json
+{"v": 1, "type": "log", "t": 1792600161.6185153, "seq": 1, "run_id": "20261022-002921-demo-en-zh", "level": "info", "source": "stdout", "msg": "Output saved to: demo-en-zh.html"}
+{"v": 1, "type": "log", "t": 1792600161.6185684, "seq": 2, "run_id": "20261022-002921-demo-en-zh", "level": "info", "source": "stderr", "msg": "transcribing 40%|####      |", "replace": true}
+{"v": 1, "type": "log", "t": 1792600161.618664, "seq": 4, "run_id": "20261022-002921-demo-en-zh", "level": "warning", "source": "pyannote", "msg": "std warning from seg.bin"}
+```
 
 Examples are verbatim lines from one real run of `live/samples/demo-en-zh.mp3`. `seq` shows each line's place in that run.
 

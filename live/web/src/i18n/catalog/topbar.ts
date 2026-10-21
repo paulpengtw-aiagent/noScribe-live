@@ -15,6 +15,8 @@ const en = {
   processing: "Processing…",
   /** Icon menu (compact header) that holds the theme and language switches. */
   menuLabel: "Theme and language",
+  /** The CLI log button in the run's stage header, and the title of the dialog it opens. */
+  cliLog: "CLI log",
   /** Run state words. "loading" is a running run with no segment yet. */
   runStatus: { running: "Live", loading: "Loading", finished: "Finished", error: "Failed", canceled: "Canceled", stale: "Stopped" },
   runDisconnected: "Disconnected",
@@ -45,6 +47,7 @@ const zhTW: TopbarMessages = {
   switchTheme: { light: "切換為淺色主題", dark: "切換為深色主題" },
   processing: "處理中…",
   menuLabel: "主題與語言",
+  cliLog: "CLI 紀錄",
   runStatus: { running: "即時", loading: "載入中", finished: "已完成", error: "失敗", canceled: "已取消", stale: "意外停止" },
   runDisconnected: "連線中斷",
   connConnected: "已連線",

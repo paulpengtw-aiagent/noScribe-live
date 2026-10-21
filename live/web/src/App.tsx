@@ -3,6 +3,7 @@ import { motion, MotionConfig } from "motion/react";
 import { toast } from "sonner";
 import { AuroraBackground } from "@/components/live/aurora-background";
 import { StageCard } from "@/components/live/stage-card";
+import { CliLogDisclosure } from "@/components/live/cli-log";
 import { usePrerollMode } from "@/components/live/preroll/use-preroll-mode";
 import { TimelineCard } from "@/components/live/timeline-card";
 import type { TimelineSegment, WaveformTimelineProps } from "@/components/live/waveform-timeline";
@@ -306,6 +307,12 @@ export default function App() {
             ) : (
             <div className="live-grid">
               <div className="live-stage">
+                {/* A row above the stage card. flex-none! keeps it from sharing the column's flex space (.live-stage > *). */}
+                {run && !prerollOnScreen && run.logs.length > 0 ? (
+                  <div className="flex flex-none! justify-end">
+                    <CliLogDisclosure logs={run.logs} startedT={run.startedT} easy={easy} />
+                  </div>
+                ) : null}
                 <StageCard
                   otherLive={otherLive}
                   onRunChange={setRunParam}

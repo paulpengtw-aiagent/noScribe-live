@@ -2,6 +2,7 @@
 
 Stdlib and pytest only. Nothing here needs the models, tkinter or PyAV.
 """
+import io
 import json
 import logging
 import os
@@ -31,6 +32,7 @@ def _no_target(monkeypatch):
     live_feed.configure(None)
     live_feed._issued_run_ids.clear()
     yield
+    live_feed._stop_all_captures()   # a test that left forwarding on must not leak it
     live_feed.configure(None)
     live_feed._issued_run_ids.clear()
 
@@ -337,3 +339,215 @@ def test_importing_the_module_loads_no_heavy_libraries():
     result = subprocess.run([sys.executable, "-c", code], env=env,
                             capture_output=True, text=True, check=True)
     assert result.stdout.strip() == "[]"
+
+
+# --- log events: the CLI's own log records and stdout/stderr text -----------
+
+def _buffers(monkeypatch):
+    """Put buffers in place of sys.stdout and sys.stderr inside the test. Returns (stdout, stderr).
+
+    Not a fixture: pytest's capture resumes its own streams before the call phase.
+    """
+    out, err = io.StringIO(), io.StringIO()
+    monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setattr(sys, "stderr", err)
+    return out, err
+
+
+def _job_with_feed(tmp_path, target):
+    live_feed.configure(str(target))
+    return live_feed.open_job(make_job(tmp_path), "precise")
+
+
+def _log_events(path):
+    return [e for e in read_events(path) if e["type"] == "log"]
+
+
+def test_feed_off_leaves_streams_and_logging_untouched(monkeypatch, tmp_path):
+    out, err = _buffers(monkeypatch)
+    root = logging.getLogger()
+    handlers, level = list(root.handlers), root.level
+    feed = live_feed.open_job(make_job(tmp_path), "precise")
+    assert feed.run_id is None
+    assert sys.stdout is out and sys.stderr is err
+    assert root.handlers == handlers and root.level == level
+    print("hello")
+    feed.end("finished")
+    assert sys.stdout is out and sys.stderr is err
+    assert root.handlers == handlers and root.level == level
+    assert out.getvalue() == "hello\n"
+
+
+def test_feed_on_installs_then_removes_the_stream_tees_and_handler(monkeypatch, tmp_path):
+    out, err = _buffers(monkeypatch)
+    root = logging.getLogger()
+    handlers, level = list(root.handlers), root.level
+    feed = _job_with_feed(tmp_path, tmp_path / "feed.ndjson")
+    assert sys.stdout is not out and sys.stderr is not err
+    assert len(root.handlers) == len(handlers) + 1
+    feed.end("finished")
+    assert sys.stdout is out and sys.stderr is err
+    assert root.handlers == handlers and root.level == level
+
+
+def _terminal_body():
+    print("Starting transcription of 'a.mp3'...")
+    print("Output will be saved to: /tmp/work/out.html")
+    sys.stderr.write("warning: slow disk /home/me/x.wav\n")
+    for pct in (10, 20, 30, 100):
+        sys.stderr.write(f"\r  {pct}%|####|")
+    sys.stderr.write("\n")
+    print("done")
+
+
+def test_terminal_output_is_byte_for_byte_identical_with_and_without_the_feed(monkeypatch, tmp_path):
+    results = []
+    for target in (None, tmp_path / "feed.ndjson"):
+        out, err = io.StringIO(), io.StringIO()
+        monkeypatch.setattr(sys, "stdout", out)
+        monkeypatch.setattr(sys, "stderr", err)
+        live_feed.configure(None if target is None else str(target))
+        feed = live_feed.open_job(make_job(tmp_path), "precise")
+        _terminal_body()
+        feed.end("finished")
+        results.append((out.getvalue(), err.getvalue()))
+    assert results[0] == results[1]
+    assert results[0][0] == ("Starting transcription of 'a.mp3'...\n"
+                             "Output will be saved to: /tmp/work/out.html\ndone\n")
+
+
+def test_log_records_and_stdout_lines_become_log_events(monkeypatch, tmp_path):
+    target = tmp_path / "feed.ndjson"
+    feed = _job_with_feed(tmp_path, target)
+    faster = logging.getLogger("faster_whisper")
+    faster_level = faster.level
+    faster.setLevel(logging.DEBUG)     # as noScribe/main.py sets it; the handler still drops DEBUG
+    try:
+        faster.debug("below INFO, not forwarded")
+        faster.info("loading model from /models/tiny.bin")
+        logging.getLogger("pyannote.audio.core").warning("std warning")
+        logging.getLogger("noScribe.transcription").error("boom")
+        print("Output saved to: /tmp/work/out.html")
+        sys.stderr.write("ERROR: disk full\n")
+    finally:
+        faster.setLevel(faster_level)
+    feed.end("finished")
+    logs = _log_events(target)
+    assert [(e["source"], e["level"], e["msg"]) for e in logs] == [
+        ("faster_whisper", "info", "loading model from tiny.bin"),
+        ("pyannote", "warning", "std warning"),
+        ("noScribe", "error", "boom"),
+        ("stdout", "info", "Output saved to: out.html"),
+        ("stderr", "error", "ERROR: disk full"),
+    ]
+    assert all("replace" not in e for e in logs)
+    assert all(e["run_id"] == feed.run_id for e in logs)
+
+
+def test_carriage_return_updates_are_replace_events(monkeypatch, tmp_path):
+    target = tmp_path / "feed.ndjson"
+    feed = _job_with_feed(tmp_path, target)
+    sys.stderr.write("\r  10%|##|")
+    sys.stderr.write("\r  20%|####|")
+    sys.stderr.write("\r  100%|########|\n")
+    print("done")
+    feed.end("finished")
+    logs = _log_events(target)
+    assert [(e["msg"], e.get("replace")) for e in logs] == [
+        ("10%|##|", True), ("20%|####|", True), ("100%|########|", True), ("done", None)]
+    assert [e["level"] for e in logs] == ["info"] * 4
+
+
+def test_crlf_and_a_carriage_return_split_across_writes(monkeypatch, tmp_path):
+    target = tmp_path / "feed.ndjson"
+    feed = _job_with_feed(tmp_path, target)
+    sys.stdout.write("first\r\n")
+    sys.stdout.write("second\r")
+    sys.stdout.write("\nthird")
+    feed.end("finished")
+    assert [(e["msg"], e.get("replace")) for e in _log_events(target)] == [
+        ("first", None), ("second", None), ("third", None)]
+
+
+def test_paths_are_trimmed_secrets_redacted_and_long_lines_cut(monkeypatch, tmp_path):
+    target = tmp_path / "feed.ndjson"
+    feed = _job_with_feed(tmp_path, target)
+    print(r"Saved to C:\Users\me\clips\take 2.wav")
+    print("reading /workspace/noScribe-live/live/samples/demo-en-zh.mp3 now")
+    print("token=hf_abcdef123456 leaked")
+    print("between")                  # identical lines in a row are coalesced, so keep them apart
+    print("Authorization: Bearer xyz")
+    print("x" * 1000)
+    feed.end("finished")
+    msgs = [e["msg"] for e in _log_events(target)]
+    assert msgs[0] == "Saved to take 2.wav"
+    assert msgs[1] == "reading demo-en-zh.mp3 now"
+    assert msgs[2] == "[redacted]"
+    assert msgs[3] == "between"
+    assert msgs[4] == "[redacted]"
+    assert len(msgs[5]) == 300 and msgs[5].endswith("...")
+
+
+def test_identical_lines_in_a_row_are_sent_once(monkeypatch, tmp_path):
+    target = tmp_path / "feed.ndjson"
+    feed = _job_with_feed(tmp_path, target)
+    for _ in range(5):
+        print("same line")
+    print("other")
+    feed.end("finished")
+    assert [e["msg"] for e in _log_events(target)] == ["same line", "other"]
+
+
+def test_rate_limit_drops_extra_lines_and_reports_the_count(monkeypatch, tmp_path):
+    clock = [1000.0]
+    monkeypatch.setattr(live_feed, "_monotonic", lambda: clock[0])
+    target = tmp_path / "feed.ndjson"
+    feed = _job_with_feed(tmp_path, target)
+    for i in range(50):
+        print(f"line {i}")
+    clock[0] += 1.0                    # one second later the bucket has refilled
+    print("later")
+    feed.end("finished")
+    msgs = [e["msg"] for e in _log_events(target)]
+    assert msgs[:20] == [f"line {i}" for i in range(20)]
+    assert msgs[20:] == ["(30 lines skipped)", "later"]
+
+
+@pytest.mark.parametrize("failure", [RuntimeError, KeyboardInterrupt])
+def test_streams_and_handler_are_restored_after_an_exception(monkeypatch, tmp_path, failure):
+    out, err = _buffers(monkeypatch)
+    root = logging.getLogger()
+    handlers = list(root.handlers)
+    target = tmp_path / "feed.ndjson"
+    feed = _job_with_feed(tmp_path, target)
+    with pytest.raises(failure):
+        try:
+            print("before the failure")
+            raise failure("transcription failed")
+        finally:
+            feed.end("error", error="transcription failed")
+    assert sys.stdout is out and sys.stderr is err
+    assert root.handlers == handlers
+    assert out.getvalue() == "before the failure\n"
+    assert [e["type"] for e in read_events(target)] == ["run_start", "log", "run_end"]
+
+
+def test_a_forwarding_error_disables_forwarding_and_keeps_the_output(monkeypatch,
+                                                                     tmp_path, caplog):
+    out, err = _buffers(monkeypatch)
+    target = tmp_path / "feed.ndjson"
+    feed = _job_with_feed(tmp_path, target)
+
+    def broken(self, *args, **kwargs):
+        raise RuntimeError("forwarder broke")
+
+    monkeypatch.setattr(live_feed._LogForwarder, "_offer", broken)
+    with caplog.at_level(logging.WARNING, logger="noScribe.live_feed"):
+        print("first")
+        print("second")
+    feed.end("finished")
+    assert out.getvalue() == "first\nsecond\n"
+    assert sys.stdout is out and sys.stderr is err
+    assert [e["type"] for e in read_events(target)] == ["run_start", "run_end"]
+    warnings = [r for r in caplog.records if r.name == "noScribe.live_feed"]
+    assert len(warnings) == 1 and "forwarder broke" in warnings[0].getMessage()
