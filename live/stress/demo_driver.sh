@@ -10,6 +10,8 @@
 #   CLIPS="live/samples/stress/01-demo-en-zh.mp3 ..."
 #                                   clips for real runs, relative to the repo root; missing files are skipped
 #   MODEL=breeze-asr-25             Whisper model for real runs
+#   REPLAY_MAX_GAP=30               cap, in seconds, on each pause inside a replayed feed (model-loading and
+#                                   diarization gaps); real-speed pre-roll for demos. Was 5.
 #   NOSCRIBE_PY=/home/cheng/noScribe/venv/bin/python
 #   FEEDS_DIR=live/feeds            feed directory the viewer reads (real runs write here, replays read and write here)
 #   MIN_FREE_BYTES=4294967296       free memory needed to start a real run (4 GiB)
@@ -195,7 +197,7 @@ latest_feed() {
 # replay's own pid in run_start. Sets STATUS.
 replay_src() {
   cd "$LIVE_DIR" || return 1
-  run_child .venv/bin/python -m server.replay "$1" --feeds "$FEEDS_DIR" --speed 1 --max-gap 5
+  run_child .venv/bin/python -m server.replay "$1" --feeds "$FEEDS_DIR" --speed 1 --max-gap ${REPLAY_MAX_GAP:-30}
 }
 
 replay() {

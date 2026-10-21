@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { motion, MotionConfig } from "motion/react";
 import { toast } from "sonner";
 import { AuroraBackground } from "@/components/live/aurora-background";
 import { StageCard } from "@/components/live/stage-card";
+import { usePrerollMode } from "@/components/live/preroll/use-preroll-mode";
 import { TimelineCard } from "@/components/live/timeline-card";
 import type { TimelineSegment, WaveformTimelineProps } from "@/components/live/waveform-timeline";
 import type { OrbMode } from "@/components/live/activity-orb";
@@ -15,6 +17,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useLiveFeed, type Connection } from "@/hooks/use-live-feed";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import { useEasyView } from "@/hooks/use-easy-view";
 import { useNow } from "@/hooks/use-now";
 import { useRunPeaks } from "@/hooks/use-run-peaks";
 import { useTheme } from "@/hooks/use-theme";
@@ -39,6 +42,9 @@ import { speakerColor } from "@/lib/speakers";
 /** Below this width the page stacks into one column. */
 const WIDE_QUERY = "(min-width: 1100px)";
 const NO_SPEAKERS: string[] = [];
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+/** The pre-roll is its own chunk: it loads only while a live run is still starting. */
+const Preroll = lazy(() => import("@/components/live/preroll/preroll-view"));
 
 function orbModeFor(phase: DisplayPhase): OrbMode {
   switch (phase) {
@@ -199,6 +205,10 @@ export default function App() {
   }, [state.helloed, state.runs, runParam, t]);
 
   const phase = displayPhase(run);
+  const { easy } = useEasyView();
+  const reduce = useMediaQuery(REDUCED_MOTION_QUERY);
+  // Until a live run has its four stats, the pre-roll composition shows instead of the full UI.
+  const pre = usePrerollMode(run, easy, reduce, now);
   const segments = run?.segments;
   const lastSegment = segments && segments.length > 0 ? segments[segments.length - 1] : undefined;
   const speakers = run?.speakers ?? NO_SPEAKERS;
@@ -267,6 +277,7 @@ export default function App() {
   return (
     <TooltipProvider delayDuration={150}>
       <SpeakerOrderContext.Provider value={speakers}>
+        <MotionConfig reducedMotion="user">
         <div className="flex min-h-svh flex-col bg-background text-foreground">
           <AuroraBackground live={active && !frozen} />
           <TopBar
@@ -280,6 +291,12 @@ export default function App() {
             onToggleTheme={toggleTheme}
           />
           <ConnBanner connection={connection} retry={retry} lastUpdateT={lastUpdateT} />
+          {run && pre.mode !== "full" ? (
+            <Suspense fallback={null}>
+              <Preroll run={run} morphing={pre.mode === "morph"} easy={easy} reduce={reduce} />
+            </Suspense>
+          ) : null}
+          {pre.mode === "pre" ? null : (
           <main className="live-page">
             {!state.helloed ? (
               <LoadingSkeleton />
@@ -308,7 +325,12 @@ export default function App() {
                 />
               </div>
 
-              <div className="live-transcript">
+              <motion.div
+                className="live-transcript"
+                initial={pre.reason === "ready" ? { opacity: 0, y: reduce ? 0 : 24 } : false}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: reduce ? 0.3 : 1, ease: [0.22, 1, 0.36, 1] }}
+              >
                 {awaitingRun ? (
                   <TranscriptSkeleton />
                 ) : picked !== null && !run ? (
@@ -336,7 +358,7 @@ export default function App() {
                 />
                 </div>
                 )}
-              </div>
+              </motion.div>
 
               <div className="live-timeline">
                 <TimelineCard
@@ -353,7 +375,9 @@ export default function App() {
             </div>
             )}
           </main>
+          )}
         </div>
+        </MotionConfig>
       </SpeakerOrderContext.Provider>
       <Toaster
         theme={theme}

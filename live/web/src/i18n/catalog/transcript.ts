@@ -13,6 +13,14 @@ const en = {
   overlap: (speaker: string) => `overlap · ${speaker}`,
   speakerNumber: (n: number) => `Speaker ${n}`,
   srLine: (speaker: string, text: string) => `${speaker}: ${text}`,
+  speedLabel: "Reveal speed",
+  speedContinuous: "Continuous",
+  speedReading: "Reading",
+  speedNormal: "Normal",
+  speedFast: "Fast",
+  speedCustom: "Custom",
+  speedCharsPerSecond: "Characters per second",
+  speedBehind: "Behind",
 };
 
 export type TranscriptMessages = typeof en;
@@ -30,6 +38,14 @@ const zhTW: TranscriptMessages = {
   overlap: (speaker: string) => `重疊 · ${speaker}`,
   speakerNumber: (n: number) => `講者 ${n}`,
   srLine: (speaker: string, text: string) => `${speaker}：${text}`,
+  speedLabel: "逐字速度",
+  speedContinuous: "連續流動",
+  speedReading: "閱讀",
+  speedNormal: "標準",
+  speedFast: "快速",
+  speedCustom: "自訂",
+  speedCharsPerSecond: "每秒字數",
+  speedBehind: "落後",
 };
 
 export const transcript = { en, "zh-TW": zhTW } satisfies Record<Locale, unknown>;
