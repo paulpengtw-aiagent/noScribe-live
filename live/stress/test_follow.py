@@ -6,8 +6,8 @@ Run from the repo root with the system Python that has Playwright:
     /usr/bin/python3 -I live/stress/test_follow.py [--static DIR] [--port 8769] [--work DIR] [--python PY]
 
 It starts `python -m server` on --port with a fresh feeds dir and replays the recorded demo feed twice:
-replay A (`--speed 0.2 --max-gap 5`, about 94 s, so it is still live through scenarios 1 and 2; scenario 3
-kills it) and replay B (`--speed 1 --max-gap 30`, about 50 s). Scenarios:
+replay A (`--speed 0.15 --max-gap 30`, slow enough to stay live through scenarios 1 and 2; scenario 3
+kills it early in its run) and replay B (`--speed 1 --max-gap 30`, about 50 s). Scenarios:
 
   1. The page is opened in follow mode while A runs; B starts 4 s later. The page must show B while B
      runs (run-state running), and follow A again after B's run_end (the server's run=latest prefers live runs).
@@ -44,7 +44,7 @@ from typing import Any
 HERE = Path(__file__).resolve().parent            # live/stress
 sys.path.insert(0, str(HERE))                     # reuse test_reconnect helpers, also under `python -I`
 from test_reconnect import INIT_JS, feed_info, port_busy, wait_until  # noqa: E402
-from test_ux import wait_full_ui  # noqa: E402  (pre-roll wait; same directory)
+from test_ux import dismiss_run_complete, wait_full_ui  # noqa: E402  (pre-roll wait, run-complete dialog; same directory)
 
 LIVE_DIR = HERE.parent                            # cwd for `python -m server` and `python -m server.replay`
 DEFAULT_STATIC = LIVE_DIR / "web" / "dist"
@@ -144,6 +144,8 @@ def state(page: Any) -> str | None:
 # renders the dot as its own span; the gap between the spans is CSS, not text), so the pattern allows zero spaces.
 RUNNING_CHIP = re.compile(r"^[●◐]\s*(Live|Loading|即時|載入中)$")
 PREROLL_JS = "() => !!(window.__nslivePreroll && window.__nslivePreroll.active)"
+PREROLL_DONE_JS = "() => !!(window.__nslivePreroll && window.__nslivePreroll.active === false)"
+SEGMENT_COUNT_JS = "() => document.querySelectorAll('[data-segment-seq]').length"
 
 
 def running(page: Any) -> bool:
@@ -162,12 +164,15 @@ def elapsed(page: Any) -> str | None:
 
 
 def pick(page: Any, run_id: str) -> str:
-    """Open the run picker (Popover trigger), choose the option whose data-run-id is run_id; return its text."""
-    page.locator('[data-testid="run-picker"]').click(timeout=5000)
+    """Open the run picker (Popover trigger), choose the option whose data-run-id is run_id; return its text.
+    The run-complete dialog is modal and takes every click, so it is dismissed before each click."""
+    dismiss_run_complete(page)
+    page.locator('[data-testid="run-picker"]').click(timeout=15000)
     option = page.locator(f'[data-testid="run-option"][data-run-id="{run_id}"]')
-    option.wait_for(state="visible", timeout=5000)
+    option.wait_for(state="visible", timeout=15000)
     text = option.inner_text()
-    option.click(timeout=5000)
+    dismiss_run_complete(page)
+    option.click(timeout=15000)
     return text
 
 
@@ -324,7 +329,8 @@ def scenario_2(lab: Lab, page: Any, path_a: Path, run_a: str, run_b: str) -> Non
     lab.shot(page, "03-explicit-b-finished.png")
 
     if offered:
-        other.click(timeout=5000)
+        dismiss_run_complete(page)
+        other.click(timeout=15000)
     wait_until(lambda: shown_run(page) == run_a, 10)
     switched = wait_full_ui(page, 30) and bool(wait_until(lambda: running(page), 5))
     lab.check("2 switch button: page now shows A with run-state running", bool(offered) and bool(switched),
@@ -334,9 +340,9 @@ def scenario_2(lab: Lab, page: Any, path_a: Path, run_a: str, run_b: str) -> Non
 
 
 def scenario_3(lab: Lab, page: Any, replay_a: subprocess.Popen, path_a: Path) -> None:
-    # Kill A as soon as the full UI is up and Elapsed has ticked: no waiting for more events, so the replay
-    # must still be running at that point (checked against A's feed file).
-    wait_full_ui(page, 30)
+    # Kill A as soon as the pre-roll has ended or one segment is rendered, whichever comes first, and Elapsed has
+    # ticked. A must still be live then: its feed file is checked for run_end right before the kill.
+    wait_until(lambda: page.evaluate(PREROLL_DONE_JS) or page.evaluate(SEGMENT_COUNT_JS) >= 1, 30, 0.1)
     e0 = elapsed(page)
     ticked = wait_until(lambda: e0 is not None and elapsed(page) not in (None, e0) and running(page),
                         5, 0.1)
@@ -368,9 +374,9 @@ def scenario_3(lab: Lab, page: Any, replay_a: subprocess.Popen, path_a: Path) ->
 def run_checks(lab: Lab, browser: Any) -> None:
     # ---- scenario 1: follow newest, live runs preferred ------------------------------------------
     before = lab.feeds_now()
-    # Replay A is paced by gap / speed, capped at max-gap: speed 0.2 with cap 30 is never shorter than the old
-    # cap of 5, and it stays live through the pre-roll, B's run and scenario 2 so that scenario 3 can kill it.
-    replay_a = lab.start_replay(0.2, 30, "A")
+    # Replay A is paced by gap / speed, capped at max-gap. Speed 0.15 keeps it live through the pre-roll, B's run and
+    # scenario 2 (at 0.2 it had finished by the time scenario 3 killed it), so scenario 3 kills it while it is live.
+    replay_a = lab.start_replay(0.15, 30, "A")
     path_a, run_a = lab.new_run(before, "A")
     ctx, page = new_page(browser)
     page.goto(lab.url, wait_until="domcontentloaded", timeout=30000)
