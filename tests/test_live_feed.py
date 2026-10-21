@@ -551,3 +551,41 @@ def test_a_forwarding_error_disables_forwarding_and_keeps_the_output(monkeypatch
     assert [e["type"] for e in read_events(target)] == ["run_start", "run_end"]
     warnings = [r for r in caplog.records if r.name == "noScribe.live_feed"]
     assert len(warnings) == 1 and "forwarder broke" in warnings[0].getMessage()
+
+
+def test_progress_without_line_breaks_becomes_replace_events_not_one_concatenated_line(
+        monkeypatch, tmp_path):
+    clock = [1000.0]
+    monkeypatch.setattr(live_feed, "_monotonic", lambda: clock[0])
+    out, err = _buffers(monkeypatch)
+    target = tmp_path / "feed.ndjson"
+    feed = _job_with_feed(tmp_path, target)
+    # The CLI writes "segmentation: 0%", "segmentation: 16%", ... with no break between them.
+    # The writes used to pile up on one pending line, which was forwarded as one concatenated line.
+    pcts = (0, 16, 32, 48, 64, 80, 96, 100)
+    for pct in pcts:
+        sys.stdout.write(f"segmentation: {pct}%")
+        clock[0] += 0.25          # slower than the 200 ms interval, so every update is sent
+    sys.stdout.write("\n")
+    print("done")
+    feed.end("finished")
+    assert out.getvalue() == "".join(f"segmentation: {p}%" for p in pcts) + "\ndone\n"
+    assert [(e["msg"], e.get("replace")) for e in _log_events(target)] == (
+        [(f"segmentation: {p}%", True) for p in pcts] + [("done", None)])
+
+
+def test_held_progress_updates_send_the_newest_at_the_line_end_and_100_at_once(
+        monkeypatch, tmp_path):
+    clock = [1000.0]                       # the clock does not move: every update is inside 200 ms
+    monkeypatch.setattr(live_feed, "_monotonic", lambda: clock[0])
+    target = tmp_path / "feed.ndjson"
+    feed = _job_with_feed(tmp_path, target)
+    for pct in (0, 16, 32, 40):
+        sys.stdout.write(f"segmentation: {pct}%")
+    sys.stdout.write("\n")                 # 16% and 32% were held back; 40% is sent now
+    for pct in (0, 16, 100):
+        sys.stdout.write(f"segmentation: {pct}%")
+    sys.stdout.write("\n")                 # 0% and 16% were held back; 100% went out at once, nothing is left
+    feed.end("finished")
+    assert [(e["msg"], e.get("replace")) for e in _log_events(target)] == [
+        ("segmentation: 0%", True), ("segmentation: 40%", True), ("segmentation: 100%", True)]

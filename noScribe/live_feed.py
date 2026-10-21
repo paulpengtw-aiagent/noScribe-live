@@ -327,6 +327,7 @@ class JobFeed:
 
 LOG_RATE_PER_S = 20        # at most this many log events per second (a token bucket of the same size)
 LOG_MAX_CHARS = 300        # longer messages are cut and end with "..."
+PROGRESS_MIN_INTERVAL_S = 0.2   # progress updates on one unfinished line are sent at most this often (100% always is)
 _PENDING_LIMIT = 4096      # text this long without a line break is sent in pieces
 _KNOWN_SOURCES = ("faster_whisper", "pyannote", "ctranslate2", "speechbrain", "torch")
 
@@ -337,6 +338,8 @@ _SECRET_RE = re.compile(r"(?i)token\s*=|authorization|bearer\s|api[_-]?key|secre
 # A /path/to/name or C:\path\to\name, trimmed to its last component.
 _PATH_RE = re.compile(r"(?<![\w.:/\\])(?:[A-Za-z]:)?[\\/](?=[^\\/\s])(?:[^\\/\r\n]+[\\/])*([^\\/\r\n]+)")
 _ERROR_START_RE = re.compile(r"\s*(error|fatal|critical)\b", re.IGNORECASE)
+# A progress update such as "segmentation: 16%". Several can run together on one line that has no break yet.
+_PROGRESS_RE = re.compile(r"([A-Za-z][\w .-]{0,40}):\s*(\d{1,3})%")
 
 _monotonic = time.monotonic    # tests replace this to make the rate limit deterministic
 _feed_local = threading.local()
@@ -415,6 +418,8 @@ class _LogForwarder:
         self._pending = None       # the newest progress line the rate limit held back
         self._partial = {"stdout": "", "stderr": ""}          # text after the last line break
         self._progress = {"stdout": False, "stderr": False}   # the last break was a \r update
+        self._last_progress = {"stdout": None, "stderr": None}   # (text, percent) of the newest progress update on the line
+        self._progress_sent_at = {"stdout": float("-inf"), "stderr": float("-inf")}
         self.disabled = False
         self._closed = False
 
@@ -454,7 +459,7 @@ class _LogForwarder:
                     return
                 for stream in ("stdout", "stderr"):
                     rest, self._partial[stream] = self._partial[stream], ""
-                    if rest:
+                    if rest or self._last_progress[stream] is not None:
                         self._line(stream, rest, "")
                 pending, self._pending = self._pending, None
                 resend = pending is not None and pending != self._last_key
@@ -474,8 +479,8 @@ class _LogForwarder:
             buf, hold = buf[:-1], "\r"
         pieces = _BREAK_RE.split(buf)      # text, break, text, break, ..., text
         for i in range(0, len(pieces) - 1, 2):
-            self._line(stream, pieces[i], pieces[i + 1])
-        rest = pieces[-1] + hold
+            self._line(stream, self._take_progress(stream, pieces[i]), pieces[i + 1])
+        rest = self._take_progress(stream, pieces[-1]) + hold
         if len(rest) > _PENDING_LIMIT:
             self._line(stream, rest, "\n")
             rest = ""
@@ -488,6 +493,12 @@ class _LogForwarder:
         else:                      # a finished line replaces the progress line before it, if any
             replace = self._progress[stream]
             self._progress[stream] = False
+            last, self._last_progress[stream] = self._last_progress[stream], None
+            if last is not None and last[1] < 100:   # the newest progress update, if it was held back (100% was sent)
+                self._emit_text(stream, last[0], True)
+        self._emit_text(stream, text, replace)
+
+    def _emit_text(self, stream, text, replace):
         if _ERROR_START_RE.match(text):
             level = "error"
         elif stream == "stderr" and not replace:
@@ -495,6 +506,30 @@ class _LogForwarder:
         else:
             level = "info"
         self._offer(stream, level, text, replace)
+
+    def _take_progress(self, stream, text):
+        """Forward the progress updates in text (which has no line break) and return the rest of the text."""
+        rest, pos = [], 0
+        for m in _PROGRESS_RE.finditer(text):
+            rest.append(text[pos:m.start()])
+            pos = m.end()
+            self._progress_update(stream, m.group(0), int(m.group(2)))
+        rest.append(text[pos:])
+        return "".join(rest)
+
+    def _progress_update(self, stream, text, pct):
+        """A progress update that has no line break after it, so the CLI's line is still open.
+
+        Each update replaces the line's progress in the feed. Updates closer together than
+        PROGRESS_MIN_INTERVAL_S are held back; the newest one is sent when the line ends (see
+        _line). 100% is always sent at once. The terminal already has every write.
+        """
+        self._last_progress[stream] = (text, pct)
+        self._progress[stream] = True
+        now = _monotonic()
+        if pct >= 100 or now - self._progress_sent_at[stream] >= PROGRESS_MIN_INTERVAL_S:
+            self._progress_sent_at[stream] = now
+            self._emit_text(stream, text, True)
 
     def _offer(self, source, level, text, replace):
         msg = _clean(text[:_PENDING_LIMIT])
