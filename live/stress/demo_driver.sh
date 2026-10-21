@@ -16,13 +16,14 @@
 #   RUN_TIMEOUT_S=900               a real run is killed after this long
 #   KILL_EVERY=3                    fault injection (below) every this many cycles
 #   KILL_MIN_INTERVAL_S=3600        ... and at most once per this many seconds (the schedule is once per hour)
-#   KILL_AFTER_S=35                 the killed run's CLI gets SIGKILL after this long
+#   KILL_AFTER_SEGMENTS=3           the killed run's CLI gets SIGKILL once its feed has this many segments
+#   KILL_TIMEOUT_S=120              ... or after this long, whichever comes first (a safety net: killed anyway)
 #   KILL_CLIP=live/samples/stress/03-multi-speaker.mp3   clip for the killed run (same guards as a real run)
 #   FAIL_CLIP=live/samples/stress/90-corrupt.mp3         clip for the failed run (fails in ~2 s, no GPU)
 #
-# Fault injection, when due: (a) a killed run: a real run, SIGKILL to the CLI after KILL_AFTER_S, with its
-# multiprocessing children (found with pgrep -P before the kill) killed too; (b) a failed run: the CLI on the
-# corrupt clip. Both write their feeds to FEEDS_DIR like any other run.
+# Fault injection, when due: (a) a killed run: a real run, SIGKILL to the CLI once its feed has KILL_AFTER_SEGMENTS
+# segments (KILL_TIMEOUT_S at most), with its multiprocessing children (found with pgrep -P before the kill) killed
+# too; (b) a failed run: the CLI on the corrupt clip. Both write their feeds to FEEDS_DIR like any other run.
 #
 # Every step is logged with a timestamp to live/logs/driver.log.
 set -uo pipefail
@@ -40,7 +41,8 @@ MIN_FREE_BYTES="${MIN_FREE_BYTES:-4294967296}"
 RUN_TIMEOUT_S="${RUN_TIMEOUT_S:-900}"
 KILL_EVERY="${KILL_EVERY:-3}"
 KILL_MIN_INTERVAL_S="${KILL_MIN_INTERVAL_S:-3600}"
-KILL_AFTER_S="${KILL_AFTER_S:-35}"
+KILL_AFTER_SEGMENTS="${KILL_AFTER_SEGMENTS:-3}"
+KILL_TIMEOUT_S="${KILL_TIMEOUT_S:-120}"
 KILL_CLIP="${KILL_CLIP:-live/samples/stress/03-multi-speaker.mp3}"
 FAIL_CLIP="${FAIL_CLIP:-live/samples/stress/90-corrupt.mp3}"
 FAULT_CYCLE=0
@@ -50,6 +52,8 @@ OUT_DIR=/tmp/nslive-driver
 LOG="$LIVE_DIR/logs/driver.log"
 CLIP_INDEX=0
 CHILD=""
+FEED=""
+SEGMENTS=0
 
 case "$FEEDS_DIR" in
   /*) ;;
@@ -187,9 +191,6 @@ replay() {
   log "end replay feed=$feed exit=$STATUS"
 }
 
-# Killed run: a real run on KILL_CLIP with the same guards as real_run; SIGKILL to the CLI after KILL_AFTER_S.
-# The CLI's multiprocessing children are listed with pgrep -P before the kill, since they would be orphaned
-# (re-parented) once the CLI dies; they are SIGKILLed too.
 # True while the process runs (a zombie, exited but not yet waited for, counts as gone).
 alive() {
   local state
@@ -197,8 +198,90 @@ alive() {
   [ -n "$state" ] && [ "$state" != "Z" ]
 }
 
+# The feed stem of a clip as noScribe/live_feed.py makes it: the file name without its extension, characters
+# other than letters, digits, _ . - turned into _ (runs of _ collapsed), cut to 60 characters. ASCII only: a
+# non-ASCII stem finds no feed, and the killed run then falls back to KILL_TIMEOUT_S.
+feed_stem() {
+  local s
+  s="$(basename "$1")"
+  s="${s%.*}"
+  s="$(printf '%s' "$s" | sed -e 's/[^A-Za-z0-9_.-]/_/g' -e 's/__*/_/g')"
+  s="${s:0:60}"
+  printf '%s\n' "${s:-job}"
+}
+
+# Prints the feed of the run that the CLI started at epoch SINCE for the clip stem STEM: the newest
+# FEEDS_DIR/<YYYYMMDD-HHMMSS>-<stem>.ndjson whose mtime is >= SINCE. Prints nothing and returns 1 when there is none.
+feed_for_run() {
+  local stem="$1" since="$2" f mtime best="" best_mtime=-1
+  for f in "$FEEDS_DIR"/????????-??????-"$stem".ndjson; do
+    [ -f "$f" ] || continue
+    case "$(basename "$f")" in replay-*) continue ;; esac
+    mtime="$(stat -c %Y "$f" 2>/dev/null)" || continue
+    [ "$mtime" -ge "$since" ] || continue
+    if [ "$mtime" -ge "$best_mtime" ]; then
+      best="$f"
+      best_mtime="$mtime"
+    fi
+  done
+  [ -n "$best" ] || return 1
+  printf '%s\n' "$best"
+}
+
+# Prints how many segment events the feed FILE holds so far (0 when it does not exist).
+segment_count() {
+  local n
+  n="$(grep -c '"type": *"segment"' "$1" 2>/dev/null)"
+  printf '%s\n' "${n:-0}"
+}
+
+# Waits until the feed of the process PID (started at epoch SINCE for the clip stem STEM) holds
+# KILL_AFTER_SEGMENTS segments. Sets FEED (its path; empty when none appeared) and SEGMENTS. Returns 0 at the
+# threshold; returns 1 when PID exits first or KILL_TIMEOUT_S seconds pass.
+await_segments() {
+  local stem="$1" since="$2" pid="$3" deadline
+  deadline=$(( $(date +%s) + KILL_TIMEOUT_S ))
+  FEED=""
+  SEGMENTS=0
+  while :; do
+    if [ -z "$FEED" ]; then
+      FEED="$(feed_for_run "$stem" "$since")"
+    fi
+    if [ -n "$FEED" ]; then
+      SEGMENTS="$(segment_count "$FEED")"
+      if [ "$SEGMENTS" -ge "$KILL_AFTER_SEGMENTS" ]; then
+        return 0
+      fi
+    fi
+    if ! alive "$pid"; then
+      [ -n "$FEED" ] && SEGMENTS="$(segment_count "$FEED")"
+      return 1
+    fi
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      return 1
+    fi
+    sleep 0.5
+  done
+}
+
+# After the SIGKILL: logs whether the killed run's feed holds a run_end line, which it must not.
+check_killed_feed() {
+  local stem="$1" since="$2"
+  [ -n "$FEED" ] || FEED="$(feed_for_run "$stem" "$since")"
+  if [ -z "$FEED" ]; then
+    log "killed run: warning: no feed was written for the killed run (stem $stem)"
+  elif grep -q '"type": *"run_end"' "$FEED"; then
+    log "killed run produced a stopped run: $FEED"
+  else
+    log "killed run feed has no run_end: $FEED"
+  fi
+}
+
+# Killed run: a real run on KILL_CLIP with the same guards as real_run. SIGKILL to the CLI once its feed holds
+# KILL_AFTER_SEGMENTS segments (KILL_TIMEOUT_S at the latest). The CLI's multiprocessing children are listed with
+# pgrep -P before the kill, since they would be orphaned (re-parented) once the CLI dies; they are SIGKILLed too.
 killed_run() {
-  local clip="$KILL_CLIP" reason cli out status kids="" waited=0 k
+  local clip="$KILL_CLIP" reason cli out status stem since kids="" k reached=0 killed=0
   case "$clip" in
     /*) ;;
     *) clip="$REPO_ROOT/$clip" ;;
@@ -213,30 +296,38 @@ killed_run() {
   fi
   mkdir -p "$OUT_DIR"
   out="$OUT_DIR/killed-$(date +%Y%m%d-%H%M%S).html"
-  log "start killed run clip=$clip model=$MODEL output=$out (SIGKILL after ${KILL_AFTER_S}s)"
+  stem="$(feed_stem "$clip")"
+  log "start killed run clip=$clip model=$MODEL output=$out (SIGKILL after $KILL_AFTER_SEGMENTS segments, at most ${KILL_TIMEOUT_S}s)"
   cd "$REPO_ROOT" || return 1
+  since=$(date +%s)
   env PYTHONDONTWRITEBYTECODE=1 "$NOSCRIBE_PY" -m noScribe --no-gui --model "$MODEL" \
     --speaker-detection auto --timestamps --live-feed "$FEEDS_DIR/" "$clip" "$out" &
   cli=$!
   CHILD="$cli"
-  while [ "$waited" -lt "$KILL_AFTER_S" ] && alive "$cli"; do
-    sleep 1
-    waited=$(( waited + 1 ))
-  done
+  await_segments "$stem" "$since" "$cli" && reached=1
   if alive "$cli"; then
     kids="$(pgrep -P "$cli" -f multiprocessing 2>/dev/null | tr '\n' ' ')"
-    log "killed run: SIGKILL to cli pid=$cli after ${waited}s; multiprocessing children: ${kids:-none}"
+    if [ "$reached" -eq 1 ]; then
+      log "killed run: SIGKILL to cli pid=$cli at $SEGMENTS segments (feed: $FEED); multiprocessing children: ${kids:-none}"
+    else
+      log "killed run: $SEGMENTS of $KILL_AFTER_SEGMENTS segments after ${KILL_TIMEOUT_S}s (feed: ${FEED:-none}), killing anyway: SIGKILL to cli pid=$cli; multiprocessing children: ${kids:-none}"
+    fi
+    killed=1
     kill -KILL "$cli" 2>/dev/null
     for k in $kids; do
       kill -KILL "$k" 2>/dev/null
     done
   else
-    log "killed run: cli pid=$cli exited before the kill"
+    [ -n "$FEED" ] && SEGMENTS="$(segment_count "$FEED")"
+    log "killed run: cli exited before the kill ($SEGMENTS segments)"
   fi
   wait "$cli" 2>/dev/null
   status=$?
   CHILD=""
   log "end killed run clip=$clip exit=$status"
+  if [ "$killed" -eq 1 ]; then
+    check_killed_feed "$stem" "$since"
+  fi
 }
 
 # Failed run: the CLI on the corrupt clip. It fails in about 2 s and needs no GPU, so no GPU guard.

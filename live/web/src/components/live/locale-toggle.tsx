@@ -28,6 +28,7 @@ export function LocaleMenuItem({ onDone }: { onDone?: () => void }) {
     <button
       type="button"
       data-testid="locale-toggle"
+      aria-label={t.topbar.switchLanguage}
       className="flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left text-[14px] hover:bg-raised"
       onClick={() => {
         setLocale(target);
@@ -37,7 +38,7 @@ export function LocaleMenuItem({ onDone }: { onDone?: () => void }) {
       <span aria-hidden="true" className="w-5 shrink-0 text-center font-medium">
         {t.topbar.languageShort}
       </span>
-      <span className="min-w-0 truncate">{t.topbar.switchLanguage}</span>
+      <span className="min-w-0">{t.topbar.languageEndonym}</span>
     </button>
   );
 }

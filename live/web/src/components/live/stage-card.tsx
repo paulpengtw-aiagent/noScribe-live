@@ -77,6 +77,8 @@ export function StageCard({
   const phaseName = phaseText(s, run, phase);
   const orbLabel = orbLabelFor(s, run, phase);
   const timed = hasTimeline(run, phase);
+  // An ended run with no clock has no progress reading: its line stays empty, so the card keeps its height.
+  const clockHidden = !timed && (phase === "finished" || phase === "error" || phase === "canceled");
 
   // The same eight tiles in every phase, so the grid never gains or loses a row. A value not known yet reads as a dash.
   const stats: Stat[] = [
@@ -170,7 +172,9 @@ export function StageCard({
         </div>
         {/* The progress line never repeats the phase name: the row above already names it. */}
         <div className="mt-2 flex h-5 items-baseline justify-between gap-3 text-[12px] tabular-nums">
-          <span className={cn("min-w-0 truncate text-ink-3", timed && "font-mono")}>{timed ? transcribed : DASH}</span>
+          <span className={cn("min-w-0 truncate text-ink-3", timed && "font-mono")}>
+            {clockHidden ? null : timed ? transcribed : DASH}
+          </span>
           <span className="shrink-0 text-ink-2">{showPercent ? `${pctValue}%` : null}</span>
         </div>
       </div>

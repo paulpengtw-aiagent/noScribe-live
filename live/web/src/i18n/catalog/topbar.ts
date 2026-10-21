@@ -5,9 +5,11 @@ import type { Locale } from "../core";
 const en = {
   appName: "noScribe Live",
   languageLabel: "Language",
-  switchLanguage: "Switch to Chinese (Traditional)",
+  switchLanguage: "Switch language to Chinese (Traditional)",
   /** Button label on the English page; it names the language the button switches to. */
   languageShort: "中",
+  /** Header menu's language row on the English page: the endonym of the language it switches to. */
+  languageEndonym: "中文（繁體）",
   switchTheme: { light: "Switch to light theme", dark: "Switch to dark theme" },
   /** Screen-reader label of the logo's busy orb. */
   processing: "Processing…",
@@ -34,8 +36,9 @@ export type TopbarMessages = typeof en;
 const zhTW: TopbarMessages = {
   appName: "noScribe Live",
   languageLabel: "語言",
-  switchLanguage: "切換為英文",
+  switchLanguage: "切換語言為英文",
   languageShort: "EN",
+  languageEndonym: "English",
   switchTheme: { light: "切換為淺色主題", dark: "切換為深色主題" },
   processing: "處理中…",
   menuLabel: "主題與語言",
