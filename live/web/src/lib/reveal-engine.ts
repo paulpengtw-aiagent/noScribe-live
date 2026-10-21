@@ -47,6 +47,10 @@ export class RevealEngine {
   private shown = 0;
   /** Fractional graphemes carried from one frame to the next, so the speed is steady at any frame rate. */
   private carry = 0;
+  /** Graphemes per second for the whole queue. Set when segments are queued (requiredRate of the full backlog), then
+   *  held while it drains. Recomputing it from the shrinking backlog every frame decays the drain exponentially, so a
+   *  400-grapheme segment took 3.5 s instead of HORIZON_S. */
+  private rate = 0;
   private cached: RevealView | null = null;
 
   /** Starts a run. Its current segments count as already shown, so nothing in them is queued. */
@@ -62,6 +66,7 @@ export class RevealEngine {
 
   /** Queues the live segments not seen before, in the order given. Segments that are not live are marked seen and never queued. */
   sync(segments: readonly RevealSegment[]): void {
+    let queued = false;
     for (const segment of segments) {
       if (this.seen.has(segment.index)) continue;
       this.seen.add(segment.index);
@@ -69,8 +74,17 @@ export class RevealEngine {
       const total = graphemeCount(segment.text.trim());
       if (total === 0) continue;
       this.queue.push({ index: segment.index, total, arrivedAt: segment.recvAt });
+      queued = true;
       this.cached = null;
     }
+    if (queued) this.rate = requiredRate(this.backlog());
+  }
+
+  /** Graphemes still to show across the whole queue: the head's shown part is not counted. */
+  private backlog(): number {
+    let total = -this.shown;
+    for (const item of this.queue) total += item.total;
+    return total;
   }
 
   /** Shows everything queued at once. */
@@ -104,9 +118,7 @@ export class RevealEngine {
       this.carry = 0;
       return;
     }
-    let backlog = -this.shown;
-    for (const item of this.queue) backlog += item.total;
-    this.carry += (requiredRate(backlog) * Math.max(0, dtMs)) / 1000;
+    this.carry += (this.rate * Math.max(0, dtMs)) / 1000;
     let whole = Math.floor(this.carry);
     this.carry -= whole;
     if (whole === 0) return;

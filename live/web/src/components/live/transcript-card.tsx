@@ -33,8 +33,9 @@ const HOLD_MS = 1000;
 const EDGE_PX = 2;
 /** A reveal this far behind the data (ms) is flushed: shown at once, not replayed. Only a stalled tab gets here. */
 const FLUSH_LAG_MS = 4000;
-/** Longest frame step (ms) the reveal integrates, so a throttled tab does not dump its backlog at once. */
-const MAX_FRAME_MS = 100;
+/** Longest frame step (ms) the reveal integrates in one go. Real elapsed time counts up to this: at 7 fps a frame is
+ *  143 ms, and a 100 ms cap silently dropped that time, so the reveal fell behind. Longer stalls are still bounded. */
+const MAX_FRAME_MS = 250;
 /** Frame step (ms) for the first frame of a loop. */
 const FIRST_FRAME_MS = 16;
 /** The screen reader keeps this many announced lines; the oldest are removed. */

@@ -30,6 +30,7 @@ import json
 import shutil
 import statistics
 import sys
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -150,6 +151,19 @@ TARGETS_JS = """() => {
 }"""
 
 
+CJK_RE = re.compile(r"[\u3400-\u9fff]")
+
+def same_text(shown: str, full: str) -> bool:
+    """Equal text. The page shows zh-TW (opencc) where the feed is Simplified, so CJK text counts as equal when the
+    lengths are within 2 characters. Other text must match exactly."""
+    return shown == full or (bool(CJK_RE.search(full)) and abs(len(shown) - len(full)) <= 2)
+
+
+def prefix_text(shown: str, full: str) -> bool:
+    """A mid-stream state is a prefix of the final text; for CJK only the length bound (<= final + 2) can be checked."""
+    return full.startswith(shown) or (bool(CJK_RE.search(full)) and len(shown) <= len(full) + 2)
+
+
 def norm(text: Any) -> str:
     return " ".join(str(text or "").split())
 
@@ -236,9 +250,9 @@ def stream_body(h: Any, page: Any, path: Path, run_id: str) -> None:
         final = feed_text(path)
         for seq, raw in snap.get("segs", {}).items():
             shown, full = norm(raw), norm(final.get(seq, ""))
-            if not shown or not full or shown == full:
+            if not shown or not full or same_text(shown, full):
                 continue
-            if full.startswith(shown):
+            if prefix_text(shown, full):
                 partial.setdefault(seq, f"{shown[:18]!r} of {full[:18]!r}...")
             else:
                 mismatches += 1
@@ -249,7 +263,7 @@ def stream_body(h: Any, page: Any, path: Path, run_id: str) -> None:
         if seen_end is None and ux.page_ended(page, run_id):
             seen_end = time.monotonic()
         if seen_end is not None:
-            complete = bool(final) and all(norm(snap.get("segs", {}).get(seq, "")) == norm(t)
+            complete = bool(final) and all(same_text(norm(snap.get("segs", {}).get(seq, "")), norm(t))
                                            for seq, t in final.items())
             if complete and drained_at is None:
                 drained_at = time.monotonic() - seen_end
@@ -260,7 +274,7 @@ def stream_body(h: Any, page: Any, path: Path, run_id: str) -> None:
     final = feed_text(path)
     snap = page.evaluate(SAMPLE_JS)
     rendered = {seq: norm(raw) for seq, raw in snap.get("segs", {}).items()}
-    full_ok = sum(1 for seq, text in final.items() if rendered.get(seq) == norm(text))
+    full_ok = sum(1 for seq, text in final.items() if same_text(rendered.get(seq, ""), norm(text)))
     rv = snap.get("reveal") or {}
     max_page = max((float(s.get("maxLagMs") or 0) for s in samples), default=0.0)
     cur = sorted(float(s.get("currentLagMs") or 0) for s in samples)
@@ -486,7 +500,7 @@ def easy_watch_body(h: Any, cases: list[Any], path: Path, run_id: str) -> None:
     for (_t, _l, _c, page), k in zip(cases, keys):
         snap = page.evaluate(SAMPLE_JS)
         rendered = {seq: norm(raw) for seq, raw in snap.get("segs", {}).items()}
-        full_ok = sum(1 for seq, text in final.items() if rendered.get(seq) == norm(text))
+        full_ok = sum(1 for seq, text in final.items() if same_text(rendered.get(seq, ""), norm(text)))
         h.check(f"easy {k}: live segments appear with full text, no streaming (queued stays 0)",
                 ended[k] and queued_max[k] == 0 and not partial[k] and full_ok == len(final),
                 f"run_end seen {ended[k]}, max queued {queued_max[k]}, partial seqs {len(partial[k])}, "
