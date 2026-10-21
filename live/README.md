@@ -118,6 +118,20 @@ Licence verdicts (checked 2026-10-21; evidence, install URLs and candidates in [
 - ObsidianUI: MIT, "Components are MIT licensed" ([terms](https://www.obsidianui.dev/terms), section 05; [repo LICENSE](https://github.com/Atharvsinh-codez/ObsidianUI/blob/main/LICENSE)). Verdict: USE.
 - AffectUI: "Items marked as free are open source under the MIT license" ([terms](https://www.affectui.com/terms), section 4; [llms.txt](https://www.affectui.com/llms.txt), "40 items are free and open source (MIT)"). Verdict: USE, free-tagged items only; Pro is excluded ([Pro licence](https://www.affectui.com/license)).
 - uiarc: "Free: MIT" ([licence](https://uiarc.dev/license); [terms](https://uiarc.dev/terms), "The free library is MIT licensed"). Verdict: USE, free items only; Pro is excluded.
+- animate-ui — MIT + Commons Clause; approved by the owner for consulting use (2026-10-22). The Commons Clause bars selling or redistributing the components in their original form ([LICENSE.md](https://raw.githubusercontent.com/imskyleen/animate-ui/main/LICENSE.md)).
+
+Showreel round, checked 2026-10-21. Details, evidence URLs and install commands are in [docs/ui-libraries-showreel.md](docs/ui-libraries-showreel.md).
+
+| Source | Item | Repo | Licence and evidence | Verdict |
+| --- | --- | --- | --- | --- |
+| ObsidianUI | Slider, `web/src/components/ui/slider.tsx` | [Atharvsinh-codez/ObsidianUI](https://github.com/Atharvsinh-codez/ObsidianUI) | MIT, LICENSE "MIT License, Copyright (c) 2026 ObsidianUI" | USE (installed) |
+| Magic UI | Terminal, `web/src/components/ui/terminal.tsx` | [magicuidesign/magicui](https://github.com/magicuidesign/magicui) | MIT, GitHub licence "MIT License" | USE (installed) |
+| NumberFlow | Sliding number, `web/src/components/ui/sliding-number.tsx` (npm `@number-flow/react`) | [barvian/number-flow](https://github.com/barvian/number-flow) | MIT, GitHub licence "MIT License"; npm `license` MIT | USE (installed) |
+| animate-ui | sliding-number, typing-text, rolling-text, morphing-text, radix/base/react-aria slider | [imskyleen/animate-ui](https://github.com/imskyleen/animate-ui) | "MIT + Commons Clause License Condition" (LICENSE.md); GitHub reports NOASSERTION | DON'T: not plain MIT |
+| allshadcn | tailwindcss-motion, bundui-components | tool pages, no repo linked | page claims "MIT-licensed"; not checked against a repo LICENSE | DON'T install: claim only |
+| allshadcn | skiper-ui, berlix-ui | tool pages, no repo linked | no licence named on the page | DON'T: unverified |
+| allshadcn | number-flow | [barvian/number-flow](https://github.com/barvian/number-flow) | MIT (API-verified, as above) | USE (as NumberFlow) |
+| shadcn.io | templates (331+) | per template | sampled JSON-LD `license` = `https://opensource.org/licenses/MIT`; each template carries its own licence | Check each template before use; none used |
 
 ## Tests
 
@@ -130,3 +144,7 @@ cd live && .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m 
 
 - Chinese is converted to Traditional (Taiwan) for display only (opencc-js cn→tw); Whisper output carries no punctuation, and none is added.
 - There are no automated frontend tests.
+
+---
+
+Built on [noScribe](https://github.com/kaixxx/noScribe) by Kai Dröge (GPL-3.0).

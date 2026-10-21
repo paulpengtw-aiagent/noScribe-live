@@ -23,6 +23,8 @@ export interface RunSummary {
   inferred_end_t?: number | null;
   /** Basename of the output HTML, only when that file exists. */
   output_name?: string | null;
+  /** The language the CLI detected (from its language event); null until then. `language` above is the configured setting ("Auto" or a fixed code). */
+  detected_language?: string | null;
 }
 
 interface EventBase {
@@ -86,6 +88,17 @@ export interface LanguageEvent extends EventBase {
   probability: number | null;
 }
 
+export type LogLevel = "debug" | "info" | "warning" | "error";
+
+/** A line of CLI output. `replace` marks a carriage-return progress update of the previous line from the same source. */
+export interface LogEvent extends EventBase {
+  type: "log";
+  level: LogLevel;
+  source: string;
+  msg: string;
+  replace?: boolean;
+}
+
 export interface SegmentEvent extends EventBase {
   type: "segment";
   index: number;
@@ -114,6 +127,7 @@ export type FeedEvent =
   | DiarizationEvent
   | ModelReadyEvent
   | LanguageEvent
+  | LogEvent
   | SegmentEvent
   | RunEndEvent;
 

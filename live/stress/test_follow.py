@@ -7,7 +7,7 @@ Run from the repo root with the system Python that has Playwright:
 
 It starts `python -m server` on --port with a fresh feeds dir and replays the recorded demo feed twice:
 replay A (`--speed 0.2 --max-gap 5`, about 94 s, so it is still live through scenarios 1 and 2; scenario 3
-kills it) and replay B (`--speed 6 --max-gap 1`, about 6 s). Scenarios:
+kills it) and replay B (`--speed 1 --max-gap 30`, about 50 s). Scenarios:
 
   1. The page is opened in follow mode while A runs; B starts 4 s later. The page must show B while B
      runs (run-state running), and follow A again after B's run_end (the server's run=latest prefers live runs).
@@ -31,6 +31,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -43,6 +44,7 @@ from typing import Any
 HERE = Path(__file__).resolve().parent            # live/stress
 sys.path.insert(0, str(HERE))                     # reuse test_reconnect helpers, also under `python -I`
 from test_reconnect import INIT_JS, feed_info, port_busy, wait_until  # noqa: E402
+from test_ux import wait_full_ui  # noqa: E402  (pre-roll wait; same directory)
 
 LIVE_DIR = HERE.parent                            # cwd for `python -m server` and `python -m server.replay`
 DEFAULT_STATIC = LIVE_DIR / "web" / "dist"
@@ -135,6 +137,24 @@ def run_info(page: Any) -> dict[str, Any]:
 
 def state(page: Any) -> str | None:
     return run_info(page).get("state")
+
+
+# A run on the air reads "●Live" (green) or, before its first segment, "◐Loading" (yellow); zh "●即時" and
+# "◐載入中". The glyph is the first character of the chip's textContent with NO space before the word (top-bar.tsx
+# renders the dot as its own span; the gap between the spans is CSS, not text), so the pattern allows zero spaces.
+RUNNING_CHIP = re.compile(r"^[●◐]\s*(Live|Loading|即時|載入中)$")
+PREROLL_JS = "() => !!(window.__nslivePreroll && window.__nslivePreroll.active)"
+
+
+def running(page: Any) -> bool:
+    """True while a run is on the air: data-state running and chip text = glyph + Live/Loading/即時/載入中."""
+    info = run_info(page)
+    return info.get("state") == "running" and bool(RUNNING_CHIP.match(info.get("text") or ""))
+
+
+def in_preroll(page: Any) -> bool:
+    """True while the page shows the pre-roll (window.__nslivePreroll.active, set by use-preroll-mode.ts)."""
+    return bool(page.evaluate(PREROLL_JS))
 
 
 def elapsed(page: Any) -> str | None:
@@ -305,19 +325,26 @@ def scenario_2(lab: Lab, page: Any, path_a: Path, run_a: str, run_b: str) -> Non
 
     if offered:
         other.click(timeout=5000)
-    switched = wait_until(lambda: shown_run(page) == run_a and state(page) == "running", 10)
+    wait_until(lambda: shown_run(page) == run_a, 10)
+    switched = wait_full_ui(page, 30) and bool(wait_until(lambda: running(page), 5))
     lab.check("2 switch button: page now shows A with run-state running", bool(offered) and bool(switched),
               f"button offered={bool(offered)}, shown run is A={shown_run(page) == run_a}, "
               f"run-state {run_info(page)}, button visible now={other.is_visible()}")
     lab.shot(page, "04-switched-to-a.png")
 
 
-def scenario_3(lab: Lab, page: Any, replay_a: subprocess.Popen) -> None:
+def scenario_3(lab: Lab, page: Any, replay_a: subprocess.Popen, path_a: Path) -> None:
+    # Kill A as soon as the full UI is up and Elapsed has ticked: no waiting for more events, so the replay
+    # must still be running at that point (checked against A's feed file).
+    wait_full_ui(page, 30)
     e0 = elapsed(page)
-    time.sleep(2)
+    ticked = wait_until(lambda: e0 is not None and elapsed(page) not in (None, e0) and running(page),
+                        5, 0.1)
     e1 = elapsed(page)
-    lab.check("3 setup: Elapsed ticks while A runs", e0 is not None and e0 != e1 and state(page) == "running",
-              f"{e0!r} -> {e1!r} over 2 s, run-state {state(page)!r}")
+    still_live = "run_end" not in path_a.read_text(encoding="utf-8")
+    lab.check("3 setup: Elapsed ticks while A runs and A has no run_end yet (killed while live)",
+              bool(ticked) and still_live and running(page),
+              f"{e0!r} -> {e1!r}, run-state {state(page)!r}, run_end absent from A's feed={still_live}")
     os.kill(replay_a.pid, signal.SIGKILL)
     replay_a.wait(timeout=10)
     stale = wait_until(lambda: state(page) == "stale", 20, step=0.3)
@@ -341,33 +368,44 @@ def scenario_3(lab: Lab, page: Any, replay_a: subprocess.Popen) -> None:
 def run_checks(lab: Lab, browser: Any) -> None:
     # ---- scenario 1: follow newest, live runs preferred ------------------------------------------
     before = lab.feeds_now()
-    replay_a = lab.start_replay(0.2, 5, "A")
+    # Replay A is paced by gap / speed, capped at max-gap: speed 0.2 with cap 30 is never shorter than the old
+    # cap of 5, and it stays live through the pre-roll, B's run and scenario 2 so that scenario 3 can kill it.
+    replay_a = lab.start_replay(0.2, 30, "A")
     path_a, run_a = lab.new_run(before, "A")
     ctx, page = new_page(browser)
     page.goto(lab.url, wait_until="domcontentloaded", timeout=30000)
-    on_a = wait_until(lambda: shown_run(page) == run_a and state(page) == "running", 15)
-    lab.check("setup: follow page shows A (run-state running) before B starts", bool(on_a),
-              f"run-state {run_info(page)}")
+    wait_until(lambda: shown_run(page) == run_a, 15)
+    # A may still be in its pre-roll (its four stats are not known yet): the run-state chip is the check here.
+    on_a = bool(wait_until(lambda: shown_run(page) == run_a and running(page), 30))
+    lab.check("setup: follow page shows A (run-state running) before B starts", on_a,
+              f"shown run is A={shown_run(page) == run_a}, pre-roll={in_preroll(page)}, run-state {run_info(page)}")
     time.sleep(4)  # B starts 4 s after A
 
     before_b = lab.feeds_now()
-    replay_b = lab.start_replay(6, 1, "B")
+    replay_b = lab.start_replay(1, 30, "B")
     path_b, run_b = lab.new_run(before_b, "B")
-    on_b = wait_until(lambda: shown_run(page) == run_b and state(page) == "running", 15)
-    lab.check("1 follow newest: page shows B while B runs", bool(on_b),
-              f"shown run is B={shown_run(page) == run_b}, run-state {run_info(page)}")
+    wait_until(lambda: shown_run(page) == run_b, 15)
+    on_b = bool(wait_until(lambda: shown_run(page) == run_b and running(page), 30))
+    lab.check("1 follow newest: page shows B while B runs", on_b,
+              f"shown run is B={shown_run(page) == run_b}, pre-roll={in_preroll(page)}, run-state {run_info(page)}")
     lab.shot(page, "01-follow-b-running.png")
 
     # The server switches to A as soon as B ends and sends A's snapshot instead of B's run_end, so the
     # page need not receive B's run_end. Time the switch from B's feed file, not from the page's feed.
-    ended_b = wait_until(lambda: "run_end" in path_b.read_text(encoding="utf-8"), 40)
+    ended_b = wait_until(lambda: "run_end" in path_b.read_text(encoding="utf-8"), 90)
     t_end = time.monotonic()
     back = wait_until(lambda: shown_run(page) == run_a, 15)
     delay = time.monotonic() - t_end
+    # The switched-to run may still be in its pre-roll (its four stats not known yet): then the pre-roll must be up
+    # with the shown run being A (`back`); otherwise the full UI must be up within 10 s.
+    full_a = wait_full_ui(page, 10)
+    pre_a = (not full_a) and in_preroll(page)
+    running_a = bool(wait_until(lambda: running(page), 5))
     lab.check("1 follow newest: page follows A again after B's run_end",
-              bool(ended_b) and bool(back) and state(page) == "running",
+              bool(ended_b) and bool(back) and (full_a or pre_a) and running_a,
               f"B run_end in its feed={bool(ended_b)}, seen by page={ended(page, run_b)}; "
-              f"switched to A {delay:.1f} s after it (spec: ~5 s); run-state {run_info(page)}")
+              f"switched to A {delay:.1f} s after it (spec: ~5 s); full UI {full_a}, pre-roll {pre_a}, "
+              f"run-state {run_info(page)}")
     lab.shot(page, "02-follow-a-after-b.png")
     replay_b.wait(timeout=60)
 
@@ -377,7 +415,7 @@ def run_checks(lab: Lab, browser: Any) -> None:
     except Exception as exc:
         lab.check("2 scenario completed", False, f"crashed: {exc!r}")
     try:
-        scenario_3(lab, page, replay_a)
+        scenario_3(lab, page, replay_a, path_a)
     except Exception as exc:
         lab.check("3 scenario completed", False, f"crashed: {exc!r}")
     ctx.close()

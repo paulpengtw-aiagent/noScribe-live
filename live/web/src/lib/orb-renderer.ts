@@ -20,6 +20,8 @@ export interface OrbInput {
   activeColor: string | undefined;
   /** Square size in CSS pixels. */
   size: number;
+  /** The pre-roll's big orb: dots are drawn larger and brighter (see PROMINENT_RADIUS and PROMINENT_ALPHA). */
+  prominent?: boolean;
 }
 
 interface ModeSpec {
@@ -61,6 +63,9 @@ const RIPPLE_MS = 1100;
 const INTRO_S = 1.2;
 /** Idle draws only this share of the dots, the rest are left out. */
 const SPARSE_KEEP = 0.55;
+/** A prominent orb draws its dots this many times larger and this many times brighter. */
+const PROMINENT_RADIUS = 1.6;
+const PROMINENT_ALPHA = 1.25;
 
 const ALPHA_LEVELS = 20;
 /** Colour classes: 0 ink, 1-3 ripple tints, 4-11 speaker colours, 12 the dim grey. */
@@ -77,6 +82,9 @@ const TINT_WEIGHTS = [0.35, 0.6, 0.85] as const;
 /** Ink dots on the dark theme take a Frost gradient across the orb; the light theme gets a deeper Frost run. */
 const FROST_DARK = ["#8fbcbb", "#88c0d0", "#5e81ac"] as const;
 const FROST_LIGHT = ["#81a1c1", "#5e81ac", "#486488"] as const;
+/** Crimson palette: the ink gradient runs coral to gold to blue on the dark theme, red to gold to navy on the light. */
+const CRIMSON_FROST_DARK = ["#f08a8f", "#f5e1a4", "#7fb8e6"] as const;
+const CRIMSON_FROST_LIGHT = ["#93272c", "#7a5a1e", "#003865"] as const;
 
 const FALLBACK_INK: RGB = { r: 245, g: 245, b: 245 };
 const FALLBACK_INK3: RGB = { r: 115, g: 115, b: 115 };
@@ -429,9 +437,10 @@ export class OrbRenderer {
   private frostInk(size: number): string | CanvasGradient {
     const { ink } = this;
     const dark = ink.r + ink.g + ink.b > 382;
-    const key = `${size}|${dark}`;
+    const crimson = document.documentElement.dataset.palette === "crimson";
+    const key = `${size}|${dark}|${crimson}`;
     if (this.inkFill && key === this.inkFillKey) return this.inkFill;
-    const stops = dark ? FROST_DARK : FROST_LIGHT;
+    const stops = crimson ? (dark ? CRIMSON_FROST_DARK : CRIMSON_FROST_LIGHT) : dark ? FROST_DARK : FROST_LIGHT;
     const grad = this.ctx.createLinearGradient(0, 0, size, size);
     stops.forEach((colour, i) => grad.addColorStop(i / (stops.length - 1), colour));
     this.inkFill = grad;
@@ -507,6 +516,8 @@ export class OrbRenderer {
     const sparse = input.mode === "idle";
     const dimmed = input.mode === "error";
     const dotScale = clamp(size / 260, 0.6, 1);
+    const radiusBoost = input.prominent ? PROMINENT_RADIUS : 1;
+    const alphaBoost = input.prominent ? PROMINENT_ALPHA : 1;
     const scatter = c.scatter;
     const progress = c.progress;
     const keys = this.keys;
@@ -585,11 +596,11 @@ export class OrbRenderer {
         cls = CLS_SPEAKER + Math.min(bands - 1, Math.floor((lonNow / TAU) * bands));
       }
       if (dimmed) cls = CLS_DIM;
-      alpha *= c.dim;
+      alpha *= c.dim * alphaBoost;
 
       px[i] = half + x1 * persp * R;
       py[i] = half - y2 * persp * R;
-      pr[i] = radius;
+      pr[i] = radius * radiusBoost;
       const a = clamp01(alpha) * 0.999;
       keys[i] = Math.floor(a * ALPHA_LEVELS) * CLASSES + cls;
     }

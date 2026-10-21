@@ -368,6 +368,7 @@ def stream_body(h: Any, page: Any, path: Path, run_id: str) -> None:
     end_t = None  # page clock (performance.now) when run_end first showed on the page
     first_t = None  # page clock when the first segment was on screen: the CLS window starts here
     drained_at = None
+    drained_queued = None  # the queued count in the same sample that completed the text
     t0 = time.monotonic()
     while time.monotonic() - t0 < 150:
         snap = page.evaluate(SAMPLE_JS)
@@ -396,6 +397,7 @@ def stream_body(h: Any, page: Any, path: Path, run_id: str) -> None:
                                            for seq, t in final.items())
             if complete and drained_at is None:
                 drained_at = time.monotonic() - seen_end
+                drained_queued = (snap.get("reveal") or {}).get("queued")
             if drained_at is not None or time.monotonic() - seen_end > 12:
                 break
         time.sleep(0.1)
@@ -409,9 +411,13 @@ def stream_body(h: Any, page: Any, path: Path, run_id: str) -> None:
     cur = sorted(float(s.get("currentLagMs") or 0) for s in samples)
     p95 = cur[int(0.95 * (len(cur) - 1))] if cur else 0.0
     max_cur = cur[-1] if cur else 0.0
-    h.check("stream: maxLagMs <= 1500 (__nsliveReveal sampled every 100 ms)",
-            bool(samples) and max_page <= 1500,
-            f"maxLagMs {max_page:.0f}, currentLagMs max {max_cur:.0f} p95 {p95:.0f}, samples {len(samples)}")
+    # Continuous flow (the default reveal mode) trails arrivals on purpose: backlog targeted at ~8 s, so the bounds are
+    # 15 s of lag and an empty queue within 12 s after run_end. The fixed-rate mode is not exercised here.
+    stored_mode = page.evaluate("() => localStorage.getItem('noscribe-live-reveal')")
+    h.check("stream: continuous mode maxLagMs <= 15000 (__nsliveReveal sampled every 100 ms)",
+            bool(samples) and max_page <= 15000,
+            f"maxLagMs {max_page:.0f}, currentLagMs max {max_cur:.0f} p95 {p95:.0f}, samples {len(samples)}; "
+            f"noscribe-live-reveal {stored_mode!r} (unset = default continuous)")
     h.check("stream: a segment is seen as a strict prefix of its final text mid-stream",
             bool(partial) and mismatches == 0,
             f"{len(partial)} segments seen partial, non-prefix states {mismatches}, "
@@ -423,6 +429,9 @@ def stream_body(h: Any, page: Any, path: Path, run_id: str) -> None:
             f"run_end seen {bool(seen_end)}, {drain}, full {full_ok}/{len(final)}, rendered {len(rendered)}, "
             f"queued {rv.get('queued')}, revealedSegments {rv.get('revealedSegments')}")
 
+    h.check("stream: continuous mode, the queue empties <= 12 s after run_end",
+            drained_at is not None and drained_at <= 12 and drained_queued == 0,
+            f"{drain}; queued at that point {drained_queued}")
     perf = page.evaluate(PERF_READ_JS)
     frames = perf.get("frames", [])
     windows: list[int] = []

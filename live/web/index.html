@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
-    <meta name="description" content="noScribe Live: a real-time view of a noScribe transcription." />
+    <meta name="description" content="即時語音轉文字：即時檢視 noScribe 轉錄" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>noScribe Live</title>
+    <title>即時語音轉文字</title>
     <script>
       // Apply the stored theme, Easy view and language before first paint, so nothing flashes.
       // Same keys and defaults as use-theme.ts, use-easy-view.ts and i18n/core.ts (dark, Easy off, detected language).
@@ -16,6 +16,10 @@
           var theme = localStorage.getItem("noscribe-live-theme") === "light" ? "light" : "dark";
           el.classList.toggle("dark", theme === "dark");
           el.dataset.theme = theme;
+        } catch (e) {}
+        try {
+          // The colour family (noscribe-live-palette): nordic unless the stored choice is crimson.
+          el.dataset.palette = localStorage.getItem("noscribe-live-palette") === "crimson" ? "crimson" : "nordic";
         } catch (e) {}
         try {
           if (localStorage.getItem("noscribe-live-easy") === "1") el.dataset.easy = "true";

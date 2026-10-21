@@ -25,6 +25,9 @@ import { hasCJK, requestConverter, useZhConverter, zhStats } from "@/lib/zh-tw";
 import { buildBlocks, type Paragraph, type SegmentItem } from "@/lib/transcript-blocks";
 import { useEasyView } from "@/hooks/use-easy-view";
 import { RevealEngine, type RevealView } from "@/lib/reveal-engine";
+import { fixedRateFor, MAX_FRAME_MS, STALL_FLUSH_MS, type RevealMode } from "@/lib/reveal-rate";
+import { SpeedControl } from "@/components/live/speed-control";
+import { useRevealSpeed } from "@/hooks/use-reveal-speed";
 import { cn } from "@/lib/utils";
 
 /** The view follows new text while the reader is within this many px of the bottom. */
@@ -33,13 +36,10 @@ const STICK_PX = 8;
 const HOLD_MS = 1000;
 /** Content this far past an edge (px) counts as "more above or below" and gets a soft fade. */
 const EDGE_PX = 2;
-/** A reveal this far behind the data (ms) is flushed: shown at once, not replayed. Only a stalled tab gets here. */
-const FLUSH_LAG_MS = 4000;
-/** Longest frame step (ms) the reveal integrates in one go. Real elapsed time counts up to this: at 7 fps a frame is
- *  143 ms, and a 100 ms cap silently dropped that time, so the reveal fell behind. Longer stalls are still bounded. */
-const MAX_FRAME_MS = 250;
 /** Frame step (ms) for the first frame of a loop. */
 const FIRST_FRAME_MS = 16;
+/** The test gaps series keeps at most this many entries. */
+const GAP_CAP = 5000;
 /** The screen reader keeps this many announced lines; the oldest are removed. */
 const SR_KEEP = 20;
 /** Held CJK text is shown raw (unconverted) once the converter has been late this long (ms). It swaps when ready. */
@@ -104,12 +104,26 @@ export interface TranscriptCardProps {
   ref?: Ref<TranscriptHandle>;
 }
 
-/** Test instrumentation, exposed as window.__nsliveReveal. Lag runs from the oldest segment not yet fully revealed. */
+/**
+ * Test instrumentation, exposed as window.__nsliveReveal. Lag runs from the oldest segment not yet fully revealed.
+ * `cps` is the rate in use, `arrivalEma` the arrival average (graphemes/s, null until two arrivals), `backlogChars` the
+ * graphemes queued, `lastAddAt` the performance.now() of the last frame that showed a grapheme. `gaps` holds the ms
+ * between consecutive visible additions while live (at most GAP_CAP entries), `maxGapMs` the largest of them, and
+ * `idleMsWhileLive` the ms with nothing appearing while live, after the first segment arrived.
+ */
 interface RevealStats {
   maxLagMs: number;
   currentLagMs: number;
   queued: number;
   revealedSegments: number;
+  mode: RevealMode;
+  cps: number;
+  arrivalEma: number | null;
+  backlogChars: number;
+  lastAddAt: number | null;
+  gaps: number[];
+  maxGapMs: number;
+  idleMsWhileLive: number;
 }
 
 declare global {
@@ -118,8 +132,54 @@ declare global {
   }
 }
 
-const revealStats: RevealStats = { maxLagMs: 0, currentLagMs: 0, queued: 0, revealedSegments: 0 };
+const revealStats: RevealStats = {
+  maxLagMs: 0,
+  currentLagMs: 0,
+  queued: 0,
+  revealedSegments: 0,
+  mode: "continuous",
+  cps: 0,
+  arrivalEma: null,
+  backlogChars: 0,
+  lastAddAt: null,
+  gaps: [],
+  maxGapMs: 0,
+  idleMsWhileLive: 0,
+};
 if (typeof window !== "undefined") window.__nsliveReveal = revealStats;
+
+/** performance.now() of the previous flow sample (null before the first sample of a run). */
+let flowAt: number | null = null;
+
+/** Clears the per-run measures when a new run opens. */
+function resetRevealStats() {
+  revealStats.maxLagMs = 0;
+  revealStats.lastAddAt = null;
+  revealStats.gaps = [];
+  revealStats.maxGapMs = 0;
+  revealStats.idleMsWhileLive = 0;
+  flowAt = null;
+}
+
+/**
+ * One flow sample at `now` (performance.now()), in which `added` graphemes became visible. Gaps between additions and
+ * idle time count only while the run is live and after its first segment arrived.
+ */
+function noteFlow(now: number, added: number, live: boolean, armed: boolean) {
+  const dt = flowAt === null ? 0 : Math.max(0, now - flowAt);
+  flowAt = now;
+  if (added > 0) {
+    const prev = revealStats.lastAddAt;
+    if (live && armed && prev !== null) {
+      const gap = now - prev;
+      if (revealStats.gaps.length < GAP_CAP) revealStats.gaps.push(gap);
+      revealStats.maxGapMs = Math.max(revealStats.maxGapMs, gap);
+    }
+    revealStats.lastAddAt = now;
+  } else if (live && armed) {
+    revealStats.idleMsWhileLive += dt;
+  }
+}
 
 /** Frame-loop state for one card: the pending frame id (null when idle) and the previous frame's timestamp. */
 interface RevealLoop {
@@ -127,12 +187,17 @@ interface RevealLoop {
   last: number | null;
 }
 
-function recordStats(engine: RevealEngine, now: number) {
-  const lag = engine.lagMs(now);
+function recordStats(engine: RevealEngine, added: number) {
+  const lag = engine.lagMs(Date.now());
   revealStats.currentLagMs = lag;
   revealStats.maxLagMs = Math.max(revealStats.maxLagMs, lag);
   revealStats.queued = engine.queued();
   revealStats.revealedSegments = engine.revealedSegments;
+  revealStats.mode = engine.mode;
+  revealStats.cps = engine.rate;
+  revealStats.arrivalEma = engine.arrivalEma;
+  revealStats.backlogChars = engine.backlogGraphemes();
+  noteFlow(performance.now(), added, !engine.ended, engine.arrivals > 0);
 }
 
 /**
@@ -142,11 +207,13 @@ function recordStats(engine: RevealEngine, now: number) {
 function pumpReveal(engine: RevealEngine, loop: RevealLoop, publish: (view: RevealView) => void) {
   if (loop.frame !== null || !engine.busy()) return;
   const step = (time: number) => {
-    const dt = loop.last === null ? FIRST_FRAME_MS : Math.min(MAX_FRAME_MS, time - loop.last);
+    const gap = loop.last === null ? null : time - loop.last;
+    const dt = gap === null ? FIRST_FRAME_MS : Math.min(MAX_FRAME_MS, gap);
     loop.last = time;
-    if (engine.lagMs(Date.now()) > FLUSH_LAG_MS) engine.flush();
-    engine.advance(dt, Date.now());
-    recordStats(engine, Date.now());
+    // A frame gap this long (a hidden tab, a long stall) shows the queue at once, so the text is current on return.
+    const flushed = gap !== null && gap > STALL_FLUSH_MS ? engine.flush() : 0;
+    const added = flushed + engine.advance(dt);
+    recordStats(engine, added);
     publish(engine.view());
     if (engine.busy()) {
       loop.frame = requestAnimationFrame(step);
@@ -444,16 +511,21 @@ export function TranscriptCard({
   // Easy view on a phone: the export sits under the transcript, not in the title row (that row pushed the transcript down).
   const exportBelow = easy && phone;
   const queueable = !reduce && !easy && !frozen;
+  // The reveal speed is shared (use-reveal-speed). The engine gets the fixed rate; continuous mode works it out itself.
+  const speed = useRevealSpeed();
+  const fixedCps = fixedRateFor(speed.mode, speed.cps);
   useLayoutEffect(() => {
     if (engine.runId !== runId) {
       engine.reset(runId, segments);
-      revealStats.maxLagMs = 0;
+      resetRevealStats();
     } else {
       // Live CJK text waits for the converter, and so does the live text behind it (sync keeps the arrival order).
       engine.sync(segments, (segment) => zhGate || !hasCJK(segment.text));
     }
+    engine.setSpeed(speed.mode, fixedCps);
+    engine.setEnded(!active);
     if (!queueable) engine.flush();
-    recordStats(engine, Date.now());
+    recordStats(engine, 0);
     const next = engine.view();
     setView(next);
     pumpReveal(engine, loop.current, setView);
@@ -469,7 +541,7 @@ export function TranscriptCard({
     }
     zhStats.heldSegments = held;
     if (cjk) requestConverter();
-  }, [engine, runId, segments, queueable, zhGate, zhReady]);
+  }, [engine, runId, segments, queueable, zhGate, zhReady, active, speed.mode, fixedCps]);
   useEffect(
     () => () => {
       if (loop.current.frame !== null) cancelAnimationFrame(loop.current.frame);
@@ -606,6 +678,8 @@ export function TranscriptCard({
   const end = run ? describeEnd(run, t.errors) : null;
   // Shown only when ExportButton would render (run ended, with segments), so no empty footer is left while live.
   const exportFooter = exportBelow && run !== null && !active && segments.length > 0;
+  // The speed control is hidden in Easy view and under reduced motion, where text shows at once.
+  const showSpeed = run !== null && !easy && !reduce;
 
   return (
     // Below the sm breakpoint the box has a fixed 70vh height: it stays a scroller that follows new text, and the
@@ -621,6 +695,7 @@ export function TranscriptCard({
             >
               {name}
             </h2>
+            {showSpeed && !phone ? <SpeedControl behind={view.behind} /> : null}
             {exportBelow ? null : <ExportButton run={run} />}
           </div>
           {/* Easy view drops the file path and the model: the title is enough to say which run this is. */}
@@ -756,6 +831,11 @@ export function TranscriptCard({
         ) : null}
       </div>
 
+      {showSpeed && phone ? (
+        <div className="shrink-0 px-6 pb-3">
+          <SpeedControl behind={view.behind} />
+        </div>
+      ) : null}
       {run && exportFooter ? (
         <div className="shrink-0 px-6 pt-2 pb-4 [&_[data-testid=export-odt]]:flex [&_[data-testid=export-odt]]:min-h-12 [&_[data-testid=export-odt]]:w-full">
           <ExportButton run={run} />

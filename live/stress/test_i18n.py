@@ -2,7 +2,8 @@
 """i18n and UI-contract checks for noScribe Live: en and zh-TW strings, html lang, the locale toggle and
 its persistence, the freeze while reconnecting (SIGSTOP), the outage that spans a finished run (SIGKILL,
 replay finishes, restart), banner layout shift, toast overlap, focus ring, mobile 390x844 checks, and a
-static scan for CJK characters in string literals of the en-capable component code.
+static scan for CJK characters in string literals of the en-capable component code, and for the zh-TW
+term 說話者 (the catalog says 講者) in any file under live/web/src and in live/web/index.html.
 
 Reuses the harness of test_ux.py (same directory: servers, replays, DOM readers). Run from any directory
 with the system Python that has Playwright:
@@ -127,6 +128,27 @@ def static_cjk_scan(live_dir: Path) -> list[str]:
                 if any(CJK.search(m.group(0)) for m in STRING_RE.finditer(line)):
                     offenders.append(f"{rel}:{num}: {stripped[:140]}")
     return offenders
+
+
+SPEAKER_TERM_WRONG = "說話者"  # zh-TW calls a speaker 講者 everywhere
+
+
+def speaker_term_hits(live_dir: Path) -> list[str]:
+    """file:line for every 說話者 in a file under live/web/src (i18n catalog included) and in live/web/index.html."""
+    hits: list[str] = []
+    web = live_dir / "web"
+    for path in sorted((web / "src").rglob("*")) + [web / "index.html"]:
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue  # binary asset, not source text
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        for num, line in enumerate(text.splitlines(), 1):
+            if SPEAKER_TERM_WRONG in line:
+                hits.append(f"{rel}:{num}: {line.strip()[:140]}")
+    return hits
 
 
 def finished_run(h: ux.Harness, port: int, feeds: Path, speed: float, max_gap: float, tag: str) -> tuple[Any, str, int]:
@@ -402,6 +424,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  FAIL CJK in string literal: {line}", flush=True)
         h.check("static: no CJK characters in string literals under live/web/src/components and lib",
                 not offenders, f"{len(offenders)} offending line(s)" if offenders else "clean")
+        wrong_term = speaker_term_hits(LIVE_DIR)
+        for line in wrong_term:
+            print(f"  FAIL 說話者 (zh-TW says 講者): {line}", flush=True)
+        h.check("static: no 說話者 under live/web/src (i18n catalog included) or live/web/index.html",
+                not wrong_term, f"{len(wrong_term)} offending line(s)" if wrong_term else "clean")
     ui_groups = [g for g in groups if g in GROUP_FUNCS]
     if ui_groups:
         if not (Path(args.static) / "index.html").is_file():

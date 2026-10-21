@@ -2616,6 +2616,9 @@ class App(ctk.CTk):
                         self.logn(f"Job error details: {traceback_str}", where='file')
                         print(f"Job error details: {traceback_str}")
                 finally:
+                    # No-op after finished/canceled/error. A BaseException skips those branches,
+                    # so this is what restores the streams and writes run_end in that case.
+                    self._live_feed.end('error', error='interrupted')
                     # If we were canceling only the current job, reset flags after it stops
                     if self._cancel_job_only:
                         self.cancel = False

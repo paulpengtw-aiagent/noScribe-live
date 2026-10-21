@@ -7,12 +7,14 @@ Run from the repo root with the system Python that has Playwright:
         [--python PY] [--src FEED.ndjson]
 
 It starts `python -m server` on --port with a fresh feeds dir, replays a recorded feed with
-`python -m server.replay --speed 3 --max-gap 2`, and runs three scenarios in headless Chromium:
+`python -m server.replay --speed 0.5 --max-gap 30`, and runs three scenarios in headless Chromium.
+Every scenario waits for the page's full UI (and >= 10 rendered segments) before it kills or aborts anything:
+the pre-roll shows neither a transcript nor the conn-state chip. Scenarios:
 
   1. SIGTERM the server mid-run (SIGKILL after 3 s), wait 5 s, restart it on the same port and feeds
      dir. The page must show reconnecting, then live, then catch up to every segment with no duplicates.
-  2. A fresh page whose /api/stream requests are aborted for ~6 s (page.route installed before the
-     page loads), then unrouted, on a second replay. Same reconnecting / live / catch-up checks.
+  2. A page on the full UI is reloaded with its /api/stream requests aborted for ~6 s (page.route installed
+     before the reload), then unrouted, on a second replay. Same reconnecting / live / catch-up checks.
   3. A page opened mid-run (after >= 10 segments are in the feed file) catches up to every segment.
 
 UI contract read from the DOM: [data-testid="conn-state"] with data-state, and each segment's
@@ -35,19 +37,22 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import time
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
 HERE = Path(__file__).resolve().parent            # live/stress
+sys.path.insert(0, str(HERE))                     # run under -I: the script directory is not on sys.path
+from test_ux import wait_full_ui  # noqa: E402  (pre-roll wait; same directory)
 LIVE_DIR = HERE.parent                            # cwd for `python -m server` and `python -m server.replay`
 DEFAULT_STATIC = LIVE_DIR / "web" / "dist"
 DEFAULT_PY = "/workspace/noScribe-live/live/.venv/bin/python"
 DEFAULT_WORK = Path("/tmp/nslive-r2")
 RECORDED_FEED = Path("/workspace/noScribe-live/live/feeds/20261020-052449-demo-en-zh.ndjson")  # read only
-SPEED = "3"
-MAX_GAP = "2"
+SPEED = "0.5"
+MAX_GAP = "30"
 
 # Runs in every document before the app's scripts: counts EventSource opens and errors and records
 # every segment/run_end the stream delivers (from `feed` and from `snapshot` catch-ups).
@@ -330,10 +335,11 @@ class Lab:
         path, run_id = self.new_run(before, "s1")
         ctx, page = self.new_page(browser, "s1")
         self.open_page(page)
-        c = self.snap_when(page, run_id, lambda x: max(x["dom"], len(x["stream"])) >= 10, 60)
-        c = c or self.counts(page, run_id)
-        self.check("s1 setup: >= 10 segments rendered before the kill", max(c["dom"], len(c["stream"])) >= 10,
-                   f"rendered {c['dom']}, stream distinct {len(c['stream'])}", contract=True)
+        # Kill only once the full UI is up: the pre-roll has no transcript and no conn-state chip to check.
+        full = wait_full_ui(page, 90)
+        c = self.snap_when(page, run_id, lambda x: x["dom"] >= 10, 60) or self.counts(page, run_id)
+        self.check("s1 setup: full UI up and >= 10 segments rendered before the kill", full and c["dom"] >= 10,
+                   f"full UI {full}, rendered {c['dom']}, stream distinct {len(c['stream'])}", contract=True)
         errors0, opens0 = c["errors"], c["opens"]
         print(f"  s1: server SIGTERM -> {self.stop_server(self.server)}", flush=True)
         time.sleep(5)
@@ -353,7 +359,7 @@ class Lab:
         self.shot(page, "s1-live.png")
         self.check("s1 machinery: page EventSource reopened", c["opens"] > opens0,
                    f"EventSource opens {opens0} -> {c['opens']}")
-        replay.wait(timeout=120)
+        replay.wait(timeout=300)
         self.verify_run("s1", page, run_id, path)
         self.shot(page, "s1-run_end.png")
         ctx.close()
@@ -370,6 +376,13 @@ class Lab:
         def abort(route: Any) -> None:
             route.abort()
 
+        # Abort only once the page is on the full UI with >= 10 segments rendered. The route is then installed and
+        # the page reloaded, so the reloaded page's first /api/stream request is aborted.
+        self.open_page(page)
+        full = wait_full_ui(page, 90)
+        c = self.snap_when(page, run_id, lambda x: x["dom"] >= 10, 60) or self.counts(page, run_id)
+        self.check("s2 setup: full UI up and >= 10 segments rendered before the abort", full and c["dom"] >= 10,
+                   f"full UI {full}, rendered {c['dom']}, stream distinct {len(c['stream'])}", contract=True)
         page.route(is_stream, abort)
         self.open_page(page)
         seen: set[Any] = set()
@@ -389,10 +402,11 @@ class Lab:
                    f"EventSource errors {last['errors']}, opens {last['opens']}")
         self.shot(page, "s2-outage.png")
         page.unroute(is_stream, abort)
+        wait_full_ui(page, 60)  # the pre-roll hides the conn-state chip until the full UI is up
         c = self.snap_when(page, run_id, lambda x: x["conn"] == "live", 40) or self.counts(page, run_id)
         self.check("s2 live: conn-state live after unroute", c["conn"] == "live",
                    f"data-state={c['conn']!r}", contract=True)
-        replay.wait(timeout=120)
+        replay.wait(timeout=300)
         self.verify_run("s2", page, run_id, path)
         self.shot(page, "s2-run_end.png")
         ctx.close()
@@ -408,7 +422,8 @@ class Lab:
         self.check("s3 setup: page opened mid-run (>= 10 segments in the feed)",
                    at_open["segments"] >= 10 and not at_open["ended"],
                    f"feed had {at_open['segments']} segments, run_end={at_open['ended']} at open")
-        replay.wait(timeout=120)
+        replay.wait(timeout=300)
+        wait_full_ui(page, 60)  # the DOM counts need the full UI (the pre-roll has no segments in the DOM)
         self.verify_run("s3", page, run_id, path)
         self.shot(page, "s3-run_end.png")
         ctx.close()

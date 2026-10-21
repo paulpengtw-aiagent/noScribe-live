@@ -32,7 +32,7 @@ export function useInkPalette(): InkPalette {
     });
     refresh();
     const observer = new MutationObserver(refresh);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme"] });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme", "data-palette"] });
     return () => observer.disconnect();
   }, []);
   return palette;

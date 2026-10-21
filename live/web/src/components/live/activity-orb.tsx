@@ -19,6 +19,8 @@ export interface ActivityOrbProps {
   frozen?: boolean;
   /** Not read out: the orb is hidden from assistive tech, and the phase text names the state. */
   label?: string;
+  /** The pre-roll's big orb: larger, brighter dots so the orb keeps its presence at full size. */
+  prominent?: boolean;
 }
 
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
@@ -37,6 +39,7 @@ export function ActivityOrb({
   size = 260,
   className,
   frozen = false,
+  prominent = false,
 }: ActivityOrbProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<OrbRenderer | null>(null);
@@ -63,8 +66,8 @@ export function ActivityOrb({
   }, [ink, ink3, still]);
 
   useLayoutEffect(() => {
-    rendererRef.current?.setInput({ mode, envelope, pulseKey, progress, speakerColors, activeColor, size });
-  }, [mode, envelope, pulseKey, progress, speakerColors, activeColor, size, still]);
+    rendererRef.current?.setInput({ mode, envelope, pulseKey, progress, speakerColors, activeColor, size, prominent });
+  }, [mode, envelope, pulseKey, progress, speakerColors, activeColor, size, prominent, still]);
 
   return (
     <canvas
@@ -73,7 +76,7 @@ export function ActivityOrb({
       data-testid="activity-orb"
       data-frozen={frozen ? "true" : undefined}
       className={cn("block shrink-0", className)}
-      style={{ width: size, height: size }}
+      style={{ width: size, height: size, flex: "none", contain: "layout size" }}
     />
   );
 }

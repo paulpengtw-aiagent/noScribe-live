@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { motion, MotionConfig } from "motion/react";
 import { toast } from "sonner";
 import { AuroraBackground } from "@/components/live/aurora-background";
 import { StageCard } from "@/components/live/stage-card";
+import { CliLogDisclosure } from "@/components/live/cli-log";
+import { RunCompleteDialog } from "@/components/live/run-complete-dialog";
+import { FLIGHT_MS, HANDOFF_MS, usePrerollMode } from "@/components/live/preroll/use-preroll-mode";
 import { TimelineCard } from "@/components/live/timeline-card";
 import type { TimelineSegment, WaveformTimelineProps } from "@/components/live/waveform-timeline";
 import type { OrbMode } from "@/components/live/activity-orb";
@@ -15,9 +19,10 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useLiveFeed, type Connection } from "@/hooks/use-live-feed";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import { useEasyView } from "@/hooks/use-easy-view";
 import { useNow } from "@/hooks/use-now";
 import { useRunPeaks } from "@/hooks/use-run-peaks";
-import { useTheme } from "@/hooks/use-theme";
+import { usePalette, useTheme } from "@/hooks/use-theme";
 import { useI18n, type Messages } from "@/i18n";
 import { DASH } from "@/lib/format";
 import type { RunStatus } from "@/lib/live-types";
@@ -39,6 +44,9 @@ import { speakerColor } from "@/lib/speakers";
 /** Below this width the page stacks into one column. */
 const WIDE_QUERY = "(min-width: 1100px)";
 const NO_SPEAKERS: string[] = [];
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+/** The pre-roll is its own chunk: it loads only while a live run is still starting. */
+const Preroll = lazy(() => import("@/components/live/preroll/preroll-view"));
 
 function orbModeFor(phase: DisplayPhase): OrbMode {
   switch (phase) {
@@ -116,6 +124,7 @@ export default function App() {
   const { state, connection, retry, lastUpdateT } = useLiveFeed(runParam);
   const { t, locale } = useI18n();
   const { theme, toggle: toggleTheme } = useTheme();
+  const { palette } = usePalette();
   const wide = useMediaQuery(WIDE_QUERY);
 
   // A run that has no start event is a stale or unknown id: show the waiting state.
@@ -199,6 +208,17 @@ export default function App() {
   }, [state.helloed, state.runs, runParam, t]);
 
   const phase = displayPhase(run);
+  const { easy } = useEasyView();
+  const reduce = useMediaQuery(REDUCED_MOTION_QUERY);
+  // The run whose pre-roll terminal has finished typing (set by the pre-roll; the switch waits for it, capped).
+  const [typedRun, setTypedRun] = useState<RunState | null>(null);
+  // Until a live run has its four stats, the pre-roll composition shows instead of the full UI.
+  const pre = usePrerollMode(run, easy, reduce, now, typedRun !== null && typedRun === run);
+  // The pre-roll composition is on screen (the pre-roll or its morph): the header keeps only the logo and the toggles.
+  const prerollOnScreen = run !== null && pre.mode !== "full";
+  // The full UI is mounted in its final layout from the start. While the pre-roll is shown it stays hidden
+  // (visibility, inert, opacity), so the switch changes no box in normal flow.
+  const fullHidden = pre.mode === "pre";
   const segments = run?.segments;
   const lastSegment = segments && segments.length > 0 ? segments[segments.length - 1] : undefined;
   const speakers = run?.speakers ?? NO_SPEAKERS;
@@ -223,8 +243,8 @@ export default function App() {
     () => envelopeFor(peaks, duration, startOffset, lastSegment),
     [peaks, duration, startOffset, lastSegment],
   );
-  const colorOf = useCallback((speaker: string) => speakerColor(speakers, speaker), [speakers]);
-  const speakerColors = useMemo(() => speakers.map(colorOf), [speakers, colorOf]);
+  const colorOf = useCallback((speaker: string) => speakerColor(speakers, speaker), [speakers, palette, theme]);
+  const speakerColors = useMemo(() => speakers.map(colorOf), [speakers, colorOf, palette, theme]);
   const activeColor = lastSegment ? colorOf(lastSegment.speaker) : undefined;
   const pulseKey = run?.liveCount ?? 0;
 
@@ -267,6 +287,7 @@ export default function App() {
   return (
     <TooltipProvider delayDuration={150}>
       <SpeakerOrderContext.Provider value={speakers}>
+        <MotionConfig reducedMotion="user">
         <div className="flex min-h-svh flex-col bg-background text-foreground">
           <AuroraBackground live={active && !frozen} />
           <TopBar
@@ -278,14 +299,47 @@ export default function App() {
             connection={connection}
             theme={theme}
             onToggleTheme={toggleTheme}
+            minimal={prerollOnScreen}
           />
           <ConnBanner connection={connection} retry={retry} lastUpdateT={lastUpdateT} />
-          <main className="live-page">
+          {/* Below the header, one box: the full UI in normal flow, and the pre-roll as an absolute overlay on top of it. */}
+          <div className="relative flex min-h-0 flex-1 flex-col">
+          {run && prerollOnScreen ? (
+            <div
+              className={pre.mode === "morph" ? "pointer-events-none absolute inset-x-0 top-0 z-10" : "absolute inset-x-0 top-0 z-10"}
+            >
+              <Suspense fallback={null}>
+                <Preroll run={run} morphing={pre.mode === "morph"} easy={easy} reduce={reduce} onTypingIdle={setTypedRun} />
+              </Suspense>
+            </div>
+          ) : null}
+          <motion.main
+            className="live-page"
+            aria-hidden={fullHidden || undefined}
+            inert={fullHidden}
+            style={{ visibility: fullHidden ? "hidden" : "visible" }}
+            initial={false}
+            // The rest of the full UI fades in once the orb's flight has landed (reduced motion: a short crossfade).
+            animate={{ opacity: fullHidden ? 0 : 1 }}
+            transition={
+              pre.mode === "morph"
+                ? { duration: reduce ? 0.2 : HANDOFF_MS / 1000, delay: reduce ? 0 : FLIGHT_MS / 1000 }
+                : { duration: 0.2 }
+            }
+          >
             {!state.helloed ? (
               <LoadingSkeleton />
             ) : (
             <div className="live-grid">
               <div className="live-stage">
+                {/* A row above the stage card. flex-none! keeps it from sharing the column's flex space (.live-stage > *).
+                    It mounts with the log lines even during the pre-roll (the full UI is hidden then), so the switch
+                    does not insert it into the column and push the stage card and transcript down. */}
+                {run && run.logs.length > 0 ? (
+                  <div className="flex flex-none! justify-end">
+                    <CliLogDisclosure logs={run.logs} startedT={run.startedT} easy={easy} />
+                  </div>
+                ) : null}
                 <StageCard
                   otherLive={otherLive}
                   onRunChange={setRunParam}
@@ -308,7 +362,12 @@ export default function App() {
                 />
               </div>
 
-              <div className="live-transcript">
+              <motion.div
+                className="live-transcript"
+                initial={pre.reason === "ready" ? { opacity: 0, y: reduce ? 0 : 24 } : false}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: reduce ? 0.3 : 1, ease: [0.22, 1, 0.36, 1] }}
+              >
                 {awaitingRun ? (
                   <TranscriptSkeleton />
                 ) : picked !== null && !run ? (
@@ -336,7 +395,7 @@ export default function App() {
                 />
                 </div>
                 )}
-              </div>
+              </motion.div>
 
               <div className="live-timeline">
                 <TimelineCard
@@ -352,9 +411,12 @@ export default function App() {
               </div>
             </div>
             )}
-          </main>
+          </motion.main>
+          </div>
         </div>
+        </MotionConfig>
       </SpeakerOrderContext.Provider>
+      <RunCompleteDialog run={run} />
       <Toaster
         theme={theme}
         position="top-right"

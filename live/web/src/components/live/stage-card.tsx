@@ -1,4 +1,5 @@
 import { useId, useRef, useState } from "react";
+import { motion } from "motion/react";
 import { Check, ChevronDown } from "lucide-react";
 import { Orb } from "@/components/aicss/Orb";
 import { ActivityOrb, type ActivityOrbProps, type OrbMode } from "@/components/live/activity-orb";
@@ -97,8 +98,8 @@ export function StageCard({
 
   // The same eight tiles in every phase, so the grid never gains or loses a row. A value not known yet reads as a dash.
   const stats: Stat[] = [
-    { label: s.stats.model, value: run?.model ?? DASH, hint: s.hints.model, hiddenInEasy: true },
-    { label: s.stats.device, value: deviceText(run) ?? DASH, hint: s.hints.device, secondary: true },
+    { label: s.stats.model, value: run?.model ?? DASH, hint: s.hints.model, hiddenInEasy: true, layoutId: "stat-model" },
+    { label: s.stats.device, value: deviceText(run) ?? DASH, hint: s.hints.device, secondary: true, layoutId: "stat-device" },
     {
       label: s.stats.latency,
       value: latency.last !== null ? formatMs(latency.last) : DASH,
@@ -106,11 +107,12 @@ export function StageCard({
       secondary: true,
     },
     { label: s.stats.rtf, value: rtf !== null ? formatRtf(rtf) : DASH, hint: s.hints.rtf, secondary: true },
-    { label: s.stats.language, value: languageText(run) ?? DASH, hint: s.hints.language, secondary: true },
+    { label: s.stats.language, value: languageText(run) ?? DASH, hint: s.hints.language, secondary: true, layoutId: "stat-language" },
     {
       label: s.stats.speakers,
       value: run && run.speakers.length > 0 ? String(run.speakers.length) : DASH,
       hint: speakerHint(s, run, speakerName),
+      layoutId: "stat-speakers",
     },
     { label: s.stats.elapsed, value: formatElapsed(elapsed), hint: s.hints.elapsed },
     { label: s.stats.segments, value: run ? String(run.segments.length) : DASH, hint: s.hints.segments },
@@ -200,16 +202,22 @@ export function StageCard({
         </>
       ) : phone ? (
         <div className="flex min-w-0 items-center gap-2.5 text-[13px]" data-testid="stage-summary">
-          <ActivityOrb
-            mode={orbMode}
-            envelope={envelope}
-            pulseKey={pulseKey}
-            progress={progress}
-            speakerColors={speakerColors}
-            activeColor={activeColor}
-            size={PHONE_SUMMARY_ORB_PX}
-            frozen={orbFrozen}
-          />
+          <div
+            data-orb-slot="stage"
+            className="flex items-center justify-center"
+            style={{ width: PHONE_SUMMARY_ORB_PX, height: PHONE_SUMMARY_ORB_PX, flex: "none", contain: "layout size" }}
+          >
+            <ActivityOrb
+              mode={orbMode}
+              envelope={envelope}
+              pulseKey={pulseKey}
+              progress={progress}
+              speakerColors={speakerColors}
+              activeColor={activeColor}
+              size={PHONE_SUMMARY_ORB_PX}
+              frozen={orbFrozen}
+            />
+          </div>
           {/* Wraps onto a second line instead of truncating: the phase, then the elapsed time and segment count. */}
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="font-medium break-words text-foreground">{phaseName}</span>
@@ -273,14 +281,14 @@ export function StageCard({
         )}
       >
         {(easy ? easyGrid : stats).map((stat) => (
-          <StatTile key={stat.label} label={stat.label} value={stat.value} hint={stat.hint} />
+          <StatTile key={stat.label} label={stat.label} value={stat.value} hint={stat.hint} layoutId={stat.layoutId} />
         ))}
         {easy ? (
           <div className="col-span-2 flex flex-col gap-1.5">
             {phone ? null : moreButton}
             <div id={moreId} hidden={!moreOpen} className="grid grid-cols-2 gap-1.5">
               {easyFolded.map((stat) => (
-                <StatTile key={stat.label} label={stat.label} value={stat.value} hint={stat.hint} />
+                <StatTile key={stat.label} label={stat.label} value={stat.value} hint={stat.hint} layoutId={stat.layoutId} />
               ))}
             </div>
           </div>
@@ -299,11 +307,23 @@ type OrbAreaProps = Omit<ActivityOrbProps, "size" | "className"> & { compact: bo
 function OrbArea({ compact, ...orb }: OrbAreaProps) {
   const ref = useRef<HTMLDivElement>(null);
   const area = useElementSize(ref);
-  // Desktop: the orb takes the room the stats leave over, between 120 and 260 px. Below 1100 px it is 140 px.
-  const size = compact ? 140 : area.height > 0 ? Math.round(Math.min(260, Math.max(120, area.height - 8))) : 260;
+  // Pinned: the desktop size is taken from the first measurement of this layout and then held, so the orb never
+  // resizes when the stats or the log beside it grow. Desktop: between 120 and 260 px. Below 1100 px it is 140 px.
+  const [pinnedPx, setPinnedPx] = useState<number | null>(null);
+  if (!compact && pinnedPx === null && area.height > 0) {
+    setPinnedPx(Math.round(Math.min(260, Math.max(120, area.height - 8))));
+  }
+  const size = compact ? 140 : (pinnedPx ?? 260);
   return (
     <div ref={ref} className={cn("flex items-center justify-center", compact ? "shrink-0" : "min-h-0 flex-1")}>
-      <ActivityOrb {...orb} size={size} />
+      {/* The slot is a fixed box: it never shrinks or grows with its neighbours. The pre-roll flies its orb onto it. */}
+      <div
+        data-orb-slot="stage"
+        className="flex items-center justify-center"
+        style={{ width: size, height: size, flex: "none", contain: "layout size" }}
+      >
+        <ActivityOrb {...orb} size={size} />
+      </div>
     </div>
   );
 }
@@ -316,18 +336,34 @@ interface Stat {
   secondary?: boolean;
   /** Easy view drops this tile altogether (the model name). */
   hiddenInEasy?: boolean;
+  /** Shared-element id: the pre-roll terminal row with the same id flies into this tile. */
+  layoutId?: string;
 }
 
 /**
  * A read-only stat. A plain div with no tabIndex or button role: the hint appears on pointer hover only,
  * so the keyboard order skips the stats.
  */
-function StatTile({ label, value, hint }: { label: string; value: string; hint: string }) {
+function StatTile({
+  label,
+  value,
+  hint,
+  layoutId,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  layoutId?: string;
+}) {
   const unknown = value === DASH;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div data-testid="stat-card" className="min-w-0 cursor-default rounded-[12px] bg-raised px-3 py-1 shadow-ring">
+        <motion.div
+          data-stat={layoutId}
+          data-testid="stat-card"
+          className="min-w-0 cursor-default rounded-[12px] bg-raised px-3 py-1 shadow-ring"
+        >
           <span className="block truncate text-[12px] leading-4 text-ink-2">{label}</span>
           <span
             className={cn(
@@ -337,7 +373,7 @@ function StatTile({ label, value, hint }: { label: string; value: string; hint: 
           >
             {value}
           </span>
-        </div>
+        </motion.div>
       </TooltipTrigger>
       <TooltipContent
         side="top"

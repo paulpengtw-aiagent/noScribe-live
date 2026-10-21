@@ -15,8 +15,8 @@ OUTDIR/summary.json.
   --easy    easy view on: localStorage noscribe-live-easy = "1" before load (axe configs only). Off by
            default: the key is not set, and the app reads anything but "1" as off.
   --widths  comma list of 1440 and/or 390 (default 1440,390). 1440 is 1440x900, 390 is 390x844.
-  --matrix  bundle and axe over theme(dark,light) x locale(en,zh-TW) x easy(off,on) x width(1440,390):
-           16 configs on one finished run. Prints a compact table; summary.json holds every config.
+  --matrix  bundle and axe over palette(nordic,crimson) x theme(dark,light) x locale(en,zh-TW) x easy(off,on) x width(1440,390):
+           32 configs on one finished run. Prints a compact table; summary.json holds every config.
            No CLS and no shots in this mode. --theme, --widths, --easy and --locale are rejected with it.
 
   axe      axe-core (violations only) on a FINISHED run, replayed at speed 8 first. One config per
@@ -65,6 +65,8 @@ EASY_KEY = "noscribe-live-easy"                          # src/hooks/use-easy-vi
 LOCALE_KEY = "noscribe-live-locale"                      # src/i18n (values: en | zh-TW)
 LOCALES = ("en", "zh-TW")
 THEMES = ("dark", "light")
+PALETTE_KEY = "noscribe-live-palette"                   # matrix dimension; no palette picker in live/web/src yet
+PALETTES = ("nordic", "crimson")
 DEFAULT_PORT = 8775
 DESKTOP = {"width": 1440, "height": 900}
 PHONE = {"width": 390, "height": 844}
@@ -160,11 +162,17 @@ def easy_script() -> str:
     return "(() => { try { localStorage.setItem('%s', '1'); } catch (e) {} })();" % EASY_KEY
 
 
+def palette_script(palette: str) -> str:
+    return "(() => { try { localStorage.setItem('%s', '%s'); } catch (e) {} })();" % (PALETTE_KEY, palette)
+
+
 LANG_JS = "() => document.documentElement.getAttribute('lang')"
 
 
-def page_scripts(base: list[str], locale: str | None, easy: bool = False) -> list[str]:
+def page_scripts(base: list[str], locale: str | None, easy: bool = False,
+                 palette: str | None = None) -> list[str]:
     extra = ([locale_script(locale)] if locale else []) + ([easy_script()] if easy else [])
+    extra += [palette_script(palette)] if palette else []
     return base + extra
 
 
@@ -375,14 +383,16 @@ def default_combos(themes: tuple[str, ...], widths: list[int], locale: str | Non
 
 
 def matrix_combos() -> list[dict[str, Any]]:
-    """theme x locale x easy x width: 16 axe configs."""
+    """palette x theme x locale x easy x width: 32 axe configs."""
     combos: list[dict[str, Any]] = []
-    for theme in THEMES:
-        for locale in LOCALES:
-            for easy in (False, True):
-                for width, vp in WIDTHS.items():
-                    label = f"{theme}-{locale}-{'easy' if easy else 'off'}-{width}"
-                    combos.append({"label": label, "theme": theme, "locale": locale, "easy": easy, "viewport": vp})
+    for palette in PALETTES:
+        for theme in THEMES:
+            for locale in LOCALES:
+                for easy in (False, True):
+                    for width, vp in WIDTHS.items():
+                        label = f"{palette}-{theme}-{locale}-{'easy' if easy else 'off'}-{width}"
+                        combos.append({"label": label, "palette": palette, "theme": theme, "locale": locale,
+                                       "easy": easy, "viewport": vp})
     return combos
 
 
@@ -482,7 +492,8 @@ class Rig:
 def axe_config(browser: Any, rig: Rig, run_id: str, expected: int, axe_path: Path, combo: dict[str, Any]) -> dict[str, Any]:
     errs: list[str] = []
     vp = combo["viewport"]
-    scripts = page_scripts([INIT_JS, theme_script(combo["theme"])], combo["locale"], combo["easy"])
+    scripts = page_scripts([INIT_JS, theme_script(combo["theme"])], combo["locale"], combo["easy"],
+                           combo.get("palette"))
     ctx, page = open_page(browser, vp, scripts, errs)
     try:
         page.goto(rig.base, wait_until="domcontentloaded", timeout=30000)
@@ -491,6 +502,7 @@ def axe_config(browser: Any, rig: Rig, run_id: str, expected: int, axe_path: Pat
         violations = page.evaluate(AXE_JS) or []
         return {
             "viewport": f"{vp['width']}x{vp['height']}",
+            "palette": combo.get("palette") or "default",
             "theme": combo["theme"],
             "theme_applied": page.evaluate(THEME_READ_JS),
             "locale": combo["locale"] or "default",
@@ -603,11 +615,11 @@ def record(errors: list[dict[str, str]], name: str, exc: BaseException) -> None:
 
 def matrix_lines(axe: dict[str, Any]) -> list[str]:
     """Compact table: serious and critical as rules/nodes, then the rule ids of both (impact, nodes)."""
-    head = f"{'theme':<6} {'locale':<6} {'easy':<4} {'width':<5} {'serious':>9} {'critical':>9}  rule ids (impact, nodes)"
+    head = f"{'palette':<8} {'theme':<6} {'locale':<6} {'easy':<4} {'width':<5} {'serious':>9} {'critical':>9}  rule ids (impact, nodes)"
     lines = [head, "-" * len(head)]
-    for entry in axe.values():
+    for label, entry in axe.items():
         if "error" in entry:
-            lines.append(f"ERROR {entry['error']}")
+            lines.append(f"ERROR {label}: {entry['error']}")
             continue
         ri, ni = entry["rules_by_impact"], entry["nodes_by_impact"]
         ser = f"{ri.get('serious', 0)}/{ni.get('serious', 0)}"
@@ -615,7 +627,8 @@ def matrix_lines(axe: dict[str, Any]) -> list[str]:
         bad = sorted((r for r in entry["rules"] if r["impact"] in ("critical", "serious")),
                      key=lambda r: (r["impact"] != "critical", str(r["id"])))
         ids = ", ".join(f"{r['id']}({r['impact'][0]},{r['nodes']})" for r in bad) or "-"
-        lines.append(f"{entry['theme']:<6} {entry['locale']:<6} {'on' if entry['easy'] else 'off':<4} "
+        lines.append(f"{entry.get('palette', 'default'):<8} {entry['theme']:<6} {entry['locale']:<6} "
+                     f"{'on' if entry['easy'] else 'off':<4} "
                      f"{entry['viewport'].split('x')[0]:<5} {ser:>9} {crit:>9}  {ids}")
     return lines
 
@@ -653,7 +666,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--widths", default=None,
                         help="comma list of 1440 and/or 390 for the axe configs (default: 1440,390)")
     parser.add_argument("--matrix", action="store_true",
-                        help="bundle and axe over theme x locale x easy x width (16 configs); no CLS or shots")
+                        help="bundle and axe over palette x theme x locale x easy x width (32 configs); no CLS or shots")
     args = parser.parse_args(argv)
     if args.matrix:
         given = [flag for flag, val in (("--theme", args.theme), ("--widths", args.widths),
@@ -709,6 +722,8 @@ def main(argv: list[str] | None = None) -> int:
         "theme": "matrix" if args.matrix else (args.theme or "both"),
         "widths": None if args.matrix else args.width_list,
         "easy": None if args.matrix else args.easy,
+        "palette": "matrix" if args.matrix else None,
+        "axe_expected": [c["label"] for c in matrix_combos()] if args.matrix else None,
     }
     errors: list[dict[str, str]] = []
     rig = Rig(args.python, args.port, static, work)

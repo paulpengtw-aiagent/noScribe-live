@@ -4,6 +4,7 @@ import { easy, type EasyMessages } from "./easy";
 import { exportArea, type ExportMessages } from "./export";
 import { errors, type ErrorsMessages } from "./errors";
 import { picker, type PickerMessages } from "./picker";
+import { preroll, type PrerollMessages } from "./preroll";
 import { stage, type StageMessages } from "./stage";
 import { timeline, type TimelineMessages } from "./timeline";
 import { topbar, type TopbarMessages } from "./topbar";
@@ -20,6 +21,7 @@ export type Messages = {
   errors: ErrorsMessages;
   easy: EasyMessages;
   export: ExportMessages;
+  preroll: PrerollMessages;
 };
 
 export const catalog: Record<Locale, Messages> = {
@@ -33,6 +35,7 @@ export const catalog: Record<Locale, Messages> = {
     errors: errors.en,
     easy: easy.en,
     export: exportArea.en,
+    preroll: preroll.en,
   },
   "zh-TW": {
     app: app["zh-TW"],
@@ -44,5 +47,6 @@ export const catalog: Record<Locale, Messages> = {
     errors: errors["zh-TW"],
     easy: easy["zh-TW"],
     export: exportArea["zh-TW"],
+    preroll: preroll["zh-TW"],
   },
 };

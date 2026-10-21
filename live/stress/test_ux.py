@@ -2,6 +2,11 @@
 """UX checks for noScribe Live: sticky follow, reveal and screen-reader output, connection states,
 paragraphs and linking, and the run picker. Servers, replays and browsers are started by this script.
 
+Time budget: each group is meant to finish in about 5 minutes or less (the gate's per-step timeout is
+420 s). Replays use speed 1 with --max-gap 30 where the checks need live time after the pre-roll (stick,
+stick end), so the pre-roll never eats the live part of a check. Waits that only bound a failure are
+kept generous; they cost nothing when the page behaves. Run a group alone with --only to time it.
+
 Run from the repo root with the system Python that has Playwright:
 
     /usr/bin/python3 -I live/stress/test_ux.py [--only stick,reveal,conn,para,picker] [--port 8770]
@@ -298,14 +303,52 @@ def block_centre(page: Any, idx: int) -> tuple[float, float]:
     return box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
 
 
+def dismiss_run_complete(page: Any) -> None:
+    """The run-complete dialog (run-complete-dialog.tsx) opens once when a run this page showed live finishes. It is a
+    modal AlertDialog: while it is open the page below takes no pointer events, so a click or hover waits on its overlay
+    until the timeout. Escape closes it, as a user would. The tests call this before they use the page."""
+    dialog = page.locator('[data-testid="run-complete-dialog"]')
+    if dialog.count() and dialog.first.is_visible():
+        page.keyboard.press("Escape")
+        wait_until(lambda: not dialog.count() or not dialog.first.is_visible(), 3, 0.1)
+
+
 def click_block(page: Any, idx: int) -> None:
+    dismiss_run_complete(page)
     x, y = block_centre(page, idx)
     page.mouse.click(x, y)
 
 
+def click_jump(page: Any, jump: Any) -> None:
+    """Clicks the jump-to-live button. It fades in (0.2 s) when follow detaches, and a slow replay can keep the
+    pre-roll overlay up for a while, so wait for the full UI and for the button to be visible, then click with 15 s."""
+    wait_full_ui(page, 30)
+    jump.wait_for(state="visible", timeout=15000)
+    dismiss_run_complete(page)
+    jump.click(timeout=15000)
+
+
 def open_picker(page: Any) -> None:
     if not page.locator('[data-testid="run-option"]').first.is_visible():
-        page.locator('[data-testid="run-picker"]').click(timeout=5000)
+        # 15 s: a slow (0.5x) replay can keep the page in the pre-roll; the picker is inert until the full UI is up.
+        page.locator('[data-testid="run-picker"]').click(timeout=15000)
+
+
+PREROLL_DONE_JS = """() => { const p = window.__nslivePreroll; return !p || p.active === false; }"""
+FULL_UI_SELECTORS = ('[data-testid="stage-card"]', '[data-testid="transcript-scroll"]')
+
+
+def full_ui_visible(page: Any) -> bool:
+    """True when the pre-roll of a live run has ended and the stage card or the transcript scroller is visible."""
+    if not page.evaluate(PREROLL_DONE_JS):
+        return False
+    return any(page.locator(sel).first.is_visible() for sel in FULL_UI_SELECTORS)
+
+
+def wait_full_ui(page: Any, timeout: float = 30.0) -> bool:
+    """Waits until window.__nslivePreroll is falsy or active === false AND the full UI is on screen. Call it after
+    opening a LIVE run and before using the picker, run-state chip, transcript, jump button or timeline."""
+    return bool(wait_until(lambda: full_ui_visible(page), timeout, 0.2))
 
 
 class Harness:
@@ -504,6 +547,7 @@ class Harness:
 def stick_body(h: Harness, page: Any, path: Path, run_id: str) -> None:
     scroller = '[data-testid="transcript-scroll"]'
     jump = page.locator('[data-testid="jump-to-live"]')
+    wait_full_ui(page, 60)
     ready = wait_until(lambda: seg_count(page) >= 8 and following(page) == "true", 60, 0.2)
     h.check("stick setup: >= 8 segments with following=true", bool(ready),
             f"segments {seg_count(page)}, following {following(page)!r}")
@@ -529,13 +573,14 @@ def stick_body(h: Harness, page: Any, path: Path, run_id: str) -> None:
             f"scrollTop {top0} -> {top1}, segments {n0} -> {n1}")
     h.shot(page, "stick-1-detached.png")
 
-    jump.click(timeout=5000)
+    click_jump(page, jump)
     back = wait_until(lambda: following(page) == "true" and at_bottom(page), 3, 0.1)
     m = metrics(page)
     h.check("stick: jump to live resumes following and reaches the bottom", bool(back),
             f"following {m.get('following')!r}, scrollTop+clientHeight {m.get('top', 0) + m.get('client', 0)}, "
             f"scrollHeight-10 {m.get('height', 0) - 10}")
 
+    wait_full_ui(page, 30)
     click_block(page, 2)
     detached = wait_until(lambda: following(page) == "false", 2, 0.05)
     in_view = wait_until(lambda: page.evaluate(IN_VIEW_JS, 2), 2, 0.1)
@@ -547,8 +592,9 @@ def stick_body(h: Harness, page: Any, path: Path, run_id: str) -> None:
             f"data-active segment {seg_active!r}, timeline {tl_active!r}")
     h.shot(page, "stick-2-timeline.png")
 
-    jump.click(timeout=5000)
+    click_jump(page, jump)
     wait_until(lambda: following(page) == "true", 3, 0.1)
+    dismiss_run_complete(page)
     page.locator(scroller).focus(timeout=5000)
     page.keyboard.press("PageUp")
     paged = wait_until(lambda: following(page) == "false", 2, 0.05)
@@ -560,6 +606,7 @@ def stick_body(h: Harness, page: Any, path: Path, run_id: str) -> None:
 def stick_end_body(h: Harness, page: Any, run_id: str) -> None:
     scroller = '[data-testid="transcript-scroll"]'
     jump = page.locator('[data-testid="jump-to-live"]')
+    wait_full_ui(page, 60)
     ready = wait_until(lambda: seg_count(page) >= 8 and following(page) == "true" and not page_ended(page, run_id),
                        60, 0.2)
     h.check("stick end setup: >= 8 segments with following=true while the run is still live", bool(ready),
@@ -582,12 +629,13 @@ def stick_end_body(h: Harness, page: Any, run_id: str) -> None:
 
 
 def stick_end_group(h: Harness, browser: Any) -> None:
-    # A fresh replay (speed 2), so run_end comes after the reader has scrolled up.
+    # A fresh replay (speed 1, max-gap 30). Only the end state matters here: the run must still be live when the
+    # reader scrolls up (after the pre-roll and 8 segments), and run_end then arrives while scrolled up.
     feeds = h.new_feeds("stick-end")
     srv = h.serve(h.port, feeds, "stick-end")
     try:
         before = h.feeds_now(feeds)
-        h.start_replay(h.demo_src, feeds, 2, 2, "stick-end")
+        h.start_replay(h.demo_src, feeds, 1, 30, "stick-end")
         _path, run_id = h.new_run(feeds, before, "stick-end")
         ctx, page = h.new_page(browser)
         try:
@@ -604,7 +652,8 @@ def group_stick(h: Harness, browser: Any) -> None:
     srv = h.serve(h.port, feeds, "stick")
     try:
         before = h.feeds_now(feeds)
-        h.start_replay(h.demo_src, feeds, 1.5, 2, "stick")
+        # Speed 1, max-gap 30: live through the pre-roll; the checks start only after wait_full_ui (in stick_body).
+        h.start_replay(h.demo_src, feeds, 1, 30, "stick")
         path, run_id = h.new_run(feeds, before, "stick")
         ctx, page = h.new_page(browser)
         try:
@@ -620,11 +669,12 @@ def group_stick(h: Harness, browser: Any) -> None:
 # ---- reveal: no empty turns, reduced motion, screen-reader announcements -------------------------
 def reveal_default_body(h: Harness, browser: Any, feeds: Path) -> None:
     before = h.feeds_now(feeds)
-    h.start_replay(h.demo_src, feeds, 2, 2, "reveal-a")
+    h.start_replay(h.demo_src, feeds, 1, 30, "reveal-a")
     path, run_id = h.new_run(feeds, before, "reveal-a")
     ctx, page = h.new_page(browser, recorders=True)
     try:
         page.goto(h.url(h.port), wait_until="domcontentloaded", timeout=30000)
+        wait_full_ui(page, 60)
         samples = empty_hits = max_turns = 0
         first_bad = None
         end = time.monotonic() + 15
@@ -638,12 +688,12 @@ def reveal_default_body(h: Harness, browser: Any, feeds: Path) -> None:
             samples += 1
             time.sleep(0.25)
         extra = f", first: {first_bad}" if first_bad else ""
-        h.check("reveal: no turn with empty paragraph text (header without text) in 15 s of a speed-2 replay",
+        h.check("reveal: no turn with empty paragraph text (header without text) in 15 s of a speed-1 replay after the pre-roll",
                 max_turns > 0 and empty_hits == 0,
                 f"samples {samples}, max turns {max_turns}, empty-turn hits {empty_hits}{extra}")
         ended = wait_until(lambda: page_ended(page, run_id), 90, 0.5)
         expected = feed_info(path)["segments"]
-        wait_until(lambda: seg_count(page) >= expected, 10, 0.3)
+        wait_until(lambda: seg_count(page) >= expected, 15, 0.3)  # continuous flow: queue drains <= ~10 s after run_end
         ann = page.evaluate("() => window.__nsAnn || []")
         rendered = seg_count(page)
         partial = [pair for pair in zip(ann, ann[1:]) if pair[1].startswith(pair[0]) and pair[1] != pair[0]]
@@ -671,7 +721,7 @@ def reveal_reduced_body(h: Harness, browser: Any, feeds: Path) -> None:
         page.goto(h.url(h.port), wait_until="domcontentloaded", timeout=30000)
         wait_until(lambda: page_ended(page, run_id), 90, 0.5)
         expect = feed_texts(path)  # read after run_end: at new_run time the file holds only run_start
-        wait_until(lambda: seg_count(page) >= len(expect), 10, 0.3)
+        wait_until(lambda: seg_count(page) >= len(expect), 15, 0.3)
         rec = page.evaluate("() => window.__nsSegRec || {}")
         problems: list[str] = []
         worst = 0.0
@@ -720,6 +770,7 @@ def conn_heartbeat(h: Harness, browser: Any) -> None:
         ctx, page = h.new_page(browser, extra="window.__NSLIVE_HEARTBEAT_TIMEOUT_MS = 4000;")
         try:
             page.goto(h.url(h.port), wait_until="domcontentloaded", timeout=30000)
+            wait_full_ui(page, 60)
             wait_until(lambda: seg_count(page) >= 2, 60, 0.3)
             os.kill(srv.pid, signal.SIGSTOP)
             t0 = time.monotonic()
@@ -759,6 +810,7 @@ def conn_restart(h: Harness, browser: Any) -> None:
         ctx, page = h.new_page(browser)
         try:
             page.goto(h.url(h.port), wait_until="domcontentloaded", timeout=30000)
+            wait_full_ui(page, 60)
             wait_until(lambda: seg_count(page) >= 3, 60, 0.3)
             before_kill = seg_count(page)
             srv.kill()
@@ -865,7 +917,7 @@ def conn_waveform_live(h: Harness, browser: Any) -> None:
     srv = h.serve(h.port, feeds, "wave")
     try:
         before = h.feeds_now(feeds)
-        h.start_replay(h.demo_src, feeds, 1.5, 2, "wave")
+        h.start_replay(h.demo_src, feeds, 1, 30, "wave")
         _path, run_id = h.new_run(feeds, before, "wave")
         ctx, page = h.new_page(browser)
         try:
@@ -939,6 +991,7 @@ def para_body(h: Harness, page: Any) -> None:
 
 
 def linking_body(h: Harness, page: Any) -> None:
+    dismiss_run_complete(page)
     page.locator('[data-segment-index="4"]').first.hover(timeout=5000)
     hl = wait_until(lambda: highlighted(page, 4), 2, 0.05)
     tl4 = '[data-timeline-index="4"]'
@@ -953,6 +1006,7 @@ def linking_body(h: Harness, page: Any) -> None:
 
 
 def notice_body(h: Harness, page: Any, feeds: Path, zh_run_id: str) -> None:
+    dismiss_run_complete(page)
     open_picker(page)
     page.locator(f'[data-testid="run-option"][data-run-id="{zh_run_id}"]').click(timeout=5000)
     wait_until(lambda: f"run={zh_run_id}" in page.url, 5, 0.1)
@@ -987,6 +1041,8 @@ def group_para(h: Harness, browser: Any) -> None:
         try:
             page.goto(h.url(h.port), wait_until="domcontentloaded", timeout=30000)
             ended = wait_until(lambda: page_ended(page, run_id), 60, 0.3)
+            wait_full_ui(page, 60)
+            wait_until(lambda: seg_count(page) >= feed_info(path)["segments"], 15, 0.3)  # queue drains after run_end
             time.sleep(0.5)
             h.check("para setup: Chinese replay at speed 8 reaches run_end on the page", bool(ended),
                     f"run_end seen {bool(ended)}, segments {seg_count(page)}")
@@ -1019,6 +1075,8 @@ def loading_consistent(h: Harness, page: Any, run_id: str) -> tuple[bool, str]:
 
 
 def picker_body(h: Harness, page: Any, zh_id: str, demo_id: str) -> None:
+    # The picker is invisible and inert during the pre-roll (minimal header): wait for the full UI first.
+    wait_full_ui(page, 90)
     open_picker(page)
     wait_until(lambda: page.locator('[data-testid="run-option"]').count() >= 2, 10, 0.2)
     opts = page.evaluate(OPTS_JS)
@@ -1083,7 +1141,7 @@ def group_picker(h: Harness, browser: Any) -> None:
         _path, zh_id = h.new_run(feeds, before, "picker-zh")
         wait_until(lambda: h.api_status(h.port, zh_id) == "finished", 60, 0.5)
         before = h.feeds_now(feeds)
-        h.start_replay(h.demo_src, feeds, 0.5, 2, "picker-demo")
+        h.start_replay(h.demo_src, feeds, 0.5, 30, "picker-demo")
         _path, demo_id = h.new_run(feeds, before, "picker-demo")
         ctx, page = h.new_page(browser)
         try:

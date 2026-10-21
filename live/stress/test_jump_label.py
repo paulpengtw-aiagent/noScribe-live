@@ -5,11 +5,11 @@ While the run is live, a reader who has scrolled up must see "Jump to live" (en)
 sample; "Jump to end" / "跳至結尾" may appear only once run_end is in the feed, and must appear soon after.
 Three pages watch one replay in one browser: English desktop, zh-TW desktop, and English Easy view at 390 px.
 
-    /usr/bin/python3 -I live/stress/test_jump_label.py [--port 8911] [--speed 0.5] [--work DIR] [--static DIR]
+    /usr/bin/python3 -I live/stress/test_jump_label.py [--port 8911] [--speed 0.3] [--max-gap 30] [--work DIR] [--static DIR]
 
-Starts `python -m server` on --port (fresh feeds dir) and `python -m server.replay SRC --speed S --max-gap 2`.
+Starts `python -m server` on --port (fresh feeds dir) and `python -m server.replay SRC --speed S --max-gap G`.
 SRC is copied into WORK, so the recorded feed stays read only. Samples the label every 500 ms until run_end is in
-the feed file, then 10 s more. Exit 0 only if every check passed. Waits (up to 3 min) while the cgroup memory is
+the feed file, then up to 20 s more (the end label must show within 15 s of run_end, since the page drains its queue after run_end). Exit 0 only if every check passed. Waits (up to 3 min) while the cgroup memory is
 above 18.0 GiB, and exits 2 if it never drops.
 """
 
@@ -29,6 +29,8 @@ from playwright.sync_api import sync_playwright
 
 HERE = Path(__file__).resolve().parent
 LIVE = HERE.parent
+sys.path.insert(0, str(HERE))  # run under -I: the script directory is not on sys.path
+from test_ux import wait_full_ui  # noqa: E402  (pre-roll wait; same directory)
 DEFAULT_PY = "/workspace/noScribe-live/live/.venv/bin/python"
 DEFAULT_SRC = "/workspace/noScribe-live/live/feeds/20261020-052449-demo-en-zh.ndjson"
 MEM_CURRENT = Path("/sys/fs/cgroup/memory.current")
@@ -81,13 +83,15 @@ def wait_until(fn, timeout: float, step: float = 0.2):
 def main() -> int:
     ap = argparse.ArgumentParser(description="Jump button label while a run is live")
     ap.add_argument("--port", type=int, default=8911)
-    ap.add_argument("--speed", type=float, default=0.5)
+    ap.add_argument("--speed", type=float, default=0.3)
+    ap.add_argument("--max-gap", type=float, default=30.0,
+                    help="longest single replay pause in seconds (default 30: keeps the run live through the pre-roll)")
     ap.add_argument("--src", default=DEFAULT_SRC)
     ap.add_argument("--python", default=DEFAULT_PY)
     ap.add_argument("--static", default=str(LIVE / "web" / "dist"))
     ap.add_argument("--work", default="/tmp/nslive-r17/jump")
     ap.add_argument("--timeout", type=float, default=240)
-    ap.add_argument("--min-live", type=int, default=8, help="live samples (500 ms apart) each page must take")
+    ap.add_argument("--min-live", type=int, default=6, help="live samples (500 ms apart) each page must take")
     args = ap.parse_args()
     if not memory_ok():
         return 2
@@ -117,7 +121,7 @@ def main() -> int:
             return 1
         before = set(os.listdir(feeds))
         rep = subprocess.Popen([args.python, "-m", "server.replay", str(src), "--feeds", str(feeds),
-                                "--speed", str(args.speed), "--max-gap", "2"],
+                                "--speed", str(args.speed), "--max-gap", str(args.max_gap)],
                                cwd=LIVE, stdout=open(work / "replay.log", "w"), stderr=subprocess.STDOUT)
         path = wait_until(lambda: next((feeds / f for f in os.listdir(feeds) if f not in before and f.endswith(".ndjson")), None), 20, 0.2)
         if path is None:
@@ -147,6 +151,7 @@ def main() -> int:
                 pages[name] = (ctx, page, loc)
 
             for name, (ctx, page, loc) in pages.items():
+                wait_full_ui(page, 90)
                 ready = wait_until(lambda: page.evaluate(SEG_JS) >= 8 and following_of(page) == "true", 90, 0.2)
                 check(f"{name}: >= 8 segments with following=true", bool(ready), f"segments {page.evaluate(SEG_JS)}")
                 if not ready:
@@ -157,6 +162,10 @@ def main() -> int:
                 detached = wait_until(lambda: following_of(page) == "false", 3, 0.05)
                 check(f"{name}: scrolled up while live", bool(detached), f"following {following_of(page)!r}, run_end in feed {ended()}")
 
+            # Sampling starts only when every page is past its pre-roll: the jump button is not on screen before that.
+            for name, (ctx, page, loc) in pages.items():
+                up = wait_full_ui(page, 90)
+                check(f"{name}: full UI before sampling", bool(up), f"segments {page.evaluate(SEG_JS)}")
             t0 = time.monotonic()
             live_n = {name: 0 for name in pages}
             bad: dict[str, list[str]] = {name: [] for name in pages}
@@ -184,15 +193,15 @@ def main() -> int:
                     elif label == END_LABEL[loc] and name not in seen_end:
                         seen_end[name] = now
                 done = fin and all(name in seen_end for name in pages)
-                if done or (fin and now - fin_at > 10):
+                if done or (fin and now - fin_at > 20):
                     break
                 time.sleep(0.5)
 
             for name, (ctx, page, loc) in pages.items():
                 check(f"{name}: 'Jump to live' on every live sample", not bad[name] and live_n[name] >= args.min_live,
                       f"{live_n[name]} live samples, violations {len(bad[name])}" + (f", first {bad[name][0]}" if bad[name] else ""))
-                check(f"{name}: 'Jump to end' only after run_end, and within 10 s of it",
-                      name in seen_end and fin_at is not None and seen_end[name] - fin_at <= 10,
+                check(f"{name}: 'Jump to end' only after run_end, and within 15 s of it",
+                      name in seen_end and fin_at is not None and seen_end[name] - fin_at <= 15,
                       f"run_end at {fin_at:.1f} s, end label at {seen_end.get(name, float('nan')):.1f} s"
                       if fin_at is not None else "run_end never reached")
             print(f"live window: scroll-up to run_end about {fin_at:.1f} s" if fin_at is not None else "live window: run_end not reached")

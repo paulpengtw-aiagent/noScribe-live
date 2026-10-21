@@ -1,4 +1,4 @@
-import type { Locale } from "../index";
+import { plural, type Locale } from "../core";
 
 const en = {
   /** Connection overlay. */
@@ -7,7 +7,7 @@ const en = {
   connAttemptRetry: (attempt: number, seconds: number) => `Attempt ${attempt} · retrying in ${seconds} s`,
   connLastUpdate: (time: string) => `Last update ${time}`,
   /** Tab title: "<status> – <file>". The product name is the title when no run is shown. */
-  titleIdle: "noScribe Live",
+  titleIdle: "Live Speech-to-Text",
   titleReconnecting: (name: string) => `⚠ Reconnecting – ${name}`,
   titleLive: (name: string) => `● Live – ${name}`,
   titleStopped: (name: string) => `■ Stopped – ${name}`,
@@ -34,6 +34,15 @@ const en = {
   /** Persistent notice for a followed run that failed. */
   failedRunToast: (name: string) => `${name} failed`,
   failedRunView: "View",
+  /** CLI log on phones (below 640 px): the toggle between six lines and the full bounded height. */
+  cliLogExpand: "Expand",
+  cliLogCollapse: "Collapse",
+  /** Transcription-complete dialog, shown once when a run this page was watching live finishes. */
+  runCompleteTitle: "Transcription complete",
+  runCompleteLength: (time: string) => `Length ${time}`,
+  runCompleteSegments: (n: number) => plural("en", n, { one: `${n} segment`, other: `${n} segments` }),
+  runCompleteSpeakers: (n: number) => plural("en", n, { one: `${n} speaker`, other: `${n} speakers` }),
+  runCompleteKeep: "Keep viewing",
 };
 
 export type AppMessages = typeof en;
@@ -43,7 +52,7 @@ const zhTW: AppMessages = {
   connAttempt: (attempt) => `第 ${attempt} 次重新連線`,
   connAttemptRetry: (attempt, seconds) => `第 ${attempt} 次重新連線 · ${seconds} 秒後重試`,
   connLastUpdate: (time) => `最後更新 ${time}`,
-  titleIdle: "noScribe Live",
+  titleIdle: "即時語音轉文字",
   titleReconnecting: (name) => `⚠ 重新連線中 – ${name}`,
   titleLive: (name) => `● 即時 – ${name}`,
   titleStopped: (name) => `■ 意外停止 – ${name}`,
@@ -63,6 +72,13 @@ const zhTW: AppMessages = {
   toastClose: "關閉通知",
   failedRunToast: (name) => `${name} 轉錄失敗`,
   failedRunView: "查看",
+  cliLogExpand: "展開",
+  cliLogCollapse: "收合",
+  runCompleteTitle: "轉錄完成",
+  runCompleteLength: (time) => `長度 ${time}`,
+  runCompleteSegments: (n) => plural("zh-TW", n, { one: `${n} 段`, other: `${n} 段` }),
+  runCompleteSpeakers: (n) => plural("zh-TW", n, { one: `${n} 位講者`, other: `${n} 位講者` }),
+  runCompleteKeep: "繼續查看",
 };
 
 export const app = { en, "zh-TW": zhTW } satisfies Record<Locale, unknown>;

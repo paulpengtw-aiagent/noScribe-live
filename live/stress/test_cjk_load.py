@@ -11,8 +11,8 @@ For the 4000 ms delay the check runs again 1 s after the delay. Failing checks a
 Only the Playwright browser is started, one at a time. Before each load the cgroup memory is read; above 17.5 GiB
 the test waits, and aborts if it stays high. Only the server it spawned is signalled.
 
-Usage (from anywhere):
-  /usr/bin/python3 -I -B /workspace/noScribe-live-nordic/live/stress/test_cjk_load.py --port 8900 --loads 32
+Usage (from the repo root; LIVE_DIR and the dist come from this file's own location):
+  /usr/bin/python3 -I -B live/stress/test_cjk_load.py --port 8900 --loads 32
 Exit status 0 when every check passes.
 """
 
@@ -30,7 +30,7 @@ import urllib.request
 from pathlib import Path
 
 PY_DEFAULT = "/workspace/noScribe-live/live/.venv/bin/python"  # the live venv: the server's dependencies (read only)
-LIVE_DIR = Path("/workspace/noScribe-live-nordic/live")  # cwd for `python -m server`
+LIVE_DIR = Path(__file__).resolve().parents[1]  # cwd for `python -m server`
 STATIC_DEFAULT = LIVE_DIR / "web" / "dist"
 FEED_SRC = Path("/workspace/noScribe-live/live/feeds/20261020-052449-demo-en-zh.ndjson")  # read only
 WORK_DEFAULT = Path("/tmp/nslive-r15r/cjk")
