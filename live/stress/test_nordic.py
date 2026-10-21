@@ -672,6 +672,53 @@ def easy_toggle_body(h: Any, browser: Any) -> None:
         ctx.close()
 
 
+EASY_TIMELINE_JS = """() => {
+  const card = document.querySelector('[data-testid="timeline-card"]');
+  if (!card) return null;
+  const cs = getComputedStyle(card);
+  const edge = card.getBoundingClientRect().right - parseFloat(cs.paddingRight) - parseFloat(cs.borderRightWidth);
+  const rights = Array.from(card.querySelectorAll('[data-timeline-index]')).map((b) => b.getBoundingClientRect().right);
+  const hit = card.querySelector('[data-testid="timeline-hit"]');
+  const hitRight = hit ? hit.getBoundingClientRect().right : null;
+  const maxRight = Math.max(hitRight ?? -Infinity, ...rights);
+  const root = document.documentElement;
+  return { edge, blocks: rights.length, hit: hitRight !== null, hitRight, maxRight: Number.isFinite(maxRight) ? maxRight : null,
+           scrollWidth: root.scrollWidth, clientWidth: root.clientWidth }; }"""
+
+
+def easy_timeline_body(h: Any, browser: Any, run_id: str) -> None:
+    """Easy view on a finished run at 1440x900: timeline blocks and the hit layer stay inside the timeline card."""
+    ux.wait_until(lambda: h.api_status(h.port, run_id) == "finished", 60, 0.5)
+    for theme in THEMES:
+        tag = f"{theme}/en"
+        ctx, page = new_ctx(browser, preset_js(theme, "en", "1"))
+        try:
+            page.set_viewport_size({"width": 1440, "height": 900})
+            page.goto(h.url(h.port), wait_until="domcontentloaded", timeout=30000)
+            ux.wait_until(lambda: ux.seg_count(page) >= 1, 30, 0.3)
+            m: dict[str, Any] = {}
+
+            def measured() -> bool:
+                m.clear()
+                m.update(page.evaluate(EASY_TIMELINE_JS) or {})
+                return m.get("blocks", 0) > 0
+
+            ux.wait_until(measured, 15, 0.3)
+            edge, max_right = m.get("edge"), m.get("maxRight")
+            fits = (m.get("blocks", 0) > 0 and bool(m.get("hit")) and edge is not None and max_right is not None
+                    and max_right <= edge + 0.5)
+            print(f"  easy timeline {tag}: max right edge {max_right} vs card edge {edge} "
+                  f"(blocks {m.get('blocks')}, hit layer right {m.get('hitRight')})", flush=True)
+            h.check(f"easy timeline {tag} at 1440x900: every timeline block and the hit layer end inside the card",
+                    fits, f"max right edge {max_right} vs card edge {edge}, blocks {m.get('blocks')}, "
+                          f"hit layer {m.get('hit')}")
+            sw, cw = m.get("scrollWidth"), m.get("clientWidth")
+            h.check(f"easy timeline {tag} at 1440x900: documentElement.scrollWidth <= clientWidth",
+                    sw is not None and cw is not None and sw <= cw, f"scrollWidth {sw}, clientWidth {cw}")
+        finally:
+            ctx.close()
+
+
 def group_easy(h: Any, browser: Any) -> None:
     feeds = h.new_feeds("easy")
     srv = h.serve(h.port, feeds, "easy")
@@ -688,6 +735,7 @@ def group_easy(h: Any, browser: Any) -> None:
         for theme, locale, _ctx, page in cases:
             h.scenario(f"easy {theme}/{locale}", easy_case_body, h, page, theme, locale)
         h.scenario("easy live run", easy_watch_body, h, cases, path, run_id)
+        h.scenario("easy timeline 1440", easy_timeline_body, h, browser, run_id)
         h.scenario("easy toggle", easy_toggle_body, h, browser)
     finally:
         for _t, _l, ctx, _p in cases:

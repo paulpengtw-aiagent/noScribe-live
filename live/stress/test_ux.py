@@ -998,13 +998,42 @@ def group_para(h: Harness, browser: Any) -> None:
 
 
 # ---- picker: options, filter, selection, reload, titles -------------------------------------------
+def loading_consistent(h: Harness, page: Any, run_id: str) -> tuple[bool, str]:
+    """True when the run's option data-status is "loading" exactly while the server reports 0 segments for it.
+    The server count is read before and after the option read; a count that moved in between is not judged."""
+    def server_segments() -> int | None:
+        for run in h.api_runs(h.port):
+            if run.get("run_id") == run_id:
+                return run.get("segments")
+        return None
+
+    before = server_segments()
+    opt = next((o for o in page.evaluate(OPTS_JS) if o["runId"] == run_id), None)
+    after = server_segments()
+    if before is None or opt is None or before != after:
+        return False, f"no stable sample: server segments {before} -> {after}, option found {opt is not None}"
+    want = "loading" if before == 0 else "live"
+    return opt["status"] == want, f"server segments {before}, data-status {opt['status']!r}, want {want!r}"
+
+
 def picker_body(h: Harness, page: Any, zh_id: str, demo_id: str) -> None:
     open_picker(page)
     wait_until(lambda: page.locator('[data-testid="run-option"]').count() >= 2, 10, 0.2)
     opts = page.evaluate(OPTS_JS)
     statuses = sorted({o["status"] for o in opts if o["status"]})
-    h.check("picker: options carry data-status finished and (during the replay) live",
-            {"finished", "live"} <= set(statuses), f"{len(opts)} options, statuses {statuses}")
+    h.check("picker: options carry data-status finished and (during the replay) live or loading",
+            "finished" in statuses and bool({"live", "loading"} & set(statuses)),
+            f"{len(opts)} options, statuses {statuses}")
+    # The replay has just started, so the demo option may still be "loading" (0 segments) or already "live".
+    verdict = {"ok": False, "detail": "no sample"}
+
+    def settled() -> bool:
+        verdict["ok"], verdict["detail"] = loading_consistent(h, page, demo_id)
+        return verdict["ok"]
+
+    wait_until(settled, 10, 0.3)
+    h.check("picker: demo option data-status is 'loading' iff the server reports 0 segments for the run",
+            verdict["ok"], verdict["detail"])
     hhmmss = bool(opts) and all(re.search(r"\d\d:\d\d:\d\d", o["text"]) for o in opts)
     groups = page.locator('[data-testid="run-group"]').count()
     follow = page.locator('[data-testid="run-option-follow"]').count()

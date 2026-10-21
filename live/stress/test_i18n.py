@@ -156,8 +156,8 @@ def locale_body(h: ux.Harness, browser: Any, port: int, locale: str, expected: i
         if want == "en":
             picker = chrome.get("picker") or ""
             stage = chrome.get("stage") or ""
-            h.check("i18n en: picker trigger reads 'Follow newest run' and stats show 'Elapsed'",
-                    "Follow newest run" in picker and "Elapsed" in stage,
+            h.check("i18n en: picker trigger reads 'Follow newest' and stats show 'Elapsed'",
+                    "Follow newest" in picker and "Elapsed" in stage,
                     f"picker {picker[:60]!r}, stage has Elapsed {'Elapsed' in stage}")
             joined = " | ".join(f"{k}={v}" for k, v in chrome.items() if v)
             cjk = CJK.findall(joined)
