@@ -43,17 +43,20 @@ export default function RunCompleteView({
     }
   };
 
+  // One text line: sibling <li>s would run together in textContent (3:22 and 50 would read as 3:2250).
+  const stats = [
+    t.app.runCompleteLength(formatClock(summary.duration)),
+    t.app.runCompleteSegments(summary.segments),
+    t.app.runCompleteSpeakers(summary.speakers),
+  ].join(" · ");
+
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent data-testid="run-complete-dialog">
         <AlertDialogHeader>
           <AlertDialogTitle>{t.app.runCompleteTitle}</AlertDialogTitle>
           <AlertDialogDescription asChild>
-            <ul data-testid="run-complete-stats" className="grid gap-1">
-              <li>{t.app.runCompleteLength(formatClock(summary.duration))}</li>
-              <li>{t.app.runCompleteSegments(summary.segments)}</li>
-              <li>{t.app.runCompleteSpeakers(summary.speakers)}</li>
-            </ul>
+            <p data-testid="run-complete-stats">{stats}</p>
           </AlertDialogDescription>
         </AlertDialogHeader>
         {failed ? (

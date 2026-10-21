@@ -139,15 +139,22 @@ def state(page: Any) -> str | None:
     return run_info(page).get("state")
 
 
-# A run on the air reads "● Live" (green) or, before its first segment, "◐ Loading" (yellow); both carry
-# data-state running. The glyph is part of the chip text (top-bar.tsx), so the check matches it too.
-RUNNING_CHIP = re.compile(r"^(●\s*(Live|即時)|◐\s*(Loading|載入中))$")
+# A run on the air reads "●Live" (green) or, before its first segment, "◐Loading" (yellow); zh "●即時" and
+# "◐載入中". The glyph is the first character of the chip's textContent with NO space before the word (top-bar.tsx
+# renders the dot as its own span; the gap between the spans is CSS, not text), so the pattern allows zero spaces.
+RUNNING_CHIP = re.compile(r"^[●◐]\s*(Live|Loading|即時|載入中)$")
+PREROLL_JS = "() => !!(window.__nslivePreroll && window.__nslivePreroll.active)"
 
 
 def running(page: Any) -> bool:
-    """True while a run is on the air: data-state running, chip Live/即時 or Loading/載入中 with its glyph."""
+    """True while a run is on the air: data-state running and chip text = glyph + Live/Loading/即時/載入中."""
     info = run_info(page)
     return info.get("state") == "running" and bool(RUNNING_CHIP.match(info.get("text") or ""))
+
+
+def in_preroll(page: Any) -> bool:
+    """True while the page shows the pre-roll (window.__nslivePreroll.active, set by use-preroll-mode.ts)."""
+    return bool(page.evaluate(PREROLL_JS))
 
 
 def elapsed(page: Any) -> str | None:
@@ -368,18 +375,19 @@ def run_checks(lab: Lab, browser: Any) -> None:
     ctx, page = new_page(browser)
     page.goto(lab.url, wait_until="domcontentloaded", timeout=30000)
     wait_until(lambda: shown_run(page) == run_a, 15)
-    on_a = wait_full_ui(page, 30) and bool(wait_until(lambda: running(page), 5))
-    lab.check("setup: follow page shows A (run-state running) before B starts", bool(on_a),
-              f"run-state {run_info(page)}")
+    # A may still be in its pre-roll (its four stats are not known yet): the run-state chip is the check here.
+    on_a = bool(wait_until(lambda: shown_run(page) == run_a and running(page), 30))
+    lab.check("setup: follow page shows A (run-state running) before B starts", on_a,
+              f"shown run is A={shown_run(page) == run_a}, pre-roll={in_preroll(page)}, run-state {run_info(page)}")
     time.sleep(4)  # B starts 4 s after A
 
     before_b = lab.feeds_now()
     replay_b = lab.start_replay(1, 30, "B")
     path_b, run_b = lab.new_run(before_b, "B")
     wait_until(lambda: shown_run(page) == run_b, 15)
-    on_b = wait_full_ui(page, 30) and bool(wait_until(lambda: running(page), 5))
-    lab.check("1 follow newest: page shows B while B runs", bool(on_b),
-              f"shown run is B={shown_run(page) == run_b}, run-state {run_info(page)}")
+    on_b = bool(wait_until(lambda: shown_run(page) == run_b and running(page), 30))
+    lab.check("1 follow newest: page shows B while B runs", on_b,
+              f"shown run is B={shown_run(page) == run_b}, pre-roll={in_preroll(page)}, run-state {run_info(page)}")
     lab.shot(page, "01-follow-b-running.png")
 
     # The server switches to A as soon as B ends and sends A's snapshot instead of B's run_end, so the
@@ -388,13 +396,16 @@ def run_checks(lab: Lab, browser: Any) -> None:
     t_end = time.monotonic()
     back = wait_until(lambda: shown_run(page) == run_a, 15)
     delay = time.monotonic() - t_end
-    # The run-state chip is hidden during the pre-roll of the switched-to run: read it only after the full UI.
-    full_a = wait_full_ui(page, 30)
-    running_a = bool(wait_until(lambda: running(page), 5)) if full_a else False
+    # The switched-to run may still be in its pre-roll (its four stats not known yet): then the pre-roll must be up
+    # with the shown run being A (`back`); otherwise the full UI must be up within 10 s.
+    full_a = wait_full_ui(page, 10)
+    pre_a = (not full_a) and in_preroll(page)
+    running_a = bool(wait_until(lambda: running(page), 5))
     lab.check("1 follow newest: page follows A again after B's run_end",
-              bool(ended_b) and bool(back) and full_a and running_a,
+              bool(ended_b) and bool(back) and (full_a or pre_a) and running_a,
               f"B run_end in its feed={bool(ended_b)}, seen by page={ended(page, run_b)}; "
-              f"switched to A {delay:.1f} s after it (spec: ~5 s); full UI {full_a}, run-state {run_info(page)}")
+              f"switched to A {delay:.1f} s after it (spec: ~5 s); full UI {full_a}, pre-roll {pre_a}, "
+              f"run-state {run_info(page)}")
     lab.shot(page, "02-follow-a-after-b.png")
     replay_b.wait(timeout=60)
 

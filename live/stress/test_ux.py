@@ -303,7 +303,18 @@ def block_centre(page: Any, idx: int) -> tuple[float, float]:
     return box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
 
 
+def dismiss_run_complete(page: Any) -> None:
+    """The run-complete dialog (run-complete-dialog.tsx) opens once when a run this page showed live finishes. It is a
+    modal AlertDialog: while it is open the page below takes no pointer events, so a click or hover waits on its overlay
+    until the timeout. Escape closes it, as a user would. The tests call this before they use the page."""
+    dialog = page.locator('[data-testid="run-complete-dialog"]')
+    if dialog.count() and dialog.first.is_visible():
+        page.keyboard.press("Escape")
+        wait_until(lambda: not dialog.count() or not dialog.first.is_visible(), 3, 0.1)
+
+
 def click_block(page: Any, idx: int) -> None:
+    dismiss_run_complete(page)
     x, y = block_centre(page, idx)
     page.mouse.click(x, y)
 
@@ -313,6 +324,7 @@ def click_jump(page: Any, jump: Any) -> None:
     pre-roll overlay up for a while, so wait for the full UI and for the button to be visible, then click with 15 s."""
     wait_full_ui(page, 30)
     jump.wait_for(state="visible", timeout=15000)
+    dismiss_run_complete(page)
     jump.click(timeout=15000)
 
 
@@ -582,6 +594,7 @@ def stick_body(h: Harness, page: Any, path: Path, run_id: str) -> None:
 
     click_jump(page, jump)
     wait_until(lambda: following(page) == "true", 3, 0.1)
+    dismiss_run_complete(page)
     page.locator(scroller).focus(timeout=5000)
     page.keyboard.press("PageUp")
     paged = wait_until(lambda: following(page) == "false", 2, 0.05)
@@ -978,6 +991,7 @@ def para_body(h: Harness, page: Any) -> None:
 
 
 def linking_body(h: Harness, page: Any) -> None:
+    dismiss_run_complete(page)
     page.locator('[data-segment-index="4"]').first.hover(timeout=5000)
     hl = wait_until(lambda: highlighted(page, 4), 2, 0.05)
     tl4 = '[data-timeline-index="4"]'
@@ -992,6 +1006,7 @@ def linking_body(h: Harness, page: Any) -> None:
 
 
 def notice_body(h: Harness, page: Any, feeds: Path, zh_run_id: str) -> None:
+    dismiss_run_complete(page)
     open_picker(page)
     page.locator(f'[data-testid="run-option"][data-run-id="{zh_run_id}"]').click(timeout=5000)
     wait_until(lambda: f"run={zh_run_id}" in page.url, 5, 0.1)

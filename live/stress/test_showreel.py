@@ -452,6 +452,16 @@ def group_preroll(h: Any, browser: Any) -> None:
         h.stop(srv)
 
 
+def dismiss_run_complete(page: Any) -> None:
+    """The run-complete dialog (run-complete-dialog.tsx) opens once when a live run finishes on the page. It is a modal
+    AlertDialog: while open the page below takes no pointer events, so a click on a control waits on its overlay.
+    Escape closes it, as a user would."""
+    dialog = page.locator('[data-testid="run-complete-dialog"]')
+    if dialog.count() and dialog.first.is_visible():
+        page.keyboard.press("Escape")
+        poll(lambda: not dialog.count() or not dialog.first.is_visible(), 3, 0.1)
+
+
 def speed_control_body(h: Any, page: Any) -> None:
     sel = '[data-testid="speed-control"]'
     visible = poll(lambda: page.locator(sel).count() > 0 and page.locator(sel).first.is_visible(), 30, 0.3)
@@ -459,13 +469,16 @@ def speed_control_body(h: Any, page: Any) -> None:
             f"count {page.locator(sel).count()}")
     if not visible:
         return
+    dismiss_run_complete(page)
     page.locator(sel).first.click()
+    dismiss_run_complete(page)
     page.locator('[data-testid="speed-mode-reading"]').click(timeout=5000)
     time.sleep(0.3)
     label_before = page.locator(sel).first.inner_text()
     stored_before = page.evaluate(SPEED_STATE_JS)
     page.reload(wait_until="domcontentloaded", timeout=30000)
     time.sleep(1.2)
+    dismiss_run_complete(page)
     page.locator(sel).first.click()
     checked = page.locator('[data-testid="speed-mode-reading"]').get_attribute("aria-checked")
     stored_after = page.evaluate(SPEED_STATE_JS)
@@ -487,6 +500,7 @@ def speed_control_body(h: Any, page: Any) -> None:
             f"cps {cps0} -> {cps1} after 5 ArrowRight; stored {stored_slider}")
     page.reload(wait_until="domcontentloaded", timeout=30000)
     time.sleep(1.2)
+    dismiss_run_complete(page)
     page.locator(sel).first.click()
     cps2 = int(page.locator('[data-testid="speed-cps"]').inner_text())
     stored_reload = json.loads(page.evaluate(SPEED_STATE_JS) or "{}")

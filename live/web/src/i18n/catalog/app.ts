@@ -77,7 +77,7 @@ const zhTW: AppMessages = {
   runCompleteTitle: "轉錄完成",
   runCompleteLength: (time) => `長度 ${time}`,
   runCompleteSegments: (n) => plural("zh-TW", n, { one: `${n} 段`, other: `${n} 段` }),
-  runCompleteSpeakers: (n) => plural("zh-TW", n, { one: `${n} 位說話者`, other: `${n} 位說話者` }),
+  runCompleteSpeakers: (n) => plural("zh-TW", n, { one: `${n} 位講者`, other: `${n} 位講者` }),
   runCompleteKeep: "繼續查看",
 };
 
