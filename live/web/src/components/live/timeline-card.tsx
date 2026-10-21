@@ -10,7 +10,7 @@ export interface TimelineCardProps {
   speakers: string[];
   /** Names the header's status: the progress is shown only once transcription has begun. */
   phase: DisplayPhase;
-  /** "01:12 of 03:23", or a dash before a run. */
+  /** The transcribed-of-total reading in the page's locale, e.g. "01:12 / 03:23", or a dash before a run. */
   transcribed: string;
   waveform: WaveformTimelineProps;
   /** Why the waveform is missing, from `useRunPeaks`. The speaker bars still show. */
@@ -45,7 +45,11 @@ export function TimelineCard({
   // Until the audio length is known and transcription has begun, the header names the phase
   // (e.g. "Identifying speakers") instead of reading "Transcribed 00:00 of —".
   const timed = waveform.duration !== null && waveform.duration > 0 && isTranscribing(phase);
-  const status = timed ? t.timeline.transcribed(transcribed) : phase === "waiting" ? DASH : t.stage.phase[phase];
+  // A failed or stopped run is named once, in the stage card; here the header stays a dash until the clock applies.
+  const status =
+    timed ? t.timeline.transcribed(transcribed)
+    : phase === "waiting" || phase === "error" || phase === "canceled" ? DASH
+    : t.stage.phase[phase];
   return (
     <section
       data-testid="timeline-card"

@@ -24,6 +24,14 @@ const en = {
   runMissingBody: "The transcript this link points to is not in the current list.",
   runMissingFollow: "Follow the newest transcript",
   runMissingAria: "Transcript",
+  /** Transcript column while a picked run's snapshot is awaited (loading, never "not found"). */
+  runLoading: "Loading transcript…",
+  /** Toaster container label and the toast close button label. */
+  toastsAria: "Notifications",
+  toastClose: "Close notification",
+  /** Persistent notice for a followed run that failed. */
+  failedRunToast: (name: string) => `${name} failed`,
+  failedRunView: "View",
 };
 
 export type AppMessages = typeof en;
@@ -47,6 +55,11 @@ const zhTW: AppMessages = {
   runMissingBody: "這個連結指向的轉錄不在目前的清單中。",
   runMissingFollow: "跟隨最新的轉錄",
   runMissingAria: "轉錄",
+  runLoading: "正在載入逐字稿…",
+  toastsAria: "通知",
+  toastClose: "關閉通知",
+  failedRunToast: (name) => `${name} 轉錄失敗`,
+  failedRunView: "查看",
 };
 
 export const app = { en, "zh-TW": zhTW } satisfies Record<Locale, unknown>;

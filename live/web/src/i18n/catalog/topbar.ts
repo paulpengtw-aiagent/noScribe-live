@@ -9,6 +9,10 @@ const en = {
   /** Button label on the English page; it names the language the button switches to. */
   languageShort: "中",
   switchTheme: { light: "Switch to light theme", dark: "Switch to dark theme" },
+  /** Screen-reader label of the logo's busy orb. */
+  processing: "Processing…",
+  /** Icon menu (compact header) that holds the theme and language switches. */
+  menuLabel: "Theme and language",
   runStatus: { running: "Live", finished: "Finished", error: "Failed", canceled: "Canceled", stale: "Stopped" },
   runDisconnected: "Disconnected",
   connConnected: "Connected",
@@ -33,6 +37,8 @@ const zhTW: TopbarMessages = {
   switchLanguage: "切換為英文",
   languageShort: "EN",
   switchTheme: { light: "切換為淺色主題", dark: "切換為深色主題" },
+  processing: "處理中…",
+  menuLabel: "主題與語言",
   runStatus: { running: "進行中", finished: "已完成", error: "失敗", canceled: "已取消", stale: "已停止" },
   runDisconnected: "連線中斷",
   connConnected: "已連線",

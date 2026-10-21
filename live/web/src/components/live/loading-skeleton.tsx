@@ -19,6 +19,29 @@ export function TranscriptSkeleton() {
   );
 }
 
+/**
+ * Transcript-column placeholder while an explicitly picked run's snapshot is awaited. It is loading, not
+ * "not found": the not-found card only appears after the server's definitive 404.
+ */
+export function RunLoading() {
+  const { t } = useI18n();
+  return (
+    <section
+      data-testid="run-loading"
+      role="status"
+      aria-busy="true"
+      aria-label={t.app.runLoading}
+      className="live-card flex min-h-0 flex-1 flex-col gap-3 p-5"
+    >
+      <p className="text-[14px] leading-6 text-ink-2">{t.app.runLoading}</p>
+      <Skeleton className="h-6 w-2/5" />
+      <Skeleton className="h-4 w-full" />
+      <Skeleton className="h-4 w-11/12" />
+      <Skeleton className="h-4 w-4/5" />
+    </section>
+  );
+}
+
 /** Page placeholder before the first hello: three cards shaped like the live layout. */
 export function LoadingSkeleton() {
   const { t } = useI18n();

@@ -21,9 +21,9 @@ export type EndKind =
 
 export interface EndDescription {
   kind: EndKind;
-  /** Headline: what happened. */
+  /** Headline: what happened. Never repeated in `detail`. */
   title: string;
-  /** Muted sub-line: why, or the humanised error for a failed run. Null when there is nothing to add. */
+  /** Muted sub-line: why it ended, or the readable cause of a failure. Null when there is nothing to add. */
   detail: string | null;
   /** The CLI's error text, trimmed, for a disclosure. Null when the run gave none. */
   rawError: string | null;
@@ -94,7 +94,7 @@ export function describeEnd(run: EndInput, labels: ErrorsMessages): EndDescripti
   }
   if (run.endStatus === "error") {
     if (rawError && isUnreadableAudio(rawError.toLowerCase())) {
-      return { kind: "unreadable-audio", title: labels.endUnreadable, detail: null, rawError };
+      return { kind: "unreadable-audio", title: labels.endFailed, detail: labels.endUnreadable, rawError };
     }
     return { kind: "failed", title: labels.endFailed, detail: humanizeError(rawError, labels), rawError };
   }

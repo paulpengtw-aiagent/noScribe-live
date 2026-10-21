@@ -115,7 +115,7 @@ export function RunPicker({ runs, value, onChange }: RunPickerProps) {
           variant="outline"
           size="sm"
           data-testid="run-picker"
-          className="h-8 w-[150px] min-w-0 justify-between gap-2 rounded-full bg-background px-3.5 text-[13px] font-normal dark:bg-background sm:w-[300px]"
+          className="h-8 min-w-0 flex-1 shrink justify-between gap-2 rounded-full bg-background px-3.5 text-[13px] font-normal dark:bg-background sm:w-[300px] sm:flex-initial"
         >
           {chosen ? (
             <span className="flex min-w-0 flex-1 items-center gap-2 text-left">
@@ -137,7 +137,7 @@ export function RunPicker({ runs, value, onChange }: RunPickerProps) {
       </PopoverTrigger>
 
       <PopoverContent align="end" sideOffset={6} className="w-[min(92vw,420px)] overflow-hidden rounded-[14px] p-0">
-        <Command shouldFilter={false} className="rounded-[14px]">
+        <Command shouldFilter={false} label={t.picker.listLabel} className="rounded-[14px]">
           <CommandInput
             data-testid="run-filter"
             aria-label={t.picker.filterRuns}
@@ -145,7 +145,7 @@ export function RunPicker({ runs, value, onChange }: RunPickerProps) {
             value={filter}
             onValueChange={setFilter}
           />
-          <CommandList className="max-h-[60vh]">
+          <CommandList label={t.picker.listLabel} className="max-h-[60vh]">
             <CommandItem value={FOLLOW_ITEM} data-testid="run-option-follow" onSelect={() => choose(FOLLOW_NEWEST)}>
               <Check
                 aria-hidden="true"

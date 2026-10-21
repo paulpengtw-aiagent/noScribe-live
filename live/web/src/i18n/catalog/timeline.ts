@@ -17,7 +17,7 @@ export type TimelineMessages = typeof en;
 
 const zhTW: TimelineMessages = {
   title: "時間軸",
-  speakers: "說話者",
+  speakers: "講者",
   transcribed: (clock: string) => `已轉錄 ${clock}`,
   segment: (n: number, name: string) => `第 ${n} 段，${name}`,
   segmentPlain: (n: number) => `第 ${n} 段`,

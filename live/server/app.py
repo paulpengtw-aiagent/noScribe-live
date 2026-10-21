@@ -214,6 +214,14 @@ def create_app(feeds_dir: str | Path, static_dir: str | Path, poll: float = 0.05
     async def list_runs() -> list[dict[str, Any]]:
         return registry.summaries()
 
+    @app.get("/api/runs/{run_id}")
+    async def get_run(run_id: str) -> Response:
+        """One run's summary. The 404 is definitive: the server does not know this id."""
+        run = registry.get(run_id)
+        if run is None:
+            return JSONResponse({"error": "unknown run"}, status_code=404)
+        return JSONResponse(run.summary(time.time()))
+
     @app.get("/api/stream")
     async def stream(request: Request, run: str = "latest") -> StreamingResponse:
         # Proxy-friendly: no-transform stops a tunnel (e.g. Cloudflare) from rewriting the body, and

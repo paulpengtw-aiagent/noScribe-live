@@ -88,6 +88,8 @@ export interface LiveState {
   run: RunState | null;
   /** True once a hello arrived on this page: the run list is known, even when it is empty. */
   helloed: boolean;
+  /** The explicitly picked run id that the server answered 404 for (definitive "not found"); null otherwise. */
+  runMissing: string | null;
 }
 
 export type LiveAction =
@@ -95,9 +97,10 @@ export type LiveAction =
   | { type: "hello"; serverT: number; runs: RunSummary[] }
   | { type: "runs"; runs: RunSummary[] }
   | { type: "snapshot"; runId: string | null; summary: RunSummary | null; events: FeedEvent[]; now: number }
-  | { type: "feed"; runId: string; event: FeedEvent; now: number };
+  | { type: "feed"; runId: string; event: FeedEvent; now: number }
+  | { type: "missing"; runId: string };
 
-export const INITIAL_LIVE_STATE: LiveState = { runs: [], serverT: null, run: null, helloed: false };
+export const INITIAL_LIVE_STATE: LiveState = { runs: [], serverT: null, run: null, helloed: false, runMissing: null };
 
 function endFromStatus(status: RunStatus | undefined): EndStatus | null {
   return status === "finished" || status === "error" || status === "canceled" ? status : null;
@@ -296,7 +299,7 @@ function keepRevealState(previous: RunState, next: RunState): RunState {
 export function liveReducer(state: LiveState, action: LiveAction): LiveState {
   switch (action.type) {
     case "reset":
-      return { ...state, run: null };
+      return { ...state, run: null, runMissing: null };
     case "hello":
       return applyRunSummaries({ ...state, runs: action.runs, serverT: action.serverT, helloed: true }, action.runs);
     case "runs":
@@ -317,6 +320,11 @@ export function liveReducer(state: LiveState, action: LiveAction): LiveState {
       if (action.event.seq <= state.run.lastSeq) return state;
       return { ...state, run: applyLine(state.run, action.event, { now: action.now, live: true }) };
     }
+    case "missing":
+      // Only a run with no start yet can be "not found"; once it has started, the stream shows it.
+      return state.run && state.run.runId === action.runId && state.run.startedT === null
+        ? { ...state, runMissing: action.runId }
+        : state;
     default:
       return state;
   }

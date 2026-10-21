@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
+import { toast } from "sonner";
 import { StageCard } from "@/components/live/stage-card";
 import { TimelineCard } from "@/components/live/timeline-card";
 import type { TimelineSegment, WaveformTimelineProps } from "@/components/live/waveform-timeline";
@@ -7,8 +8,8 @@ import type { OrbMode } from "@/components/live/activity-orb";
 import { TopBar } from "@/components/live/top-bar";
 import { TranscriptCard, type TranscriptHandle } from "@/components/live/transcript-card";
 import { ConnBanner } from "@/components/live/conn-banner";
-import { notifyNewRun } from "@/components/live/new-run-notice";
-import { LoadingSkeleton, TranscriptSkeleton } from "@/components/live/loading-skeleton";
+import { notifyFailedRun, notifyNewRun } from "@/components/live/new-run-notice";
+import { LoadingSkeleton, RunLoading, TranscriptSkeleton } from "@/components/live/loading-skeleton";
 import { RunMissing } from "@/components/live/run-missing";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -19,6 +20,7 @@ import { useRunPeaks } from "@/hooks/use-run-peaks";
 import { useTheme } from "@/hooks/use-theme";
 import { useI18n, type Messages } from "@/i18n";
 import { DASH } from "@/lib/format";
+import type { RunStatus } from "@/lib/live-types";
 import {
   displayPhase,
   elapsedSeconds,
@@ -91,10 +93,39 @@ function documentTitle(run: RunState | null, connection: Connection, hasHello: b
   return t.titleIdle;
 }
 
+/** A failed-run notice still on screen, by run id. `id` is the toast id. */
+interface OpenFailedNotice {
+  name: string;
+  id: string | number;
+}
+
+/**
+ * Raises the persistent failed-run notice for one run. `open` tracks the notices still on screen so a locale
+ * switch can re-raise them in the new language; a notice closed by the reader leaves the map.
+ */
+function raiseFailedRun(
+  open: Map<string, OpenFailedNotice>,
+  runId: string,
+  name: string,
+  app: Messages["app"],
+  onView: (runId: string) => void,
+) {
+  const id = notifyFailedRun({
+    message: app.failedRunToast(name),
+    viewLabel: app.failedRunView,
+    closeLabel: app.toastClose,
+    onView: () => onView(runId),
+    onDismiss: (dismissed) => {
+      if (open.get(runId)?.id === dismissed) open.delete(runId);
+    },
+  });
+  open.set(runId, { name, id });
+}
+
 export default function App() {
   const [runParam, setRunParam] = useState(readRunParam);
   const { state, connection, retry, lastUpdateT } = useLiveFeed(runParam);
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { theme, toggle: toggleTheme } = useTheme();
   const wide = useMediaQuery(WIDE_QUERY);
   const reduceMotion = useReducedMotion() ?? false;
@@ -113,12 +144,14 @@ export default function App() {
   const { peaks, error: peaksError } = useRunPeaks(peakRunId, !active);
   // The header never says "Live" while the stream is down: the run's state is unknown then.
   const badgeRun = active && connection !== "live" ? null : run;
-  // Transcript column: the skeleton while the run is awaited, the CLI hint only when the server
-  // confirmed zero runs, a "not found" card for an explicit run id the server does not know, or the run.
+  // Transcript column. Following the newest run: the skeleton while it is awaited, the CLI hint only when the
+  // server confirmed zero runs, else the run. An explicit run id: a loading state until its snapshot is in;
+  // the "not found" card only after the server's 404 (state.runMissing), never before.
   const runsExist = state.runs.length > 0;
-  const awaitingRun = !run && (connection === "connecting" || (runParam === FOLLOW_NEWEST && runsExist));
+  const picked = runParam === FOLLOW_NEWEST ? null : runParam;
+  const awaitingRun = picked === null && !run && (connection === "connecting" || runsExist);
   const onboarding = state.helloed && !runsExist && !run && connection !== "connecting";
-  const missingRun = state.helloed && runsExist && !run && !awaitingRun;
+  const missingRun = picked !== null && !run && state.runMissing === picked && !state.runs.some((r) => r.run_id === picked);
 
   // The URL names the shown run; following the newest run leaves the URL bare.
   useEffect(() => {
@@ -149,6 +182,34 @@ export default function App() {
     }
   }, [state.helloed, state.runs, runParam, t]);
 
+  // Failed-run notices are open toasts. A locale switch drops every toast and re-raises the open failed-run
+  // notices in the new language, so no toast stays in the old one.
+  const openFailed = useRef(new Map<string, OpenFailedNotice>());
+  useEffect(() => {
+    const open = [...openFailed.current];
+    openFailed.current.clear();
+    toast.dismiss();
+    for (const [runId, notice] of open) raiseFailedRun(openFailed.current, runId, notice.name, t.app, setRunParam);
+  }, [t]);
+
+  // A followed run that turns failed gets one persistent notice, once per run id. The first hello only sets the
+  // baseline, so failures already listed are not news; a run that changes to error while following is.
+  const runStatuses = useRef<Map<string, RunStatus> | null>(null);
+  const failedNoticed = useRef(new Set<string>());
+  useEffect(() => {
+    if (!state.helloed) return;
+    const before = runStatuses.current;
+    runStatuses.current = new Map(state.runs.map((item): [string, RunStatus] => [item.run_id, item.status]));
+    if (before === null || runParam !== FOLLOW_NEWEST) return;
+    for (const item of state.runs) {
+      if (item.status !== "error" || before.get(item.run_id) === "error" || failedNoticed.current.has(item.run_id)) {
+        continue;
+      }
+      failedNoticed.current.add(item.run_id);
+      raiseFailedRun(openFailed.current, item.run_id, runName(item), t.app, setRunParam);
+    }
+  }, [state.helloed, state.runs, runParam, t]);
+
   const phase = displayPhase(run);
   const segments = run?.segments;
   const lastSegment = segments && segments.length > 0 ? segments[segments.length - 1] : undefined;
@@ -163,7 +224,7 @@ export default function App() {
     : run.endStatus === "finished" && duration
       ? duration
       : Math.max(0, (end ?? startOffset) - startOffset);
-  const transcribed = clockText(transcribedSeconds, duration);
+  const transcribed = clockText(transcribedSeconds, duration, locale);
   const progress = progressFraction(run);
 
   const latency = useMemo(() => latencyStats(run), [run]);
@@ -252,14 +313,19 @@ export default function App() {
                   elapsed={elapsed}
                   frozen={frozen}
                   lastUpdateT={lastUpdateT}
+                  loading={picked !== null && !run && !missingRun}
                 />
               </motion.div>
 
               <motion.div className="live-transcript" {...entrance(1, reduceMotion)}>
                 {awaitingRun ? (
                   <TranscriptSkeleton />
-                ) : missingRun ? (
-                  <RunMissing onFollowNewest={() => setRunParam(FOLLOW_NEWEST)} />
+                ) : picked !== null && !run ? (
+                  missingRun ? (
+                    <RunMissing onFollowNewest={() => setRunParam(FOLLOW_NEWEST)} />
+                  ) : (
+                    <RunLoading />
+                  )
                 ) : (
                 <div
                   data-testid={onboarding ? "onboarding" : undefined}
@@ -297,7 +363,13 @@ export default function App() {
           </main>
         </div>
       </SpeakerOrderContext.Provider>
-      <Toaster theme={theme} position="top-center" offset={72} />
+      <Toaster
+        theme={theme}
+        position="top-right"
+        offset={72}
+        mobileOffset={72}
+        containerAriaLabel={t.app.toastsAria}
+      />
     </TooltipProvider>
   );
 }

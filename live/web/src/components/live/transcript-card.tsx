@@ -211,13 +211,24 @@ function OverlapTag({ speaker }: { speaker: string }) {
   );
 }
 
-/** How a run ended, shown in place of the transcript when it produced no segments. */
-function EndNotice({ end }: { end: EndDescription }) {
+/**
+ * How a run ended: the title, one detail line, and the raw CLI error behind one disclosure. This is the only place
+ * the page explains an ended run. Centred in place of an empty transcript; a left-aligned strip under the header
+ * when the run kept some segments, so the reason stays in view.
+ */
+function EndNotice({ end, strip = false }: { end: EndDescription; strip?: boolean }) {
   return (
-    <div className="m-auto flex w-full max-w-[600px] flex-col items-center gap-2 px-2 py-10 text-center">
+    <div
+      className={cn(
+        "flex w-full flex-col gap-2",
+        strip ? "shrink-0 px-6 pb-4 text-left" : "m-auto max-w-[600px] items-center px-2 py-10 text-center",
+      )}
+    >
       <h3 className="text-[18px] leading-tight font-medium tracking-[-0.01em]">{end.title}</h3>
       {end.detail ? <p className="text-[15px] leading-relaxed text-ink-2">{end.detail}</p> : null}
-      {end.rawError ? <ErrorDetails raw={end.rawError} className="mt-3 w-full max-w-[560px]" /> : null}
+      {end.rawError ? (
+        <ErrorDetails raw={end.rawError} className={cn("w-full max-w-[560px]", strip ? "mt-1" : "mt-3")} />
+      ) : null}
     </div>
   );
 }
@@ -285,6 +296,8 @@ export function TranscriptCard({
   // Until this time (performance.now() ms), scroll events cannot start or stop following. Covers programmatic scrolls.
   const holdRef = useRef(0);
   const [edges, setEdges] = useState({ top: false, bottom: false });
+  // Keyboard focus on the scroller. The edge fade is dropped while it holds, so the inset focus ring is never faded.
+  const [keyFocus, setKeyFocus] = useState(false);
   // Keeps the previous object when nothing changed, so scroll events do not re-render the card.
   const setEdgesFor = (el: HTMLElement) => {
     const top = el.scrollTop > EDGE_PX;
@@ -462,7 +475,11 @@ export function TranscriptCard({
     <section aria-label={t.transcript.transcriptLabel} className="live-card relative flex min-h-0 flex-1 flex-col overflow-hidden max-sm:h-[70vh] max-sm:flex-none">
       {run ? (
         <header className="shrink-0 px-6 pt-5 pb-4">
-          <h2 title={name ?? undefined} className="truncate text-[22px] leading-tight font-medium tracking-[-0.02em]">
+          <h2
+            data-testid="run-title"
+            title={name ?? undefined}
+            className="truncate text-[22px] leading-tight font-medium tracking-[-0.02em]"
+          >
             {name}
           </h2>
           <div className="mt-1.5 flex min-w-0 items-center gap-2 text-[13px] leading-5 text-ink-2">
@@ -481,6 +498,8 @@ export function TranscriptCard({
         </header>
       ) : null}
 
+      {hasBlocks && end && end.kind !== "finished" ? <EndNotice end={end} strip /> : null}
+
       <div
         ref={scrollRef}
         role="region"
@@ -493,8 +512,10 @@ export function TranscriptCard({
         onTouchStart={stopFollowing}
         onTouchMove={stopFollowing}
         onKeyDown={onKeyDown}
-        className="quiet-scroll flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pb-8 outline-none focus-visible:ring-2 ring-ring ring-offset-2 ring-offset-card"
-        style={{ maskImage: edgeMask(edges), WebkitMaskImage: edgeMask(edges) }}
+        onFocus={(event) => setKeyFocus(event.currentTarget.matches(":focus-visible"))}
+        onBlur={() => setKeyFocus(false)}
+        className="quiet-scroll flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pb-8 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        style={keyFocus ? undefined : { maskImage: edgeMask(edges), WebkitMaskImage: edgeMask(edges) }}
       >
         {!run ? (
           <div className="m-auto flex w-full max-w-[600px] flex-col items-center gap-5 py-10 text-center">

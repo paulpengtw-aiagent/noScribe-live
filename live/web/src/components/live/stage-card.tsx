@@ -2,12 +2,10 @@ import { useId, useRef, useState } from "react";
 import { Check } from "lucide-react";
 import { Orb } from "@/components/aicss/Orb";
 import { ActivityOrb, type ActivityOrbProps, type OrbMode } from "@/components/live/activity-orb";
-import { ErrorDetails } from "@/components/live/error-details";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatClock, useI18n, type Messages } from "@/i18n";
 import { useElementSize } from "@/hooks/use-element-size";
 import { useMediaQuery } from "@/hooks/use-media-query";
-import { describeEnd } from "@/lib/end-state";
 import { DASH, formatElapsed, formatMs, formatRtf } from "@/lib/format";
 import { type DisplayPhase, type LatencyStats, type RunState } from "@/lib/live-state";
 import { deviceText, languageText } from "@/lib/live-view";
@@ -33,7 +31,7 @@ export interface StageCardProps {
   activeColor: string | undefined;
   /** 0..1 */
   progress: number;
-  /** "01:12 of 03:23", or a dash. */
+  /** The transcribed-of-total reading in the page's locale, e.g. "01:12 / 03:23", or a dash. */
   transcribed: string;
   latency: LatencyStats;
   rtf: number | null;
@@ -42,6 +40,8 @@ export interface StageCardProps {
   frozen?: boolean;
   /** Unix seconds of the last update. Shown as "Last update hh:mm:ss" while frozen. */
   lastUpdateT?: number | null;
+  /** A picked run whose snapshot has not arrived yet: the phase row reads "Loading…", not "Listening for a run…". */
+  loading?: boolean;
 }
 
 export function StageCard({
@@ -60,6 +60,7 @@ export function StageCard({
   elapsed,
   frozen = false,
   lastUpdateT = null,
+  loading = false,
 }: StageCardProps) {
   const { t, locale } = useI18n();
   const s = t.stage;
@@ -74,17 +75,19 @@ export function StageCard({
   const showPercent = pctValue > 0;
 
   const phaseName = phaseText(s, run, phase);
+  const orbLabel = orbLabelFor(s, run, phase);
   const timed = hasTimeline(run, phase);
 
-  // Latency and RTF are shown only when they can be computed: a finished run opened from history has
-  // no live segments to measure, so its Latency tile is left out rather than reading a dash.
+  // The same eight tiles in every phase, so the grid never gains or loses a row. A value not known yet reads as a dash.
   const stats: Stat[] = [
     { label: s.stats.model, value: run?.model ?? DASH, hint: s.hints.model },
     { label: s.stats.device, value: deviceText(run) ?? DASH, hint: s.hints.device },
-    ...(latency.last !== null
-      ? [{ label: s.stats.latency, value: formatMs(latency.last), hint: latencyHintText(s, latency) }]
-      : []),
-    ...(rtf !== null ? [{ label: s.stats.rtf, value: formatRtf(rtf), hint: s.hints.rtf }] : []),
+    {
+      label: s.stats.latency,
+      value: latency.last !== null ? formatMs(latency.last) : DASH,
+      hint: latencyHintText(s, latency),
+    },
+    { label: s.stats.rtf, value: rtf !== null ? formatRtf(rtf) : DASH, hint: s.hints.rtf },
     { label: s.stats.language, value: languageText(run) ?? DASH, hint: s.hints.language },
     {
       label: s.stats.speakers,
@@ -101,12 +104,8 @@ export function StageCard({
     frozen && "[&_*]:[animation-play-state:paused]!",
   );
 
-  const summary = [
-    elapsed !== null ? formatElapsed(elapsed) : null,
-    run ? s.segmentCount(run.segments.length) : null,
-  ]
-    .filter((part): part is string => part !== null)
-    .join(" · ");
+  // Both slots are always present, with a dash for an unknown value, so the strip keeps its width.
+  const summary = `${formatElapsed(elapsed)} · ${run ? s.segmentCount(run.segments.length) : DASH}`;
 
   return (
     <section
@@ -126,9 +125,10 @@ export function StageCard({
             activeColor={activeColor}
             size={PHONE_SUMMARY_ORB_PX}
             frozen={frozen}
+            label={orbLabel}
           />
           <span className="min-w-0 truncate font-medium text-foreground">{phaseName}</span>
-          {summary ? <span className="min-w-0 truncate font-mono tabular-nums text-ink-3">{summary}</span> : null}
+          <span className="min-w-0 truncate font-mono tabular-nums text-ink-3">{summary}</span>
           <button
             type="button"
             data-testid="stats-toggle"
@@ -150,15 +150,16 @@ export function StageCard({
           speakerColors={speakerColors}
           activeColor={activeColor}
           frozen={frozen}
+          label={orbLabel}
         />
       )}
 
-      {/* On phones the strip already names the phase, so the pill only appears for a failure, which carries details. */}
-      {!phone || phase === "error" || phase === "canceled" ? (
+      {/* The phase is named once: in the phone strip above, or in this row on wider screens. */}
+      {phone ? null : (
         <div className={phaseRowClass}>
-          <PhaseRow run={run} phase={phase} elapsed={elapsed} s={s} errors={t.errors} />
+          <PhaseRow run={run} phase={phase} elapsed={elapsed} s={s} loading={loading} />
         </div>
-      ) : null}
+      )}
 
       <div>
         <div className="h-[2px] w-full overflow-hidden rounded-full bg-hairline">
@@ -167,19 +168,17 @@ export function StageCard({
             style={{ width: `${pctValue}%` }}
           />
         </div>
+        {/* The progress line never repeats the phase name: the row above already names it. */}
         <div className="mt-2 flex h-5 items-baseline justify-between gap-3 text-[12px] tabular-nums">
-          <span className={cn("min-w-0 truncate text-ink-3", timed && "font-mono")}>
-            {timed ? transcribed : run ? phaseName : DASH}
-          </span>
-          {showPercent ? <span className="shrink-0 text-ink-2">{`${pctValue}%`}</span> : null}
+          <span className={cn("min-w-0 truncate text-ink-3", timed && "font-mono")}>{timed ? transcribed : DASH}</span>
+          <span className="shrink-0 text-ink-2">{showPercent ? `${pctValue}%` : null}</span>
         </div>
       </div>
 
-      {frozen && lastUpdateT !== null ? (
-        <p data-testid="last-update" className="text-center text-[12px] tabular-nums text-ink-3">
-          {s.lastUpdate(formatClock(lastUpdateT, locale))}
-        </p>
-      ) : null}
+      {/* Always reserves its line, so the card does not move when the run freezes. */}
+      <p data-testid="last-update" className="min-h-[20px] text-center text-[12px] tabular-nums text-ink-3">
+        {frozen && lastUpdateT !== null ? s.lastUpdate(formatClock(lastUpdateT, locale)) : null}
+      </p>
 
       {/* A plain grid, never a horizontal scroller: the stat tiles are read-only and are not tab stops. */}
       <div id={statsId} className={cn("grid grid-cols-2 gap-1.5", phone && !statsOpen && "hidden")}>
@@ -220,12 +219,18 @@ interface Stat {
  * so the keyboard order skips the stats.
  */
 function StatTile({ label, value, hint }: { label: string; value: string; hint: string }) {
+  const unknown = value === DASH;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className="min-w-0 cursor-default rounded-[12px] bg-raised px-3 py-1 shadow-ring">
+        <div data-testid="stat-card" className="min-w-0 cursor-default rounded-[12px] bg-raised px-3 py-1 shadow-ring">
           <span className="block truncate text-[12px] leading-4 text-ink-2">{label}</span>
-          <span className="mt-0.5 block truncate text-[14px] leading-5 font-medium tabular-nums text-foreground">
+          <span
+            className={cn(
+              "mt-0.5 block truncate text-[14px] leading-5 font-medium tabular-nums",
+              unknown ? "text-ink-3" : "text-foreground",
+            )}
+          >
             {value}
           </span>
         </div>
@@ -241,8 +246,8 @@ function StatTile({ label, value, hint }: { label: string; value: string; hint: 
 }
 
 /**
- * True when "mm:ss of mm:ss" can be shown: the audio length is known and transcription has begun
- * (or the run has ended). Before that the line names the phase instead, so it never reads "00:00 of —".
+ * True when the "transcribed / length" reading can be shown: the audio length is known and transcription has
+ * begun (or the run has ended). Before that the line stays a dash, so it never reads "00:00 / —".
  */
 function hasTimeline(run: RunState | null, phase: DisplayPhase): boolean {
   if (!run || run.duration === null || run.duration <= 0) return false;
@@ -264,31 +269,47 @@ function latencyHintText(s: StageText, stats: LatencyStats): string {
   return s.hints.latencyMeasured(msText(stats.last), msText(stats.median), split);
 }
 
+/** A run the viewer found stale with no end status: the process stopped without reporting why. */
+function stoppedRun(run: RunState | null): boolean {
+  return Boolean(run?.stale && !run.endStatus);
+}
+
 /** The phase's name, with the diarization detail (segmenting, comparing voices) when the CLI reports one. */
 function phaseText(s: StageText, run: RunState | null, phase: DisplayPhase): string {
   if (phase === "diarizing" && run?.progress?.detail === "segmentation") return s.phase.segmenting;
   if (phase === "diarizing" && run?.progress?.detail === "embeddings") return s.phase.comparingVoices;
-  if (phase === "error" && run?.stale && !run.endStatus) return s.phase.stoppedUnexpectedly;
+  if (phase === "error" && stoppedRun(run)) return s.phase.stopped;
   return s.phase[phase];
 }
 
-/** The pill (and whatever sits beside it) that names the current phase. */
+/** The orb's accessible name says the same state as the title: Failed, Stopped or Canceled. Other phases keep the mode's name. */
+function orbLabelFor(s: StageText, run: RunState | null, phase: DisplayPhase): string | undefined {
+  if (phase === "error") return stoppedRun(run) ? s.orbAria.stopped : s.orbAria.failed;
+  if (phase === "canceled") return s.orbAria.canceled;
+  return undefined;
+}
+
+/**
+ * The pill (and whatever sits beside it) that names the current phase. A failed or stopped run is named here
+ * by its title alone; its message and details live in the transcript card, not in this panel.
+ */
 function PhaseRow({
   run,
   phase,
   elapsed,
   s,
-  errors,
+  loading,
 }: {
   run: RunState | null;
   phase: DisplayPhase;
   elapsed: number | null;
   s: StageText;
-  errors: Messages["errors"];
+  loading: boolean;
 }) {
   switch (phase) {
     case "waiting":
-      return <Orb variant="C2" pill label={s.listeningForRun} />;
+      // A picked run whose snapshot is still on its way is loading, not a run the page is listening for.
+      return <Orb variant="C2" pill label={loading && !run ? s.loadingRun : s.listeningForRun} />;
     case "loading":
     case "listening":
       return <Orb variant="S1" pill label={phaseText(s, run, phase)} />;
@@ -306,21 +327,8 @@ function PhaseRow({
         </p>
       );
     case "error":
-    case "canceled": {
-      const end = run ? describeEnd(run, errors) : null;
-      return (
-        <div className="min-w-0 max-w-full">
-          <p className="text-[14px] font-medium text-foreground">{phaseText(s, run, phase)}</p>
-          {end ? (
-            <>
-              <p className="mt-1 text-[13px] leading-5 break-words text-ink-2">{end.title}</p>
-              {end.detail ? <p className="text-[13px] leading-5 break-words text-ink-3">{end.detail}</p> : null}
-              {end.rawError ? <ErrorDetails raw={end.rawError} className="mt-2" /> : null}
-            </>
-          ) : null}
-        </div>
-      );
-    }
+    case "canceled":
+      return <p className="max-w-full truncate text-[14px] font-medium text-foreground">{phaseText(s, run, phase)}</p>;
   }
 }
 

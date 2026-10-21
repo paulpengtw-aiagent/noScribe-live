@@ -119,3 +119,14 @@ def test_a_server_failure_such_as_a_missing_ffmpeg_stays_a_500(tmp_path, monkeyp
     resp = client.get("/api/runs/srv/peaks")
     assert resp.status_code == 500
     assert "not installed" in resp.json()["error"]
+
+
+def test_run_summary_is_200_for_a_known_run_and_404_for_an_unknown_one(tmp_path):
+    client, registry = make_client(tmp_path)
+    add_run(registry, "known", tmp_path / "known.mp3")
+    resp = client.get("/api/runs/known")
+    assert resp.status_code == 200
+    assert resp.json()["run_id"] == "known"
+    missing = client.get("/api/runs/unknown")
+    assert missing.status_code == 404
+    assert missing.json() == {"error": "unknown run"}

@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useState } from "react";
 import { INITIAL_LIVE_STATE, liveReducer } from "@/lib/live-state";
 import type { FeedPayload, HelloPayload, RunsPayload, SegmentEvent, SnapshotPayload } from "@/lib/live-types";
+import { FOLLOW_NEWEST } from "@/lib/live-view";
 
 /**
  * One connection state for the page.
@@ -24,6 +25,8 @@ const RETRY_BASE_MS = 1000;
 const RETRY_MAX_MS = 10000;
 /** The server pings every 15 s on an open stream, so 35 s with no message of any type means it is dead. */
 const STALE_AFTER_MS = 35000;
+/** A failed "is this run known?" check is asked again after this long; only a 404 is a definitive "not found". */
+const PROBE_RETRY_MS = 2000;
 
 /** Debug surface for automated checks: one entry per live segment. */
 export interface LiveArrival {
@@ -142,7 +145,13 @@ export function useLiveFeed(runParam: string) {
       armStale();
       const on = (type: string, handle: (ev: MessageEvent<string>) => void) =>
         es.addEventListener(type, (ev) => {
+          // Any message of any type proves the stream is up again, so it ends a loss without waiting for a hello.
           armStale();
+          cancelDownTimer();
+          failures = 0;
+          attempts = 0;
+          setConnection("live");
+          setRetry(NO_RETRY);
           setLastUpdateT(Date.now() / 1000);
           handle(ev as MessageEvent<string>);
         });
@@ -158,13 +167,7 @@ export function useLiveFeed(runParam: string) {
       on("ping", () => {});
       on("hello", (ev) => {
         const d = parse<HelloPayload>(ev);
-        if (!d) return;
-        cancelDownTimer();
-        failures = 0;
-        attempts = 0;
-        setConnection("live");
-        setRetry(NO_RETRY);
-        dispatch({ type: "hello", serverT: d.server_t, runs: d.runs });
+        if (d) dispatch({ type: "hello", serverT: d.server_t, runs: d.runs });
       });
       on("snapshot", (ev) => {
         const d = parse<SnapshotPayload>(ev);
@@ -193,6 +196,37 @@ export function useLiveFeed(runParam: string) {
       source?.close();
     };
   }, [runParam]);
+
+  // An explicit run id whose snapshot has no summary and that the run list does not name: ask the server once.
+  // Only its 404 means "not found"; until then the page shows the loading state.
+  const awaitingStart = state.run !== null && state.run.runId === runParam && state.run.startedT === null;
+  const needsProbe =
+    runParam !== FOLLOW_NEWEST &&
+    state.helloed &&
+    awaitingStart &&
+    state.runMissing !== runParam &&
+    !state.runs.some((r) => r.run_id === runParam);
+
+  useEffect(() => {
+    if (!needsProbe) return;
+    const controller = new AbortController();
+    let retryTimer: number | undefined;
+    const check = () => {
+      fetch(`/api/runs/${encodeURIComponent(runParam)}`, { signal: controller.signal, cache: "no-store" })
+        .then((res) => {
+          if (res.status === 404) dispatch({ type: "missing", runId: runParam });
+          else if (!res.ok) retryTimer = window.setTimeout(check, PROBE_RETRY_MS);
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) retryTimer = window.setTimeout(check, PROBE_RETRY_MS);
+        });
+    };
+    check();
+    return () => {
+      controller.abort();
+      window.clearTimeout(retryTimer);
+    };
+  }, [needsProbe, runParam]);
 
   return { state, connection, retry, lastUpdateT };
 }

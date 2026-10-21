@@ -38,6 +38,8 @@ const ALPHA_TRANSCRIBED = 0.24;
 const ALPHA_PENDING = 0.1;
 // Used only if --foreground cannot be read.
 const FALLBACK_INK = "#737373";
+// Narrowest a block is drawn, in percent of the track, so a very short segment stays visible.
+const MIN_BLOCK_PERCENT = 0.3;
 
 interface WaveformDraw {
   /** Timeline size in CSS pixels. */
@@ -175,17 +177,39 @@ export function WaveformTimeline({
 
   const span = duration && duration > 0 ? duration : Math.max(1, frontier ?? 1);
   const pct = (seconds: number) => Math.min(100, Math.max(0, ((seconds - startOffset) / span) * 100));
+  // A block's left edge and width, in percent of the track. Drawing and hit testing both use this.
+  const blockBox = (seg: TimelineSegment) => {
+    const left = pct(seg.start);
+    return { left, width: Math.max(MIN_BLOCK_PERCENT, pct(seg.end) - left) };
+  };
+
+  // The block whose centre is nearest the pointer's x. The one hit layer covers the gaps between blocks too,
+  // so a tap anywhere on the track selects the block it is closest to.
+  const nearestIndex = (clientX: number, box: DOMRect): number | null => {
+    if (box.width <= 0) return null;
+    const x = ((clientX - box.left) / box.width) * 100;
+    let best: number | null = null;
+    let bestDistance = Infinity;
+    for (const seg of segments) {
+      const { left, width } = blockBox(seg);
+      const distance = Math.abs(left + width / 2 - x);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = seg.index;
+      }
+    }
+    return best;
+  };
+
   return (
     <div ref={rootRef} onKeyDown={onKeyDown} className={cn("relative h-full w-full", className)}>
       <canvas ref={canvasRef} aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full" />
-      <div className="absolute inset-x-0 top-1/2 h-px bg-hairline" />
+      <div className="pointer-events-none absolute inset-x-0 top-1/2 h-px bg-hairline" />
+      {/* Keyboard stops only: pointer input goes to the hit layer below, which picks the nearest block. */}
       {segments.map((seg) => {
-        const left = pct(seg.start);
-        const segWidth = Math.max(0.3, pct(seg.end) - left);
+        const { left, width } = blockBox(seg);
         const name = speakerName(seg.speaker);
         const isActive = activeIndex === seg.index;
-        // The block's own box can be a few pixels wide. The ::before pseudo-element is an invisible 24 px hit area,
-        // centred on the block; the bar itself keeps its width.
         return (
           <button
             key={seg.index}
@@ -196,26 +220,39 @@ export function WaveformTimeline({
             aria-current={isActive ? "true" : undefined}
             tabIndex={seg.index === stopIndex ? 0 : -1}
             aria-label={name ? t.timeline.segment(seg.index + 1, name) : t.timeline.segmentPlain(seg.index + 1)}
-            onMouseEnter={() => onHover(seg.index)}
-            onMouseLeave={() => onHover(null)}
             onFocus={() => {
               onHover(seg.index);
               setFocusStop(seg.index);
             }}
             onBlur={() => onHover(null)}
             onClick={() => onSelect(seg.index)}
-            className="timeline-block absolute top-1/2 h-10 -translate-y-1/2 rounded-sm before:absolute before:top-0 before:left-1/2 before:h-full before:w-6 before:-translate-x-1/2 before:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+            className="timeline-block pointer-events-none absolute top-1/2 h-10 -translate-y-1/2 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
             style={{
               left: `${left}%`,
-              width: `${segWidth}%`,
+              width: `${width}%`,
               backgroundColor: speakerColor(seg.speaker),
             }}
           />
         );
       })}
       {frontier !== null ? (
-        <div className="absolute inset-y-0 w-px bg-foreground" style={{ left: `${pct(frontier)}%` }} />
+        <div className="pointer-events-none absolute inset-y-0 w-px bg-foreground" style={{ left: `${pct(frontier)}%` }} />
       ) : null}
+      {/* One hit layer over the whole track, at least 24 px tall. Pointer hover and click select the nearest block. */}
+      <div
+        data-testid="timeline-hit"
+        aria-hidden="true"
+        className="absolute inset-0 min-h-[24px] cursor-pointer"
+        onPointerMove={(event) => {
+          const index = nearestIndex(event.clientX, event.currentTarget.getBoundingClientRect());
+          if (index !== hoveredIndex) onHover(index);
+        }}
+        onPointerLeave={() => onHover(null)}
+        onClick={(event) => {
+          const index = nearestIndex(event.clientX, event.currentTarget.getBoundingClientRect());
+          if (index !== null) onSelect(index);
+        }}
+      />
     </div>
   );
 }

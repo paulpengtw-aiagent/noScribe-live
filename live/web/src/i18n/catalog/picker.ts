@@ -5,6 +5,8 @@ const en = {
   followNewest: "Follow newest run",
   followNewestShort: "Follow newest",
   filterRuns: "Filter runs",
+  /** Accessible name of the run list (cmdk Command and CommandList). */
+  listLabel: "Runs",
   filterPlaceholder: "Filter by file, run id or status",
   noRuns: "No runs yet.",
   noMatch: (query: string) => `No runs match "${query}".`,
@@ -19,6 +21,7 @@ const zhTW: PickerMessages = {
   followNewest: "跟隨最新執行",
   followNewestShort: "跟隨最新",
   filterRuns: "篩選執行",
+  listLabel: "轉錄紀錄",
   filterPlaceholder: "依檔案、執行 ID 或狀態篩選",
   noRuns: "尚無執行紀錄。",
   noMatch: (query: string) => `沒有符合「${query}」的執行。`,

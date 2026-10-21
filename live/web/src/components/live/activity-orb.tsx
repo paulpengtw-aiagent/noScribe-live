@@ -18,6 +18,8 @@ export interface ActivityOrbProps {
   className?: string;
   /** The run has ended or the connection is lost: the orb stops and keeps one static frame. */
   frozen?: boolean;
+  /** Accessible name. Defaults to the mode's name; the stage card passes the exact state (failed, stopped). */
+  label?: string;
 }
 
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
@@ -36,6 +38,7 @@ export function ActivityOrb({
   size = 260,
   className,
   frozen = false,
+  label,
 }: ActivityOrbProps): JSX.Element {
   const { t } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -70,7 +73,7 @@ export function ActivityOrb({
     <canvas
       ref={canvasRef}
       role="img"
-      aria-label={t.stage.orbAria[mode]}
+      aria-label={label ?? t.stage.orbAria[mode]}
       data-frozen={frozen ? "true" : undefined}
       className={cn("block shrink-0", className)}
       style={{ width: size, height: size }}
