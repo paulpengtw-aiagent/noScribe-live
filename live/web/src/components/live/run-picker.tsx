@@ -10,8 +10,8 @@ import { FOLLOW_NEWEST, isLiveSummary, runName } from "@/lib/live-view";
 import type { RunStatus, RunSummary } from "@/lib/live-types";
 import { cn } from "@/lib/utils";
 
-/** The status word shown per run. "live" is a run the server reports as still running. */
-type PickerStatus = "live" | "finished" | "failed" | "stopped" | "canceled";
+/** The status word shown per run. "live" is a run the server reports as still running; "loading" is one with no segment yet. */
+type PickerStatus = "live" | "loading" | "finished" | "failed" | "stopped" | "canceled";
 
 const PICKER_STATUS: Record<RunStatus, PickerStatus> = {
   running: "live",
@@ -24,17 +24,30 @@ const PICKER_STATUS: Record<RunStatus, PickerStatus> = {
 /** Dot and label colours per status. Live pulses; canceled is a hollow grey dot. */
 const STATUS_STYLE: Record<PickerStatus, { dot: string; text: string }> = {
   live: { dot: "bg-status-live animate-pulse", text: "text-status-live-ink" },
+  loading: { dot: "bg-status-loading", text: "text-status-loading-ink" },
   finished: { dot: "bg-foreground/60", text: "text-ink-2" },
   failed: { dot: "bg-status-failed", text: "text-status-failed-ink" },
   stopped: { dot: "bg-status-stopped", text: "text-status-stopped-ink" },
   canceled: { dot: "border border-ink-2 bg-transparent", text: "text-ink-2" },
 };
 
+/** Glyph per status, the same as the header chip's: the glyph and the word carry the state, not the colour alone. */
+const STATUS_GLYPH: Record<PickerStatus, string> = {
+  live: "●",
+  loading: "◐",
+  finished: "✓",
+  failed: "✕",
+  stopped: "■",
+  canceled: "○",
+};
+
 /** cmdk value of the "Follow newest run" item. Not a run id. */
 const FOLLOW_ITEM = "__follow_newest__";
 
 function pickerStatus(run: RunSummary): PickerStatus {
-  return isLiveSummary(run) ? "live" : PICKER_STATUS[run.status];
+  if (!isLiveSummary(run)) return PICKER_STATUS[run.status];
+  // A running run with no segment yet is loading, as the header chip reads it.
+  return run.segments === 0 ? "loading" : "live";
 }
 
 interface RunDay {
@@ -65,9 +78,9 @@ function matchesQuery(run: RunSummary, query: string, statusWord: string): boole
   return haystack.includes(query);
 }
 
-/** Live runs show the time elapsed so far; ended runs show the audio duration. */
+/** Live and loading runs show the time elapsed so far; ended runs show the audio duration. */
 function durationText(run: RunSummary, status: PickerStatus, nowMs: number): string {
-  if (status === "live") return run.started_t == null ? DASH : formatElapsed(nowMs / 1000 - run.started_t);
+  if (status === "live" || status === "loading") return run.started_t == null ? DASH : formatElapsed(nowMs / 1000 - run.started_t);
   return formatElapsed(run.duration);
 }
 
@@ -178,7 +191,10 @@ export function RunPicker({ runs, value, onChange }: RunPickerProps) {
                       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                         <span className="flex min-w-0 items-center gap-2">
                           <span className="min-w-0 flex-1 truncate font-medium">{runName(run)}</span>
-                          <span className={cn("shrink-0 text-[12px]", style.text)}>{t.picker.status[status]}</span>
+                          <span className={cn("flex shrink-0 items-center gap-1 text-[12px]", style.text)}>
+                            <span aria-hidden="true">{STATUS_GLYPH[status]}</span>
+                            {t.picker.status[status]}
+                          </span>
                         </span>
                         <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-[12px] tabular-nums text-ink-2">
                           <span>{formatDateTime(run.started_t)}</span>

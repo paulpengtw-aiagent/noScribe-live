@@ -127,8 +127,8 @@ export default function App() {
   const clockNow = frozen && lastUpdateT !== null ? lastUpdateT * 1000 : now;
   // Offers a switch to another still-running run; never moves the user off a run they picked.
   const otherLive = otherLiveRun(state.runs, run?.runId ?? null, active, runParam === FOLLOW_NEWEST);
-  // The waveform is requested as soon as the run's audio is known, live or not.
-  const peakRunId = run?.audioFile ? run.runId : null;
+  // The waveform is requested for every shown run. A run with no audio answers 404, which reads as "missing".
+  const peakRunId = run ? run.runId : null;
   const { peaks, error: peaksError } = useRunPeaks(peakRunId, !active);
   // The header never says "Live" while the stream is down: the run's state is unknown then.
   const badgeRun = active && connection !== "live" ? null : run;
@@ -340,6 +340,7 @@ export default function App() {
                 <TimelineCard
                   speakers={speakers}
                   phase={phase}
+                  theme={theme}
                   transcribed={run ? transcribed : DASH}
                   waveform={waveform}
                   peaksError={peaksError}

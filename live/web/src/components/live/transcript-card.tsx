@@ -573,7 +573,7 @@ export function TranscriptCard({
                     data-speaker-dot
                     data-streaming={streaming ? "true" : undefined}
                     className="size-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: speakerColor(speakers, block.speaker) }}
+                    style={{ backgroundColor: speakerColor(speakers, block.speaker), color: speakerColor(speakers, block.speaker) }}
                   />
                   {block.speaker ? (
                     <span className={cn("truncate text-ink-2", easy ? "font-bold" : "font-medium")}>{speakerName(block.speaker)}</span>

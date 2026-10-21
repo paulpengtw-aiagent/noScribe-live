@@ -37,7 +37,6 @@ export function ActivityOrb({
   size = 260,
   className,
   frozen = false,
-  label,
 }: ActivityOrbProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<OrbRenderer | null>(null);
