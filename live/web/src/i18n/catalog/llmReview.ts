@@ -2,7 +2,7 @@ import type { Locale } from "../core";
 
 // AI correction strings: the panel, the review list, the transcript and the .odt note. zh-TW follows the en shape.
 const en = {
-  title: "Review corrections",
+  title: "AI correction",
   open: "AI correction",
   settings: "Model settings",
   privacy: "Segments and reference documents are sent only to the endpoint you set, and only when you start a correction.",
@@ -39,7 +39,7 @@ const en = {
 export type LlmReviewMessages = typeof en;
 
 const zhTW: LlmReviewMessages = {
-  title: "審閱修正",
+  title: "AI 校正",
   open: "AI 校正",
   settings: "模型設定",
   privacy: "只有在你開始校正時，逐字稿片段與參考文件才會送到你設定的端點。",

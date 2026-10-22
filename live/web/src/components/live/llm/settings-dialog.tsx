@@ -29,9 +29,9 @@ export function LlmSettingsDialog({ open, onOpenChange }: { open: boolean; onOpe
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         data-testid="llm-settings-dialog"
-        className="max-h-[90vh] overflow-y-auto sm:max-w-xl"
+        className="flex max-h-[min(44rem,calc(100dvh_-_6rem))] flex-col overflow-hidden sm:max-w-xl"
       >
-        <DialogHeader>
+        <DialogHeader className="shrink-0">
           <DialogTitle className="text-xl">{t.llmSettings.title}</DialogTitle>
           <DialogDescription>{t.llmSettings.intro}</DialogDescription>
         </DialogHeader>
@@ -115,174 +115,178 @@ function SettingsForm({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <form className="grid gap-5" onSubmit={onSubmit}>
-      <div className="grid gap-2">
-        <label htmlFor="llm-base-url" className="text-sm font-medium">
-          {t.llmSettings.baseUrl}
-        </label>
-        <Input
-          id="llm-base-url"
-          data-testid="llm-base-url"
-          className={EASY_INPUT}
-          type="text"
-          inputMode="url"
-          placeholder="http://localhost:8799/v1"
-          autoComplete="off"
-          spellCheck={false}
-          value={baseUrl}
-          onChange={(event) => setBaseUrl(event.target.value)}
-        />
-        <p className="text-muted-foreground text-xs">{t.llmSettings.baseUrlHint}</p>
-      </div>
-
-      <div className="grid gap-2">
-        <label htmlFor="llm-api-key" className="text-sm font-medium">
-          {t.llmSettings.apiKey}
-        </label>
-        <div className="flex gap-2">
+    <form className="flex min-h-0 flex-1 flex-col gap-4" onSubmit={onSubmit}>
+      <div className="-mx-1 grid min-h-0 flex-1 content-start gap-5 overflow-y-auto px-1 py-1">
+        <div className="grid gap-2">
+          <label htmlFor="llm-base-url" className="text-sm font-medium">
+            {t.llmSettings.baseUrl}
+          </label>
           <Input
-            id="llm-api-key"
-            data-testid="llm-api-key"
-            className={cn("flex-1", EASY_INPUT)}
-            type={showKey ? "text" : "password"}
+            id="llm-base-url"
+            data-testid="llm-base-url"
+            className={EASY_INPUT}
+            type="text"
+            inputMode="url"
+            placeholder="http://localhost:8799/v1"
             autoComplete="off"
             spellCheck={false}
-            value={key}
-            onChange={(event) => setKey(event.target.value)}
+            value={baseUrl}
+            onChange={(event) => setBaseUrl(event.target.value)}
           />
+          <p className="text-muted-foreground text-xs">{t.llmSettings.baseUrlHint}</p>
+        </div>
+
+        <div className="grid gap-2">
+          <label htmlFor="llm-api-key" className="text-sm font-medium">
+            {t.llmSettings.apiKey}
+          </label>
+          <div className="flex gap-2">
+            <Input
+              id="llm-api-key"
+              data-testid="llm-api-key"
+              className={cn("flex-1", EASY_INPUT)}
+              type={showKey ? "text" : "password"}
+              autoComplete="off"
+              spellCheck={false}
+              value={key}
+              onChange={(event) => setKey(event.target.value)}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-lg"
+              data-testid="llm-key-toggle"
+              aria-label={showKey ? t.llmSettings.hideKey : t.llmSettings.showKey}
+              title={showKey ? t.llmSettings.hideKey : t.llmSettings.showKey}
+              onClick={() => setShowKey((shown) => !shown)}
+            >
+              {showKey ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+            </Button>
+          </div>
+          <p className="text-muted-foreground text-xs">{t.llmSettings.apiKeyHint}</p>
+        </div>
+
+        <div className="grid gap-2">
+          <label htmlFor="llm-model" className="text-sm font-medium">
+            {t.llmSettings.model}
+          </label>
+          <Input
+            id="llm-model"
+            data-testid="llm-model"
+            className={EASY_INPUT}
+            type="text"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder={DEFAULT_LLM_MODEL}
+            value={model}
+            onChange={(event) => setModel(event.target.value)}
+          />
+          <p className="text-muted-foreground text-xs">{t.llmSettings.modelHint}</p>
+        </div>
+
+        <div className="grid gap-2">
+          <label htmlFor="llm-temperature" className="text-sm font-medium">
+            {t.llmSettings.temperature}
+          </label>
+          <Input
+            id="llm-temperature"
+            data-testid="llm-temperature"
+            className={EASY_INPUT}
+            type="number"
+            inputMode="decimal"
+            min={0}
+            max={2}
+            step={0.1}
+            aria-invalid={!temp.valid}
+            value={temperature}
+            onChange={(event) => setTemperature(event.target.value)}
+          />
+          {temp.valid ? (
+            <p className="text-muted-foreground text-xs">{t.llmSettings.temperatureHint}</p>
+          ) : (
+            <p role="alert" className="text-status-failed-ink text-sm">
+              {t.llmSettings.temperatureInvalid}
+            </p>
+          )}
+        </div>
+
+        <label
+          htmlFor="llm-remember"
+          className="flex min-h-12 cursor-pointer items-start gap-3 rounded-md border p-3"
+        >
+          <input
+            id="llm-remember"
+            data-testid="llm-remember"
+            type="checkbox"
+            className="mt-1 size-5 shrink-0 accent-primary"
+            checked={remember}
+            onChange={(event) => setRemember(event.target.checked)}
+          />
+          <span className="grid gap-1">
+            <span className="text-sm font-medium">{t.llmSettings.remember}</span>
+            <span className="text-muted-foreground text-xs">{t.llmSettings.rememberHint}</span>
+          </span>
+        </label>
+
+        {hasUrl ? (
+          <div
+            data-testid="llm-privacy"
+            role="note"
+            className={cn(
+              "grid gap-2 rounded-md border p-3 text-sm",
+              local ? "border-border" : "border-status-stopped-ink",
+            )}
+          >
+            <p className={local ? undefined : "text-status-stopped-ink"}>
+              {local ? t.llmSettings.privacyLocal : t.llmSettings.privacyRemote}
+            </p>
+            <p>{t.llmSettings.privacyKey}</p>
+          </div>
+        ) : (
+          <p data-testid="llm-privacy" className="text-muted-foreground text-sm">
+            {t.llmSettings.privacyKey}
+          </p>
+        )}
+
+      </div>
+
+      <DialogFooter className="shrink-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 flex-wrap items-center gap-3 sm:grow">
           <Button
             type="button"
             variant="outline"
-            size="icon-lg"
-            data-testid="llm-key-toggle"
-            aria-label={showKey ? t.llmSettings.hideKey : t.llmSettings.showKey}
-            title={showKey ? t.llmSettings.hideKey : t.llmSettings.showKey}
-            onClick={() => setShowKey((shown) => !shown)}
+            data-testid="llm-test"
+            disabled={!temp.valid || !hasUrl || testing}
+            onClick={() => void runTest()}
           >
-            {showKey ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+            {testing ? t.llmSettings.testing : t.llmSettings.test}
+          </Button>
+          {result ? (
+            <p
+              data-testid="llm-test-result"
+              data-ok={result.ok ? "true" : "false"}
+              data-kind={result.ok ? undefined : result.error.kind}
+              role="status"
+              className={cn(
+                "min-w-0 grow basis-48 text-sm",
+                result.ok ? "text-status-live-ink" : "text-status-failed-ink",
+              )}
+            >
+              {result.ok ? t.llmSettings.testOk(result.ms, result.model) : errorText(result.error, t.llmSettings)}
+              {!result.ok && (result.error.kind === "http" || result.error.kind === "auth") ? (
+                <span className="text-muted-foreground block text-xs">{result.error.message}</span>
+              ) : null}
+            </p>
+          ) : null}
+        </div>
+        <div className="flex shrink-0 justify-end gap-2">
+          <Button type="button" variant="outline" data-testid="llm-cancel" onClick={onDone}>
+            {t.llmSettings.cancel}
+          </Button>
+          <Button type="submit" data-testid="llm-save" disabled={!temp.valid}>
+            {t.llmSettings.save}
           </Button>
         </div>
-        <p className="text-muted-foreground text-xs">{t.llmSettings.apiKeyHint}</p>
-      </div>
-
-      <div className="grid gap-2">
-        <label htmlFor="llm-model" className="text-sm font-medium">
-          {t.llmSettings.model}
-        </label>
-        <Input
-          id="llm-model"
-          data-testid="llm-model"
-          className={EASY_INPUT}
-          type="text"
-          autoComplete="off"
-          spellCheck={false}
-          placeholder={DEFAULT_LLM_MODEL}
-          value={model}
-          onChange={(event) => setModel(event.target.value)}
-        />
-        <p className="text-muted-foreground text-xs">{t.llmSettings.modelHint}</p>
-      </div>
-
-      <div className="grid gap-2">
-        <label htmlFor="llm-temperature" className="text-sm font-medium">
-          {t.llmSettings.temperature}
-        </label>
-        <Input
-          id="llm-temperature"
-          data-testid="llm-temperature"
-          className={EASY_INPUT}
-          type="number"
-          inputMode="decimal"
-          min={0}
-          max={2}
-          step={0.1}
-          aria-invalid={!temp.valid}
-          value={temperature}
-          onChange={(event) => setTemperature(event.target.value)}
-        />
-        {temp.valid ? (
-          <p className="text-muted-foreground text-xs">{t.llmSettings.temperatureHint}</p>
-        ) : (
-          <p role="alert" className="text-status-failed-ink text-sm">
-            {t.llmSettings.temperatureInvalid}
-          </p>
-        )}
-      </div>
-
-      <label
-        htmlFor="llm-remember"
-        className="flex min-h-12 cursor-pointer items-start gap-3 rounded-md border p-3"
-      >
-        <input
-          id="llm-remember"
-          data-testid="llm-remember"
-          type="checkbox"
-          className="mt-1 size-5 shrink-0 accent-primary"
-          checked={remember}
-          onChange={(event) => setRemember(event.target.checked)}
-        />
-        <span className="grid gap-1">
-          <span className="text-sm font-medium">{t.llmSettings.remember}</span>
-          <span className="text-muted-foreground text-xs">{t.llmSettings.rememberHint}</span>
-        </span>
-      </label>
-
-      {hasUrl ? (
-        <div
-          data-testid="llm-privacy"
-          role="note"
-          className={cn(
-            "grid gap-2 rounded-md border p-3 text-sm",
-            local ? "border-border" : "border-status-stopped-ink",
-          )}
-        >
-          <p className={local ? undefined : "text-status-stopped-ink"}>
-            {local ? t.llmSettings.privacyLocal : t.llmSettings.privacyRemote}
-          </p>
-          <p>{t.llmSettings.privacyKey}</p>
-        </div>
-      ) : (
-        <p data-testid="llm-privacy" className="text-muted-foreground text-sm">
-          {t.llmSettings.privacyKey}
-        </p>
-      )}
-
-      <div className="flex flex-wrap items-center gap-3">
-        <Button
-          type="button"
-          variant="outline"
-          data-testid="llm-test"
-          disabled={!temp.valid || !hasUrl || testing}
-          onClick={() => void runTest()}
-        >
-          {testing ? t.llmSettings.testing : t.llmSettings.test}
-        </Button>
-        {result ? (
-          <p
-            data-testid="llm-test-result"
-            data-ok={result.ok ? "true" : "false"}
-            data-kind={result.ok ? undefined : result.error.kind}
-            role="status"
-            className={cn(
-              "text-sm",
-              result.ok ? "text-status-live-ink" : "text-status-failed-ink",
-            )}
-          >
-            {result.ok ? t.llmSettings.testOk(result.ms, result.model) : errorText(result.error, t.llmSettings)}
-            {!result.ok && (result.error.kind === "http" || result.error.kind === "auth") ? (
-              <span className="text-muted-foreground block text-xs">{result.error.message}</span>
-            ) : null}
-          </p>
-        ) : null}
-      </div>
-
-      <DialogFooter>
-        <Button type="button" variant="outline" data-testid="llm-cancel" onClick={onDone}>
-          {t.llmSettings.cancel}
-        </Button>
-        <Button type="submit" data-testid="llm-save" disabled={!temp.valid}>
-          {t.llmSettings.save}
-        </Button>
       </DialogFooter>
     </form>
   );

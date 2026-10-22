@@ -43,11 +43,27 @@ export function LlmPanel({ run, segments }: { run: RunState; segments: Segment[]
   const [error, setError] = useState<LlmError | null>(null);
   const [saveFailed, setSaveFailed] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const errorRef = useRef<HTMLDivElement | null>(null);
+  const reviewRef = useRef<HTMLDivElement | null>(null);
+  // Set when a run ends; the effect below scrolls the result or the error into view once it has rendered.
+  const pendingScroll = useRef<"review" | "error" | null>(null);
   const configured = settings.baseUrl.trim() !== "" && settings.model.trim() !== "";
   const L = t.llmReview;
 
   // Cancel a run only when the panel itself goes away. Closing the dialog keeps the run going.
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  // After a run ends, bring the new review list or the error into view inside the scrolling body.
+  useEffect(() => {
+    const target = pendingScroll.current;
+    if (!target) return;
+    pendingScroll.current = null;
+    const el = target === "error" ? errorRef.current : reviewRef.current;
+    el?.scrollIntoView({
+      block: target === "error" ? "nearest" : "start",
+      behavior: reduce || easy ? "auto" : "smooth",
+    });
+  }, [running, corrections, error, reduce, easy]);
 
   // Reload the stored corrections when the dialog opens and whenever they change elsewhere.
   useEffect(() => {
@@ -106,11 +122,13 @@ export function LlmPanel({ run, segments }: { run: RunState; segments: Segment[]
         items: merged,
       };
       setCorrections(next);
+      pendingScroll.current = "review";
       saveCorrections(next).catch(() => setSaveFailed(true));
     } catch (err) {
       if (isLlmError(err) && err.kind === "aborted") {
         // Cancelled by the reader: nothing to report.
       } else {
+        pendingScroll.current = "error";
         setError(isLlmError(err) ? err : { kind: "network", message: String(err) });
       }
     } finally {
@@ -147,96 +165,103 @@ export function LlmPanel({ run, segments }: { run: RunState; segments: Segment[]
         </DialogTrigger>
         <DialogContent
           data-testid="llm-panel"
-          className="max-h-[88vh] gap-4 overflow-y-auto sm:max-w-2xl"
+          className="flex max-h-[min(52rem,calc(100dvh_-_6rem))] flex-col gap-4 overflow-hidden sm:max-w-2xl"
         >
-          <DialogHeader>
-            <DialogTitle>{L.title}</DialogTitle>
-            <DialogDescription>{L.privacy}</DialogDescription>
-          </DialogHeader>
+          <div className="flex shrink-0 flex-col gap-3">
+            <DialogHeader>
+              <DialogTitle>{L.title}</DialogTitle>
+              <DialogDescription>{L.privacy}</DialogDescription>
+            </DialogHeader>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              data-testid="llm-settings-open"
-              onClick={() => setSettingsOpen(true)}
-            >
-              <Settings2 aria-hidden="true" />
-              {L.settings}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid="llm-settings-open"
+                onClick={() => setSettingsOpen(true)}
+              >
+                <Settings2 aria-hidden="true" />
+                {L.settings}
+              </Button>
+            </div>
           </div>
 
-          <ContextSection />
+          <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-1 py-1">
+            <ContextSection />
 
-          <div className="flex flex-col gap-3">
-            {running ? (
-              <>
-                <p
-                  data-testid="llm-progress"
-                  aria-live="polite"
-                  className="text-[13px] leading-5 text-ink-2"
-                >
-                  {progress && progress.total > 0 ? L.progress(progress.done, progress.total) : L.preparing}
-                </p>
-                <div className="flex items-center gap-3">
-                  <div className="relative min-w-0 flex-1 overflow-hidden rounded-full">
-                    <Progress value={pct} className="h-2" />
-                    {reduce || easy ? null : (
-                      <motion.span
-                        aria-hidden="true"
-                        className="pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-linear-to-r from-transparent via-white/35 to-transparent"
-                        animate={{ x: ["-100%", "320%"] }}
-                        transition={{ duration: 2.4, ease: "easeInOut", repeat: Infinity }}
-                      />
-                    )}
+            <div className="flex flex-col gap-3">
+              {running ? (
+                <>
+                  <p
+                    data-testid="llm-progress"
+                    aria-live="polite"
+                    className="text-[13px] leading-5 text-ink-2"
+                  >
+                    {progress && progress.total > 0 ? L.progress(progress.done, progress.total) : L.preparing}
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <div className="relative min-w-0 flex-1 overflow-hidden rounded-full">
+                      <Progress value={pct} className="h-2" />
+                      {reduce || easy ? null : (
+                        <motion.span
+                          aria-hidden="true"
+                          className="pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-linear-to-r from-transparent via-white/35 to-transparent"
+                          animate={{ x: ["-100%", "320%"] }}
+                          transition={{ duration: 2.4, ease: "easeInOut", repeat: Infinity }}
+                        />
+                      )}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      data-testid="llm-cancel"
+                      onClick={() => abortRef.current?.abort()}
+                    >
+                      {L.cancel}
+                    </Button>
                   </div>
+                </>
+              ) : (
+                <div className="flex flex-wrap items-center gap-3">
                   <Button
                     type="button"
-                    variant="outline"
-                    size="sm"
-                    data-testid="llm-cancel"
-                    onClick={() => abortRef.current?.abort()}
+                    data-testid="llm-run"
+                    disabled={!configured}
+                    onClick={start}
+                    className={cn(easy && "min-h-12 px-5 text-[16px]")}
                   >
-                    {L.cancel}
+                    {L.run}
                   </Button>
+                  {configured ? null : <span className="text-[13px] text-ink-2">{L.needConfig}</span>}
                 </div>
-              </>
-            ) : (
-              <div className="flex flex-wrap items-center gap-3">
-                <Button
-                  type="button"
-                  data-testid="llm-run"
-                  disabled={!configured}
-                  onClick={start}
-                  className={cn(easy && "min-h-12 px-5 text-[16px]")}
+              )}
+              {error && error.kind !== "aborted" ? (
+                <div
+                  ref={errorRef}
+                  role="alert"
+                  data-testid="llm-error"
+                  data-kind={error.kind}
+                  className="rounded-[12px] border border-destructive/50 bg-destructive/10 px-3 py-2 text-[14px] leading-6 text-foreground"
                 >
-                  {L.run}
-                </Button>
-                {configured ? null : <span className="text-[13px] text-ink-2">{L.needConfig}</span>}
-              </div>
-            )}
-            {error && error.kind !== "aborted" ? (
-              <div
-                role="alert"
-                data-testid="llm-error"
-                data-kind={error.kind}
-                className="rounded-[12px] border border-destructive/50 bg-destructive/10 px-3 py-2 text-[14px] leading-6 text-foreground"
-              >
-                {errorText(error, L)}
+                  {errorText(error, L)}
+                </div>
+              ) : null}
+              {saveFailed ? <p className="text-[13px] text-destructive">{L.saveFailed}</p> : null}
+            </div>
+
+            {corrections ? (
+              <div ref={reviewRef}>
+                <ReviewList
+                  runId={run.runId}
+                  segments={segments}
+                  corrections={corrections}
+                  onChange={onReviewChange}
+                />
               </div>
             ) : null}
-            {saveFailed ? <p className="text-[13px] text-destructive">{L.saveFailed}</p> : null}
           </div>
-
-          {corrections ? (
-            <ReviewList
-              runId={run.runId}
-              segments={segments}
-              corrections={corrections}
-              onChange={onReviewChange}
-            />
-          ) : null}
         </DialogContent>
       </Dialog>
       <LlmSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
