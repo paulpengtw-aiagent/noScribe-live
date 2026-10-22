@@ -1,6 +1,6 @@
-// AI correction settings: the endpoint, API key, model, temperature and the remember choice. "Test connection" uses the
-// values in the form, so nothing is saved until Save. Easy view (html[data-easy="true"]) is handled by the global rules
-// for buttons and text sizes; the inputs get their 48 px height from the variant class below.
+// AI correction settings: the provider, endpoint, API key, model, temperature and the remember choice. "Test connection"
+// uses the values in the form, so nothing is saved until Save. Easy view (html[data-easy="true"]) is handled by the global
+// rules for buttons and text sizes; the inputs get their 48 px height from the variant class below.
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,8 +13,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { LlmSettingsMessages } from "@/i18n/catalog/llmSettings";
 import { useI18n } from "@/i18n";
+import { ANTHROPIC_BASE_URL, ANTHROPIC_DEFAULT_MODEL, isAnthropicEndpoint } from "@/lib/llm/anthropic";
 import { testConnection, type TestConnectionResult } from "@/lib/llm/client";
 import { DEFAULT_LLM_MODEL, isLocalEndpoint, useLlmSettings } from "@/lib/llm/settings";
 import type { LlmError, LlmSettings } from "@/lib/llm/types";
@@ -49,15 +51,21 @@ function parseTemperature(text: string): { valid: boolean; value: number | undef
   return Number.isFinite(n) && n >= 0 && n <= 2 ? { valid: true, value: n } : { valid: false, value: undefined };
 }
 
-function errorText(error: LlmError, m: LlmSettingsMessages): string {
+function errorText(error: LlmError, m: LlmSettingsMessages, anthropic: boolean): string {
   const status = error.status ?? 0;
   switch (error.kind) {
     case "cors":
-      return m.errors.cors;
+      return anthropic ? m.errors.corsAnthropic : m.errors.cors;
     case "network":
       return m.errors.network;
     case "auth":
-      return m.errors.auth(status);
+      return anthropic ? m.errors.authAnthropic : m.errors.auth(status);
+    case "forbidden":
+      return m.errors.forbidden;
+    case "rate_limit":
+      return m.errors.rateLimit;
+    case "overloaded":
+      return m.errors.overloaded;
     case "http":
       return m.errors.http(status);
     case "json":
@@ -65,6 +73,13 @@ function errorText(error: LlmError, m: LlmSettingsMessages): string {
     case "aborted":
       return m.errors.aborted;
   }
+}
+
+/** Text for a finished test. Anthropic results say whether the chosen model appears in the key's model list. */
+function resultText(outcome: TestConnectionResult, anthropic: boolean, m: LlmSettingsMessages): string {
+  if (!outcome.ok) return errorText(outcome.error, m, anthropic);
+  if (outcome.provider !== "anthropic") return m.testOk(outcome.ms, outcome.model);
+  return outcome.modelListed === true ? m.testOkListed(outcome.ms, outcome.model) : m.testOkNotListed(outcome.model);
 }
 
 // Mounted each time the dialog opens (Radix unmounts the content on close), so the fields start from the saved values.
@@ -78,13 +93,16 @@ function SettingsForm({ onDone }: { onDone: () => void }) {
   const [temperature, setTemperature] = useState(settings.temperature === undefined ? "" : String(settings.temperature));
   const [remember, setRemember] = useState(settings.remember);
   const [testing, setTesting] = useState(false);
-  const [result, setResult] = useState<TestConnectionResult | null>(null);
+  const [result, setResult] = useState<{ outcome: TestConnectionResult; anthropic: boolean } | null>(null);
   const testRun = useRef<AbortController | null>(null);
 
   // Closing the dialog cancels a test that is still in flight.
   useEffect(() => () => testRun.current?.abort(), []);
 
-  const temp = parseTemperature(temperature);
+  // The provider follows the base URL field, so a hand-typed api.anthropic.com URL also shows Anthropic.
+  const anthropic = isAnthropicEndpoint(baseUrl.trim());
+  // Anthropic calls send no temperature, so the field is disabled and cannot block Save.
+  const temp = anthropic ? { valid: true, value: undefined } : parseTemperature(temperature);
   const draft: LlmSettings = {
     baseUrl: baseUrl.trim(),
     model: model.trim() || DEFAULT_LLM_MODEL,
@@ -93,6 +111,16 @@ function SettingsForm({ onDone }: { onDone: () => void }) {
   };
   const hasUrl = draft.baseUrl !== "";
   const local = isLocalEndpoint(draft.baseUrl);
+
+  // Anthropic fills the base URL and the default model. Custom clears the base URL only if it was the Anthropic one.
+  const chooseProvider = (next: string) => {
+    if (next === "anthropic") {
+      setBaseUrl(ANTHROPIC_BASE_URL);
+      setModel(ANTHROPIC_DEFAULT_MODEL);
+    } else if (anthropic) {
+      setBaseUrl("");
+    }
+  };
 
   const runTest = async () => {
     testRun.current?.abort();
@@ -104,7 +132,7 @@ function SettingsForm({ onDone }: { onDone: () => void }) {
     if (run.signal.aborted) return; // the dialog closed or a newer test started
     testRun.current = null;
     setTesting(false);
-    setResult(outcome);
+    setResult({ outcome, anthropic });
   };
 
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -114,9 +142,38 @@ function SettingsForm({ onDone }: { onDone: () => void }) {
     onDone();
   };
 
+  const outcome = result?.outcome ?? null;
+  const outcomeAnthropic = result?.anthropic ?? false;
+  const shownProvider = outcome?.ok ? outcome.provider : outcomeAnthropic ? "anthropic" : "openai";
+  const warn = outcome?.ok === true && outcome.provider === "anthropic" && outcome.modelListed !== true;
+
   return (
     <form className="flex min-h-0 flex-1 flex-col gap-4" onSubmit={onSubmit}>
       <div className="-mx-1 grid min-h-0 flex-1 content-start gap-5 overflow-y-auto px-1 py-1">
+        <div className="grid gap-2">
+          <label htmlFor="llm-provider" className="text-sm font-medium">
+            {t.llmSettings.provider}
+          </label>
+          <Select value={anthropic ? "anthropic" : "custom"} onValueChange={chooseProvider}>
+            <SelectTrigger id="llm-provider" data-testid="llm-provider" className={cn("w-full", EASY_INPUT)}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="custom" data-testid="llm-provider-custom">
+                {t.llmSettings.providerCustom}
+              </SelectItem>
+              <SelectItem value="anthropic" data-testid="llm-provider-anthropic">
+                {t.llmSettings.providerAnthropic}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          {anthropic ? (
+            <p data-testid="llm-anthropic-note" role="note" className="rounded-md border p-3 text-sm">
+              {t.llmSettings.anthropicNote}
+            </p>
+          ) : null}
+        </div>
+
         <div className="grid gap-2">
           <label htmlFor="llm-base-url" className="text-sm font-medium">
             {t.llmSettings.baseUrl}
@@ -197,11 +254,14 @@ function SettingsForm({ onDone }: { onDone: () => void }) {
             min={0}
             max={2}
             step={0.1}
+            disabled={anthropic}
             aria-invalid={!temp.valid}
             value={temperature}
             onChange={(event) => setTemperature(event.target.value)}
           />
-          {temp.valid ? (
+          {anthropic ? (
+            <p className="text-muted-foreground text-xs">{t.llmSettings.temperatureAnthropic}</p>
+          ) : temp.valid ? (
             <p className="text-muted-foreground text-xs">{t.llmSettings.temperatureHint}</p>
           ) : (
             <p role="alert" className="text-status-failed-ink text-sm">
@@ -261,20 +321,24 @@ function SettingsForm({ onDone }: { onDone: () => void }) {
           >
             {testing ? t.llmSettings.testing : t.llmSettings.test}
           </Button>
-          {result ? (
+          {outcome ? (
             <p
               data-testid="llm-test-result"
-              data-ok={result.ok ? "true" : "false"}
-              data-kind={result.ok ? undefined : result.error.kind}
+              data-ok={outcome.ok ? "true" : "false"}
+              data-kind={outcome.ok ? undefined : outcome.error.kind}
+              data-provider={shownProvider}
+              data-model-listed={
+                outcome.ok && outcome.provider === "anthropic" ? String(outcome.modelListed === true) : undefined
+              }
               role="status"
               className={cn(
                 "min-w-0 grow basis-48 text-sm",
-                result.ok ? "text-status-live-ink" : "text-status-failed-ink",
+                !outcome.ok || warn ? (outcome.ok ? "text-status-stopped-ink" : "text-status-failed-ink") : "text-status-live-ink",
               )}
             >
-              {result.ok ? t.llmSettings.testOk(result.ms, result.model) : errorText(result.error, t.llmSettings)}
-              {!result.ok && (result.error.kind === "http" || result.error.kind === "auth") ? (
-                <span className="text-muted-foreground block text-xs">{result.error.message}</span>
+              {resultText(outcome, outcomeAnthropic, t.llmSettings)}
+              {!outcome.ok && (outcome.error.kind === "http" || outcome.error.kind === "auth") ? (
+                <span className="text-muted-foreground block text-xs">{outcome.error.message}</span>
               ) : null}
             </p>
           ) : null}

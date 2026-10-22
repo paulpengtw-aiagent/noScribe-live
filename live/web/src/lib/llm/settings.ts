@@ -1,6 +1,7 @@
 // Connection settings for the LLM correction feature. Non-secret settings live in localStorage. The API key lives in
 // sessionStorage, and also in localStorage only when the user chose "remember on this browser". The key is never logged.
 import { useMemo, useSyncExternalStore } from "react";
+import { ANTHROPIC_DEFAULT_MODEL } from "./anthropic";
 import type { LlmSettings } from "./types";
 
 /** localStorage key for the non-secret settings (base URL, model, temperature, remember). */
@@ -8,7 +9,7 @@ export const LLM_SETTINGS_KEY = "noscribe-live-llm-settings";
 /** Storage key for the API key: sessionStorage always, localStorage only when `remember` is true. */
 export const LLM_KEY_STORAGE = "noscribe-live-llm-key";
 
-export const DEFAULT_LLM_MODEL = "claude-opus-5-5";
+export const DEFAULT_LLM_MODEL = ANTHROPIC_DEFAULT_MODEL;
 
 export interface LlmSettingsApi {
   settings: LlmSettings;

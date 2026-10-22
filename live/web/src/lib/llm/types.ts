@@ -69,8 +69,20 @@ export interface RunCorrections {
   note?: string;
 }
 
-/** Failure classes for a call to the chat endpoint, so the UI can say what to fix. */
-export type LlmErrorKind = "cors" | "network" | "http" | "auth" | "json" | "aborted";
+/**
+ * Failure classes for a call to the chat endpoint, so the UI can say what to fix. "auth" is 401, "forbidden" is 403,
+ * "rate_limit" is 429, "overloaded" is 529, and "http" is any other non-2xx reply.
+ */
+export type LlmErrorKind =
+  | "cors"
+  | "network"
+  | "http"
+  | "auth"
+  | "forbidden"
+  | "rate_limit"
+  | "overloaded"
+  | "json"
+  | "aborted";
 
 /** A failed call to the chat endpoint. */
 export interface LlmError {

@@ -15,6 +15,7 @@ llm-confirm, llm-confirm-ok, llm-show-original, export-odt, and transcript segme
              llm-context-stats shows 10.
   run        a correction run on the finished demo feed completes: at least 2 llm-diff rows (the recorded feed
              has 2 correctable segments), one of them for the 吶喊自序 correction (data-corrected-text).
+             The regular mock log shows browser_header=no for its chat requests (Ollama-style hosts get no header).
   review     accept one row and reject one (accept two and reject one when there are 3 or more rows): transcript
              shows the accepted corrections (data-corrected="true") and not the originals; reload keeps them
              (IndexedDB); llm-show-original hides them, again shows.
@@ -23,13 +24,23 @@ llm-confirm, llm-confirm-ok, llm-show-original, export-odt, and transcript segme
   malformed  model "mock-malformed-once": the first answer per batch is invalid JSON; the run still completes
              and the mock log shows a malformed answer followed by a valid retry.
   cors       mock started with --no-cors: llm-test shows llm-error[data-kind="cors"]; a correction run does too.
+  anthropic  mock started with --anthropic and the test-only Anthropic override (anthropic_override): the preset
+             fills base URL + model and shows the note (the real URL is never contacted); the mock typed by hand,
+             key sk-ant-test: test connection ok, provider anthropic, model listed, and the mock log shows
+             GET /v1/models with browser_header=yes auth=x-api-key; key sk-ant-nomodel: data-model-listed=false;
+             a run without uploads gets at least 2 llm-diff rows and no llm-error, its chat requests carry
+             browser_header=yes, no temperature/top_p/response_format and max_tokens >= 16000; without the override
+             the same mock gives llm-error[data-kind="cors"].
+  anthropic-errors  the same mock: keys sk-ant-401/403/429/529 via test connection give data-kind auth, forbidden,
+             rate_limit and overloaded.
 
 Run from the repo root with the system Python that has Playwright:
 
-    /usr/bin/python3 -I -B live/stress/test_llm.py [--only settings,upload,run,review,export,malformed,cors]
+    /usr/bin/python3 -I -B live/stress/test_llm.py [--only settings,upload,run,review,export,malformed,cors,anthropic,anthropic-errors]
         [--port 8960] [--static DIR] [--python PY] [--work DIR]
 
-Viewer port of group i is --port + i (settings 0, upload 1, run 2, review 3, export 4, malformed 5, cors 6);
+Viewer port of group i is --port + i (settings 0, upload 1, run 2, review 3, export 4, malformed 5, cors 6,
+anthropic 7, anthropic-errors 8);
 its mock listens on --port + 20 + i. To use the mock by hand: `python3 live/stress/mock_llm.py --port 8799`,
 base URL http://localhost:8799/v1, any API key, model "mock". WORK (default /tmp/nslive-llm) holds feeds/,
 logs/, shots/ and downloads/. The finished demo feed is read only. Exit code 0 only if every check passed.
@@ -60,7 +71,14 @@ DEMO_NAME = FEED_SRC.name
 DEFAULT_PORT = 8960
 DEFAULT_WORK = Path("/tmp/nslive-llm")
 KEY_STORE = "noscribe-live-llm-key"
-GROUP_OFFSET = {"settings": 0, "upload": 1, "run": 2, "review": 3, "export": 4, "malformed": 5, "cors": 6}
+GROUP_OFFSET = {"settings": 0, "upload": 1, "run": 2, "review": 3, "export": 4, "malformed": 5, "cors": 6,
+                "anthropic": 7, "anthropic-errors": 8}
+ANTHROPIC_BASE = "https://api.anthropic.com/v1"  # the preset; never test-connected (the checks use the mock)
+ANTHROPIC_MODEL = "claude-opus-5-5"
+ANTHROPIC_HOSTS_KEY = "noscribe-live-llm-dev-anthropic-hosts"  # test-only override of the Anthropic host detection
+ANTHROPIC_PROBE = {"x-api-key": "sk-ant-ready", "anthropic-version": "2023-06-01"}  # readiness GET of --anthropic
+ANTHROPIC_ERROR_KEYS = (("sk-ant-401", "auth"), ("sk-ant-403", "forbidden"), ("sk-ant-429", "rate_limit"),
+                        ("sk-ant-529", "overloaded"))
 GROUPS = tuple(GROUP_OFFSET)
 MOCK_OFFSET = 20
 CORRECTED = '[data-corrected="true"]'
@@ -91,9 +109,10 @@ def has_num(text: str, n: int) -> bool:
     return re.search(rf"(?<!\d){n}(?!\d)", text or "") is not None
 
 
-def mock_up(port: int) -> bool:
+def mock_up(port: int, headers: dict[str, str] | None = None) -> bool:
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=2) as resp:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/v1/models", headers=headers or {})
+        with urllib.request.urlopen(req, timeout=2) as resp:
             return resp.status == 200
     except Exception:
         return False
@@ -107,7 +126,8 @@ def start_stack(h: Any, tag: str, mock_args: tuple[str, ...] = ()) -> Stack:
     mock_log = h.logs / f"mock-{tag}.log"
     cmd = [sys.executable, "-I", "-B", str(MOCK), "--port", str(mport), "--log", str(mock_log), *mock_args]
     mock = h._spawn(cmd, f"mock-{tag}-{mport}.out")
-    if not ux.wait_until(lambda: mock_up(mport), 15):
+    probe = ANTHROPIC_PROBE if "--anthropic" in mock_args else None  # the native API needs its key and version
+    if not ux.wait_until(lambda: mock_up(mport, probe), 15):
         raise RuntimeError(f"mock LLM on port {mport} did not answer /v1/models (logs in {h.logs})")
     run_id = ux.feed_info(feeds / DEMO_NAME)["run_id"]
     return Stack(viewer, mock, mport, run_id, mock_log)
@@ -280,6 +300,10 @@ def group_run(h: Any, browser: Any) -> None:
                 f"rows whose corrected text has 吶喊自序: {nahan}")
         errors = page.locator(T("llm-error")).count()
         h.check("run: no llm-error shown", errors == 0, f"llm-error elements {errors}")
+        chats = chat_lines(st)
+        plain = bool(chats) and all("browser_header=no" in ln for ln in chats)
+        h.check("run: the regular mock log shows browser_header=no for chat requests", plain,
+                f"chat lines {len(chats)}, with browser_header=no {sum('browser_header=no' in ln for ln in chats)}")
         h.shot(page, "run-diffs.png")
     finally:
         for ctx in ctxs:
@@ -435,8 +459,184 @@ def group_cors(h: Any, browser: Any) -> None:
         stop_all(st.viewer, st.mock)
 
 
+# ---- Anthropic emulation (the mock's --anthropic mode) -----------------------------------------------------
+def anthropic_override(mport: int) -> str:
+    """Init script (test only): the app treats the mock's hosts as Anthropic, via its localStorage override."""
+    hosts = f"127.0.0.1:{mport},localhost:{mport}"
+    return f"try {{ localStorage.setItem('{ANTHROPIC_HOSTS_KEY}', '{hosts}'); }} catch (e) {{}}"
+
+
+def choose_provider(page: Any, name: str) -> None:
+    """Picks llm-provider-<name>: a RadioGroup item (visible) or a Select item (open llm-provider first)."""
+    option = page.locator(T(f"llm-provider-{name}"))
+    if not option.is_visible():
+        page.click(T("llm-provider"))
+        page.wait_for_timeout(200)
+    option.click()
+    page.wait_for_timeout(300)
+
+
+def provider_is_anthropic(page: Any) -> bool:
+    """Anthropic is in effect: its note shows and the temperature field is disabled."""
+    return page.locator(T("llm-anthropic-note")).is_visible() and page.locator(T("llm-temperature")).is_disabled()
+
+
+def ensure_settings_open(page: Any) -> None:
+    if not page.is_visible(T("llm-base-url")):
+        open_panel(page)
+        page.click(T("llm-settings-open"))
+        page.wait_for_selector(T("llm-base-url"), state="visible", timeout=15000)
+
+
+def save_settings(page: Any) -> None:
+    page.click(T("llm-save"))
+    page.wait_for_timeout(300)
+    if page.is_visible(T("llm-base-url")):  # the dialog stays open after save: close it
+        page.keyboard.press("Escape")
+
+
+def wait_test_result(page: Any, want: dict[str, str], timeout: float = 25) -> dict[str, str]:
+    """Polls llm-test-result until its attributes match `want`, so an earlier result never passes for this click."""
+    loc = page.locator(T("llm-test-result"))
+    last: dict[str, str] = {}
+
+    def matched() -> bool:  # a detached element raises here; ux.wait_until treats that as not yet
+        if loc.count() == 0:
+            return False
+        attrs = loc.first.evaluate("e => Object.fromEntries([...e.attributes].map((a) => [a.name, a.value]))")
+        last.clear()
+        last.update(attrs)
+        return all(attrs.get(k) == v for k, v in want.items())
+
+    ux.wait_until(matched, timeout, 0.3)
+    return dict(last)
+
+
+def mock_log_text(st: Stack) -> str:
+    return st.mock_log.read_text(encoding="utf-8") if st.mock_log.exists() else ""
+
+
+def chat_lines(st: Stack) -> list[str]:
+    return [ln for ln in mock_log_text(st).splitlines() if "POST /v1/chat/completions" in ln]
+
+
+def group_anthropic(h: Any, browser: Any) -> None:
+    st = start_stack(h, "anthropic", mock_args=("--anthropic",))
+    ctxs: list[Any] = []
+    mock_base = f"http://127.0.0.1:{st.mock_port}/v1"
+    try:
+        ctx, page = h.new_page(browser, extra=anthropic_override(st.mock_port))
+        ctxs.append(ctx)
+        open_run(page, h.port, st.run_id)
+        open_panel(page)
+        page.click(T("llm-settings-open"))
+        page.wait_for_selector(T("llm-base-url"), state="visible", timeout=15000)
+        # Custom first: temperature 0.2 is typed while the field is enabled, so the Anthropic run proves it is omitted.
+        choose_provider(page, "custom")
+        if page.locator(T("llm-temperature")).is_enabled():
+            page.fill(T("llm-temperature"), "0.2")
+        else:
+            info("anthropic: temperature", "field disabled on Custom; the omission check is not exercised")
+        # (a) the preset fills base URL and model and shows the note. The real URL is never test-connected.
+        choose_provider(page, "anthropic")
+        preset_base = page.input_value(T("llm-base-url"))
+        preset_model = page.input_value(T("llm-model"))
+        note = page.locator(T("llm-anthropic-note")).is_visible()
+        h.check("anthropic: the preset fills base URL and model and shows the note",
+                preset_base == ANTHROPIC_BASE and preset_model == ANTHROPIC_MODEL and note,
+                f"base {preset_base!r}, model {preset_model!r}, note visible {note}")
+        # The mock, typed by hand. The override keeps the provider on Anthropic (b).
+        page.fill(T("llm-base-url"), mock_base)
+        page.fill(T("llm-api-key"), "sk-ant-test")
+        page.fill(T("llm-model"), ANTHROPIC_MODEL)
+        h.check("anthropic: the provider still shows Anthropic for the hand-typed mock URL (override)",
+                provider_is_anthropic(page), f"base {mock_base}; note visible and temperature disabled")
+        save_settings(page)
+        # (c)
+        click_test(page)
+        got = wait_test_result(page, {"data-ok": "true", "data-provider": "anthropic", "data-model-listed": "true"})
+        listed = ux.wait_until(lambda: re.search(r"GET /v1/models\b.*browser_header=yes\b.*auth=x-api-key",
+                                                  mock_log_text(st)), 10, 0.3)
+        h.check("anthropic: test connection ok, provider anthropic, model listed; GET /v1/models has the browser header",
+                got.get("data-ok") == "true" and got.get("data-provider") == "anthropic"
+                and got.get("data-model-listed") == "true" and bool(listed),
+                f"llm-test-result {got}; mock GET line with browser_header=yes auth=x-api-key seen {bool(listed)}")
+        # (d) a key whose models list lacks claude-opus-5-5
+        ensure_settings_open(page)
+        page.fill(T("llm-api-key"), "sk-ant-nomodel")
+        save_settings(page)
+        click_test(page)
+        got2 = wait_test_result(page, {"data-ok": "true", "data-model-listed": "false"})
+        h.check("anthropic: key sk-ant-nomodel gives data-ok=true and data-model-listed=false",
+                got2.get("data-ok") == "true" and got2.get("data-model-listed") == "false", f"llm-test-result {got2}")
+        # (e) the key back, then a run with no uploads
+        ensure_settings_open(page)
+        page.fill(T("llm-api-key"), "sk-ant-test")
+        save_settings(page)
+        open_panel(page)
+        count = run_correction(page)
+        page.wait_for_timeout(300)
+        errors = page.locator(T("llm-error")).count()
+        h.check("anthropic: a run gets at least 2 llm-diff rows from the fenced prose reply, no llm-error",
+                count >= MIN_DIFF_ROWS and errors == 0, f"llm-diff rows {count}, llm-error elements {errors}")
+        ok_chat = [ln for ln in chat_lines(st) if "response=valid" in ln and "status=200" in ln]
+        wanted = ("browser_header=yes", "temperature=absent", "top_p=absent", "response_format=absent")
+        shaped = bool(ok_chat) and all(all(w in ln for w in wanted) for ln in ok_chat)
+        h.check("anthropic: chat requests carry browser_header=yes, no temperature, no top_p, no response_format",
+                shaped, f"valid chat lines {len(ok_chat)}; first {ok_chat[:1]}")
+        maxes = [int(m.group(1)) for m in (re.search(r"max_tokens=(\d+)", ln) for ln in ok_chat) if m]
+        h.check("anthropic: chat requests send max_tokens >= 16000", bool(maxes) and min(maxes) >= 16000,
+                f"max_tokens on valid chat lines {maxes}")
+        h.shot(page, "anthropic-run.png")
+        # (f) the same mock in a context without the override: the host is not Anthropic, so the browser sends no
+        # header, the preflight gets 400 without Access-Control-Allow-Origin, and the run reports a CORS error.
+        ctx3, page3 = h.new_page(browser)
+        ctxs.append(ctx3)
+        open_run(page3, h.port, st.run_id)
+        configure(page3, mock_base, "sk-ant-test", ANTHROPIC_MODEL)
+        open_panel(page3)
+        cors_run = page3.locator('[data-testid="llm-error"][data-kind="cors"]')
+        try:
+            page3.click(T("llm-run"), timeout=10000)
+            cors_seen = ux.wait_until(lambda: cors_run.count() > 0, 30, 0.3)
+            cors_detail = f"llm-error[data-kind=cors] elements {cors_run.count()}"
+        except Exception as exc:  # the run could not start: a failed check, not a crash of the group
+            cors_seen, cors_detail = False, f"run not started: {exc!r}"[:200]
+        preflight_400 = any("OPTIONS" in ln and "browser_header=no" in ln and "status=400" in ln
+                            for ln in mock_log_text(st).splitlines())
+        h.check("anthropic: without the override the same mock gives llm-error[data-kind=cors]",
+                bool(cors_seen), f"{cors_detail}; mock preflight 400 without the header logged {preflight_400}")
+    finally:
+        for ctx in ctxs:
+            ctx.close()
+        stop_all(st.viewer, st.mock)
+
+
+def group_anthropic_errors(h: Any, browser: Any) -> None:
+    st = start_stack(h, "anthropic-errors", mock_args=("--anthropic",))
+    ctxs: list[Any] = []
+    try:
+        ctx, page = h.new_page(browser, extra=anthropic_override(st.mock_port))
+        ctxs.append(ctx)
+        open_run(page, h.port, st.run_id)
+        for key, kind in ANTHROPIC_ERROR_KEYS:
+            configure(page, st.base, key, ANTHROPIC_MODEL)
+            click_test(page)
+            got = wait_test_result(page, {"data-ok": "false", "data-kind": kind})
+            h.check(f"anthropic-errors: key {key} gives llm-test-result data-kind={kind}",
+                    got.get("data-ok") == "false" and got.get("data-kind") == kind, f"llm-test-result {got}")
+            if page.is_visible(T("llm-base-url")):  # close the settings dialog for the next configure
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(300)
+    finally:
+        for ctx in ctxs:
+            ctx.close()
+        stop_all(st.viewer, st.mock)
+
+
 GROUP_FUNCS = {"settings": group_settings, "upload": group_upload, "run": group_run, "review": group_review,
-               "export": group_export, "malformed": group_malformed, "cors": group_cors}
+               "export": group_export, "malformed": group_malformed, "cors": group_cors,
+               "anthropic": group_anthropic, "anthropic-errors": group_anthropic_errors}
 
 
 def _exit_on_term(signum: int, _frame: Any) -> None:

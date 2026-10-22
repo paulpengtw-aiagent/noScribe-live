@@ -91,12 +91,12 @@ async function correctBatch(
   const send = (): Promise<string> => chatCompletion({ settings, apiKey, messages, signal, json: false });
 
   let reply = await send();
-  let items = parseReply(reply);
+  let items = parseCorrectionsReply(reply);
   if (items === null) {
     // One retry: show the model its own reply and ask for a valid array only.
     messages.push({ role: "assistant", content: reply }, { role: "user", content: REPAIR_INSTRUCTION });
     reply = await send();
-    items = parseReply(reply);
+    items = parseCorrectionsReply(reply);
     if (items === null) {
       const err: LlmError = { kind: "json", message: "The model reply was not a JSON array after one retry." };
       throw err;
@@ -105,26 +105,47 @@ async function correctBatch(
   return toCorrections(items, batch);
 }
 
-/** The reply as a JSON array: the whole text when it parses, else the first balanced [...] in it. Null otherwise. */
-function parseReply(raw: string): unknown[] | null {
-  const text = raw.replace(/```(?:json)?/gi, "").trim();
-  for (const candidate of [text, firstArray(text)]) {
-    if (!candidate) continue;
-    try {
-      const value: unknown = JSON.parse(candidate);
-      if (Array.isArray(value)) return value;
-    } catch {
-      // Not JSON: try the next candidate.
+/**
+ * The correction reply as a JSON array, or null when it has none. Strips ```json and ``` fences anywhere, then takes
+ * the first complete JSON array or object that parses (prose before and after is allowed; brackets inside strings are
+ * skipped). An object with an array property, such as {"corrections": [...]}, gives that array. Any other object gives
+ * [object], so a single correction object is one item.
+ */
+export function parseCorrectionsReply(text: string): unknown[] | null {
+  const stripped = text.replace(/```(?:json)?/gi, "");
+  let start = 0;
+  while (start < stripped.length) {
+    const ch = stripped[start];
+    const end = ch === "[" || ch === "{" ? closingIndex(stripped, start) : -1;
+    if (end < 0) {
+      start++;
+      continue;
     }
+    const items = parseCandidate(stripped.slice(start, end + 1));
+    if (items !== null) return items;
+    // A complete bracketed span that does not parse is prose or broken JSON: continue after it.
+    start = end + 1;
   }
   return null;
 }
 
-/** The first balanced [...] in the text, skipping brackets inside JSON strings. */
-function firstArray(text: string): string | null {
-  const start = text.indexOf("[");
-  if (start < 0) return null;
-  let depth = 0;
+/** The items of one candidate: an array, an object's array property, or [object]. Null when it is not valid JSON. */
+function parseCandidate(candidate: string): unknown[] | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(candidate);
+  } catch {
+    return null;
+  }
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "object" || value === null) return null;
+  const list = Object.values(value).find((v): v is unknown[] => Array.isArray(v));
+  return list ?? [value];
+}
+
+/** Index of the bracket that closes the array or object opened at `start`, or -1. Brackets inside strings are skipped. */
+function closingIndex(text: string, start: number): number {
+  const expected: string[] = [];
   let inString = false;
   let escaped = false;
   for (let i = start; i < text.length; i++) {
@@ -136,13 +157,15 @@ function firstArray(text: string): string | null {
     } else if (ch === '"') {
       inString = true;
     } else if (ch === "[") {
-      depth++;
-    } else if (ch === "]") {
-      depth--;
-      if (depth === 0) return text.slice(start, i + 1);
+      expected.push("]");
+    } else if (ch === "{") {
+      expected.push("}");
+    } else if (ch === "]" || ch === "}") {
+      if (expected.pop() !== ch) return -1;
+      if (expected.length === 0) return i;
     }
   }
-  return null;
+  return -1;
 }
 
 /** Keeps valid, changed items for segments of this batch. Each segment appears at most once. */
