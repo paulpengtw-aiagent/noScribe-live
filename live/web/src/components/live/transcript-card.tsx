@@ -15,6 +15,7 @@ import { useI18n } from "@/i18n";
 import { StreamingTextInline } from "@/components/aicss/streaming-text-inline";
 import { ErrorDetails } from "@/components/live/error-details";
 import { ExportButton } from "@/components/live/export-button";
+import { LlmPanel } from "@/components/live/llm/llm-panel";
 import { Button } from "@/components/ui/button";
 import { describeEnd, type EndDescription } from "@/lib/end-state";
 import { formatElapsed, isMostlyCjk } from "@/lib/format";
@@ -29,6 +30,8 @@ import { fixedRateFor, MAX_FRAME_MS, STALL_FLUSH_MS, type RevealMode } from "@/l
 import { SpeedControl } from "@/components/live/speed-control";
 import { useRevealSpeed } from "@/hooks/use-reveal-speed";
 import { cn } from "@/lib/utils";
+import { acceptedTexts, correctionsVersion, loadCorrections, subscribeCorrections, useShowingOriginal } from "@/lib/llm/store";
+import type { RunCorrections } from "@/lib/llm/types";
 
 /** The view follows new text while the reader is within this many px of the bottom. */
 const STICK_PX = 8;
@@ -243,6 +246,8 @@ interface SegmentSpanProps {
   shown?: number;
   /** Display text for a segment (Traditional Chinese conversion when loaded). */
   display: (text: string) => string;
+  /** Accepted AI correction for this segment, shown unless the reader asked for the original. Replaces the segment text. */
+  corrected?: string;
   /** CJK text the converter has not produced yet, or a segment queued behind one: laid out but not painted. */
   hidden: boolean;
   /** Drawn unconverted because the converter is late (fallback). It cross-fades when the converted text arrives. */
@@ -263,6 +268,7 @@ const SegmentSpan = memo(function SegmentSpan({
   reveal,
   shown,
   display,
+  corrected,
   hidden,
   raw,
   motion,
@@ -271,7 +277,7 @@ const SegmentSpan = memo(function SegmentSpan({
   onHover,
   onSelect,
 }: SegmentSpanProps) {
-  const text = display(segment.text.trim());
+  const text = display((corrected ?? segment.text).trim());
   const ref = useRef<HTMLSpanElement>(null);
   const wasRaw = useRef(raw);
   // Raw text becomes converted text: fade the span's opacity in. Opacity only, so the layout does not move.
@@ -295,6 +301,7 @@ const SegmentSpan = memo(function SegmentSpan({
         data-segment-index={segment.index}
         data-segment-seq={segment.seq}
         data-active={active ? "true" : undefined}
+        data-corrected={corrected !== undefined ? "true" : undefined}
         style={hidden ? HIDDEN_STYLE : undefined}
         lang={isMostlyCjk(text) ? "zh-Hant" : undefined}
         onMouseEnter={() => onHover(segment.index)}
@@ -305,6 +312,7 @@ const SegmentSpan = memo(function SegmentSpan({
           segment.live && "segment-fresh",
           hovered && "bg-raised",
           active && "bg-secondary",
+          corrected !== undefined && "underline decoration-dotted decoration-ink-3 underline-offset-4",
         )}
       >
         {reveal === "waiting" ? null : (
@@ -498,6 +506,32 @@ export function TranscriptCard({
     const id = window.setTimeout(() => setZhFallback(true), ZH_FALLBACK_MS);
     return () => window.clearTimeout(id);
   }, [cjkHeld]);
+  // AI corrections for a finished run, loaded from IndexedDB and reloaded when they change. The accepted text replaces
+  // the segment text unless the reader asked for the original. The original itself is never changed in the store.
+  const llmVersion = useSyncExternalStore(subscribeCorrections, correctionsVersion);
+  const showOriginal = useShowingOriginal(runId ?? "");
+  // The loaded corrections carry the run they belong to, so another run's data is never shown while this one loads.
+  const [llmLoaded, setLlmLoaded] = useState<{ runId: string; rc: RunCorrections | null } | null>(null);
+  const llmReady = run !== null && !active && segments.length > 0 && describeEnd(run, t.errors)?.kind === "finished";
+  useEffect(() => {
+    if (!llmReady || !runId) return;
+    let alive = true;
+    loadCorrections(runId)
+      .then((rc) => {
+        if (alive) setLlmLoaded({ runId, rc });
+      })
+      .catch(() => {
+        if (alive) setLlmLoaded({ runId, rc: null });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [llmReady, runId, llmVersion]);
+  const llmRun = llmReady && runId !== null && llmLoaded?.runId === runId ? llmLoaded.rc : null;
+  const correctedTexts = useMemo(
+    () => (showOriginal ? new Map<number, string>() : acceptedTexts(llmRun)),
+    [llmRun, showOriginal],
+  );
   const name = run ? (run.audioName ?? run.runId) : null;
 
   // The reveal (see src/lib/reveal-engine.ts). Live segments type out one grapheme at a time, in arrival order; a
@@ -697,6 +731,7 @@ export function TranscriptCard({
             </h2>
             {showSpeed && !phone ? <SpeedControl behind={view.behind} /> : null}
             {exportBelow ? null : <ExportButton run={run} />}
+            {llmReady ? <LlmPanel run={run} segments={segments} /> : null}
           </div>
           {/* Easy view drops the file path and the model: the title is enough to say which run this is. */}
           {easy ? null : (
@@ -786,6 +821,7 @@ export function TranscriptCard({
                         // Held text is laid out but not painted: CJK before the converter is ready, and what queues behind it.
                         const hidden = (!zhGate && hasCJK(seg.text)) || view.held.has(seg.index);
         const raw = zhFallback && !zhReady && hasCJK(seg.text);
+                        const corrected = correctedTexts.get(seg.index);
                         const reveal: Reveal = hidden
                           ? "plain"
                           : seg.index === view.head
@@ -805,6 +841,7 @@ export function TranscriptCard({
                             reveal={reveal}
                             shown={reveal === "reveal" ? view.shown : undefined}
                             display={toDisplay}
+                            corrected={corrected}
                             hidden={hidden}
                             raw={raw}
                             motion={!reduce && !easy}

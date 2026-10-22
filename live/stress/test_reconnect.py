@@ -415,7 +415,9 @@ class Lab:
         before = self.feeds_now()
         replay = self.start_replay("s3")
         path, run_id = self.new_run(before, "s3")
-        wait_until(lambda: feed_info(path)["segments"] >= 10, 60)
+        # Open the page only once the replayed feed file holds >= 10 segment lines (poll up to 180 s). The first
+        # segments can take over a minute to reach the file, so no fixed delay is reliable.
+        wait_until(lambda: feed_info(path)["segments"] >= 10, 180, step=0.5)
         at_open = feed_info(path)
         ctx, page = self.new_page(browser, "s3")
         self.open_page(page)

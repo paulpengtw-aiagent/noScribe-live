@@ -470,16 +470,16 @@ def speed_control_body(h: Any, page: Any) -> None:
     if not visible:
         return
     dismiss_run_complete(page)
-    page.locator(sel).first.click()
+    page.locator(sel).first.click(timeout=15000)
     dismiss_run_complete(page)
-    page.locator('[data-testid="speed-mode-reading"]').click(timeout=5000)
+    page.locator('[data-testid="speed-mode-reading"]').click(timeout=15000)
     time.sleep(0.3)
     label_before = page.locator(sel).first.inner_text()
     stored_before = page.evaluate(SPEED_STATE_JS)
     page.reload(wait_until="domcontentloaded", timeout=30000)
     time.sleep(1.2)
     dismiss_run_complete(page)
-    page.locator(sel).first.click()
+    page.locator(sel).first.click(timeout=15000)
     checked = page.locator('[data-testid="speed-mode-reading"]').get_attribute("aria-checked")
     stored_after = page.evaluate(SPEED_STATE_JS)
     mode_after = json.loads(stored_after or "{}").get("mode")
@@ -489,6 +489,7 @@ def speed_control_body(h: Any, page: Any) -> None:
             f"{checked}; control label before {label_before!r}")
     cps0 = int(page.locator('[data-testid="speed-cps"]').inner_text())
     thumb = page.locator('[data-testid="speed-slider"] [role="slider"]').first
+    dismiss_run_complete(page)
     thumb.focus()
     for _ in range(5):
         page.keyboard.press("ArrowRight")
@@ -501,7 +502,7 @@ def speed_control_body(h: Any, page: Any) -> None:
     page.reload(wait_until="domcontentloaded", timeout=30000)
     time.sleep(1.2)
     dismiss_run_complete(page)
-    page.locator(sel).first.click()
+    page.locator(sel).first.click(timeout=15000)
     cps2 = int(page.locator('[data-testid="speed-cps"]').inner_text())
     stored_reload = json.loads(page.evaluate(SPEED_STATE_JS) or "{}")
     h.check("speed: custom rate persists across reload",
