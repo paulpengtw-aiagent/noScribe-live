@@ -105,10 +105,21 @@ faster-whisper yields segments per 30 s decoding window, so they arrive in burst
 
 AI correction is optional and frontend-only: the viewer server takes no part. The browser calls an OpenAI-compatible endpoint directly, with no proxy. On a finished run, the transcript card header has an 「AI 校正」 (AI correction) button. Corrections run only when you start them.
 
-Settings (「AI 校正設定」):
+Walkthrough:
+
+1. Press 「AI 校正」 on the transcript card of a finished run. The panel that opens is titled 「AI 校正」.
+2. Press 「模型設定」 (the panel's settings button) and fill in the base URL, the API key and the model.
+3. Press 「測試連線」 (test connection), then 「儲存」 (save).
+4. Press 「開始校正」 (start correction).
+
+`live/feeds/` is gitignored (see `live/.gitignore`), so a fresh clone has no runs to correct. Use one of your own finished runs (noScribe CLI with `--live-feed live/feeds/`), or copy a finished `.ndjson` feed into `live/feeds/`.
+
+Uploaded context files are kept only in the tab: they are cleared on reload. Corrections persist in IndexedDB, so they survive a reload.
+
+Settings (opened with 「模型設定」; the dialog is titled 「AI 校正設定」):
 
 - Base URL of the API, for example `http://localhost:8799/v1`. Requests go to `${base}/chat/completions`.
-- API key, model (default `claude-opus-5-5`), optional temperature (0 to 2), and Test connection, which sends one `ping` with `max_tokens` 5.
+- API key, model (default `claude-opus-5-5`), optional temperature (0 to 2), and 測試連線 (test connection), which sends one `ping` with `max_tokens` 5. For Anthropic it calls `GET /v1/models` instead; see below.
 - The key goes to sessionStorage (`noscribe-live-llm-key`), so it lasts for the tab only. Ticking 「記住此瀏覽器」 (remember on this browser) also keeps it in localStorage. The other settings live in localStorage (`noscribe-live-llm-settings`). The key is sent only to the configured endpoint, and it is never logged or echoed in error messages.
 - Privacy: if the endpoint is not local, the transcript and the context documents leave this machine. Local means localhost, 127.0.0.0/8, `::1`, `*.local`, private IPv4 ranges, or IPv6 unique-local and link-local addresses (`isLocalEndpoint` in `live/web/src/lib/llm/settings.ts`).
 
@@ -117,6 +128,18 @@ Context: free text and up to 30 files (`.docx`, `.pdf`, `.txt`, `.md`; 50 MB in 
 Run: segments go to the model 20 at a time, each batch with two read-only neighbours on either side for context. The model replies with a JSON array of the changed segments only. An invalid reply is retried once; a second invalid reply fails the run with an error.
 
 Review: each change is shown as a per-segment diff. Accept or reject each one, or accept or reject all at once. 顯示原文 (show original) toggles between the corrected and original text. Decisions are stored per run in IndexedDB, so they survive a reload. When a run has accepted corrections, the .odt download is built in the browser (`live/web/src/lib/llm/odt.ts`) and includes them and an AI-correction note.
+
+### Use your own Anthropic key
+
+In settings, pick the provider 「Anthropic (Claude)」. It fills the base URL `https://api.anthropic.com/v1` and the model `claude-opus-5-5`.
+
+- The browser calls Anthropic's OpenAI-compatible `/chat/completions` directly, with the key as a Bearer token. For api.anthropic.com only, it adds the header `anthropic-dangerous-direct-browser-access: true`, because Anthropic refuses browser (CORS) calls without it. The header acknowledges that the key is exposed to this page. That is acceptable here: it is your own key, in your own browser, in a localhost tool.
+- `temperature` and `top_p` are not sent: `claude-opus-5-5` rejects a temperature below 1 and any `top_p`. `max_tokens` is 16000, because the model's thinking counts against it.
+- Anthropic ignores `response_format`, so the app parses the JSON out of code fences or prose.
+- 測試連線 calls `GET /v1/models`. It is free and uses the native API (`x-api-key` and `anthropic-version: 2023-06-01`). It says whether the key works and whether `claude-opus-5-5` is listed. The UI explains errors 401, 403, 429 and 529.
+- The key stays in sessionStorage unless you tick 「記住此瀏覽器」 (remember on this browser), which puts it in localStorage.
+- Every correction run is billed to the key. The transcript and the context documents are sent to Anthropic.
+- Unscoped personal or service-account keys also need an `anthropic-workspace-id` header, which this app does not send. Use a workspace-scoped key.
 
 ### CORS
 
@@ -130,12 +153,16 @@ The endpoint must allow browser requests from the viewer's origin (for example `
 
 ```sh
 python3 live/stress/mock_llm.py --port 8799     # base URL http://localhost:8799/v1, any key, model "mock"
-/usr/bin/python3 -I -B live/stress/test_llm.py  # all groups; --only settings,upload,run,review,export,malformed,cors
+python3 live/stress/mock_llm.py --port 8799 --anthropic   # emulates Anthropic, see below
+/usr/bin/python3 -I -B live/stress/test_llm.py  # all groups; --only settings,upload,run,review,export,malformed,cors,anthropic,anthropic-errors
 ```
 
 - Mock models: `mock-malformed-once` returns invalid JSON once per batch, then valid JSON; `mock-error-500` returns HTTP 500; `--no-cors` drops the CORS headers.
+- `--anthropic` emulates Anthropic's behaviour: a preflight without the `anthropic-dangerous-direct-browser-access` header gets 400, a `temperature` below 1 or any `top_p` gets 400, replies come as fenced JSON, and `/v1/models` needs `x-api-key`. Test keys: `sk-ant-401`, `sk-ant-403`, `sk-ant-429`, `sk-ant-529` (the matching error) and `sk-ant-nomodel` (the model is not listed).
+- The app detects Anthropic by host, so the tests mark the mock host as Anthropic with a test-only localStorage key, `noscribe-live-llm-dev-anthropic-hosts` (for example `127.0.0.1:8799,localhost:8799`). Set it in the browser devtools console with `localStorage.setItem("noscribe-live-llm-dev-anthropic-hosts", "127.0.0.1:8799,localhost:8799")`, then reload.
+- New test_llm groups: `anthropic` and `anthropic-errors`.
 - The checks use Playwright under the system Python. They need a built frontend in `live/web/dist`, a Python with the server dependencies (`--python`), the 10 fixtures in `live/stress/fixtures/llm` (generated by `make_fixtures.py`), and the finished demo feed. `DEFAULT_PY` (in `test_ux.py`) and `FEED_SRC` (in `test_llm.py`) are hard-coded to `/workspace/noScribe-live`; pass `--python` for the first and edit `FEED_SRC` for the second in another checkout.
-- Groups use viewer ports 8960 to 8966 and mock ports 8980 to 8986 (`--port` sets the base). Scratch files go to `/tmp/nslive-llm` (`--work`).
+- Groups use viewer ports 8960 to 8968 and mock ports 8980 to 8988 (`--port` sets the base). Scratch files go to `/tmp/nslive-llm` (`--work`).
 
 ## UI components and licensing
 
@@ -176,9 +203,14 @@ uvx --with pytest pytest tests/test_live_feed.py --noconftest -q                
 cd live && .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m pytest    # backend
 ```
 
+## Stress test
+
+A stress test on 2026-10-21 ran 16 real noScribe CLI runs on the RTX 5060 Ti. The results, method and measurements are in [docs/stress-2026-10-21.md](docs/stress-2026-10-21.md). The four headed-browser reviews are in the private repo paulpengtw-aiagent/exam-review-stress-corpus under `noscribe-review*/`.
+
 ## Known gaps
 
 - Chinese is converted to Traditional (Taiwan) for display only (opencc-js cn→tw); Whisper output carries no punctuation, and none is added.
+- Two CLI issues were left as they are, because the CLI stays unchanged. A `kill -9` of the CLI orphans its diarization worker, which keeps about 1.5 GB of RAM and the GPU. An unreadable audio file fails with "tuple index out of range".
 - There are no automated frontend tests.
 
 ---
